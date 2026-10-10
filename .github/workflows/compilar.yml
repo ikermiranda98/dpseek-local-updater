@@ -1,0 +1,179 @@
+# Compila DeepSeek Harness con los cambios locales (Ollama, español, sin inicio de
+# sesión ni telemetría) y lo publica como Release. La app instalada busca sus
+# actualizaciones en el último Release (ver "actualizaciones" en config.json).
+#
+# Se ejecuta:
+#   - cada 6 horas: solo compila si DeepSeek ha publicado una versión nueva;
+#   - al cambiar config.json o sistema/ en main: recompila la versión actual;
+#   - a mano: pestaña Actions → "Compilar instalador" → Run workflow.
+
+name: Compilar instalador
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      forzar:
+        description: 'Compilar aunque ya exista un instalador para la última versión de DeepSeek'
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths: ['config.json', 'sistema/**', '.github/workflows/compilar.yml']
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: compilar
+  cancel-in-progress: false
+
+env:
+  OFICIAL: https://github.com/deepseek-ai/deepseek-harness.git
+
+jobs:
+  comprobar:
+    name: Comprobar versión de DeepSeek
+    runs-on: ubuntu-latest
+    outputs:
+      compilar: ${{ steps.decidir.outputs.compilar }}
+      version: ${{ steps.decidir.outputs.version }}
+      etiqueta: ${{ steps.decidir.outputs.etiqueta }}
+    steps:
+      - name: Mantener activa la comprobación programada
+        # GitHub desactiva las tareas programadas de los repos sin actividad en
+        # 60 días; volver a activarla en cada ejecución reinicia ese plazo.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/compilar.yml/enable"
+
+      - name: Decidir si hay que compilar
+        id: decidir
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORZAR: ${{ inputs.forzar || false }}
+          EVENTO: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          version=$(curl -fsSL https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/HEAD/apps/desktop/package.json | jq -r .version)
+          etiqueta="dsh-v$version"
+          if ! git ls-remote --exit-code --tags "$OFICIAL" "refs/tags/$etiqueta" >/dev/null; then
+            echo "DeepSeek todavía no ha etiquetado la versión $version; se esperará a la siguiente comprobación."
+            echo "compilar=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          ultima=$(gh release view --repo "${{ github.repository }}" --json tagName -q .tagName 2>/dev/null || true)
+          echo "Versión oficial: $version · Último instalador publicado: ${ultima:-ninguno}"
+          compilar=true
+          # Los instaladores se publican como dsh-v<versión oficial>-local (y -local-2,
+          # -local-3… si se recompila la misma versión). Los primeros usaban v<versión>.<fecha>.<n>.
+          case "$ultima" in "$etiqueta-local"|"$etiqueta-local-"*|"v$version"|"v$version".*) compilar=false ;; esac
+          if [ "$FORZAR" = "true" ] || [ "$EVENTO" = "push" ]; then compilar=true; fi
+          echo "Compilar: $compilar"
+          {
+            echo "compilar=$compilar"
+            echo "version=$version"
+            echo "etiqueta=$etiqueta"
+          } >> "$GITHUB_OUTPUT"
+
+  compilar:
+    name: Compilar y publicar el instalador
+    needs: comprobar
+    if: needs.comprobar.outputs.compilar == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      VERSION: ${{ needs.comprobar.outputs.version }}
+      ETIQUETA: ${{ needs.comprobar.outputs.etiqueta }}
+      # Ruta corta: el Python incluido en la app no carga bibliotecas con rutas de
+      # más de 260 caracteres.
+      CODIGO: D:\dsh
+    steps:
+      - name: Descargar esta herramienta
+        uses: actions/checkout@v4
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Preparar pnpm y git
+        run: |
+          corepack enable
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          git config --system core.longpaths true
+
+      - name: Descargar DeepSeek Harness ${{ needs.comprobar.outputs.version }}
+        run: git clone --depth 1 --branch $env:ETIQUETA $env:OFICIAL $env:CODIGO
+
+      - name: Aplicar los cambios locales
+        env:
+          # La app buscará sus actualizaciones en los Releases de este repositorio.
+          DSH_LOCAL_ACTUALIZACIONES: ${{ github.server_url }}/${{ github.repository }}/releases/latest/download
+        run: |
+          node sistema/aplicar-cambios.mjs $env:CODIGO
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Copy-Item sistema/env.windows "$env:CODIGO/apps/desktop/.env.windows"
+
+      - name: Instalar dependencias
+        working-directory: D:\dsh
+        run: corepack pnpm install --frozen-lockfile
+
+      - name: Crear el instalador
+        working-directory: D:\dsh
+        run: |
+          # Número de versión mayor que el oficial para que la app lo vea como
+          # actualización: <versión>.<fecha>.<ejecución> (las versiones estables
+          # necesitan el prefijo -test que exige el empaquetador).
+          $fecha = (Get-Date).ToUniversalTime().ToString('yyyyMMdd')
+          $base = if ($env:VERSION.Contains('-')) { $env:VERSION } else { "$env:VERSION-test" }
+          $build = "$base.$fecha.$env:GITHUB_RUN_NUMBER"
+          "BUILD=$build" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          # NSIS a veces no puede sobrescribir el .exe provisional que acaba de
+          # ejecutar para crear el desinstalador; un segundo intento lo resuelve.
+          foreach ($intento in 1, 2) {
+            corepack pnpm run package:desktop:win:x64:unsigned -- --build-version $build
+            if ($LASTEXITCODE -eq 0) { break }
+            if ($intento -eq 2) { exit $LASTEXITCODE }
+            Write-Host "::warning::El empaquetado ha fallado; se reintenta una vez."
+            Start-Sleep -Seconds 20
+          }
+
+      - name: Publicar el Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $dir = "$env:CODIGO/apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts"
+          $exe = Get-ChildItem $dir -Filter "*$env:BUILD*.exe" | Where-Object { $_.Name -notmatch 'uninstaller' } | Select-Object -First 1
+          $feed = Join-Path $dir 'nightly.yml'
+          if (-not $exe -or -not (Test-Path $feed)) { Get-ChildItem $dir; throw 'Falta el instalador o nightly.yml' }
+
+          # Nombre como la versión oficial más -local (y -local-2, -3… si ya existe).
+          $previos = @(gh release list --repo $env:GITHUB_REPOSITORY --limit 200 --json tagName -q '.[].tagName' |
+            Where-Object { $_ -eq "$env:ETIQUETA-local" -or $_ -like "$env:ETIQUETA-local-*" })
+          $nombre = if ($previos.Count -eq 0) { "$env:ETIQUETA-local" } else { "$env:ETIQUETA-local-$($previos.Count + 1)" }
+
+          # Renombra el instalador y su blockmap, y actualiza nightly.yml (que la app usa
+          # para encontrarlo). El sha512 no cambia: es el mismo fichero.
+          $nuevoExe = Join-Path $dir "$nombre.exe"
+          Move-Item $exe.FullName $nuevoExe
+          if (Test-Path "$($exe.FullName).blockmap") { Move-Item "$($exe.FullName).blockmap" "$nuevoExe.blockmap" }
+          (Get-Content $feed -Raw).Replace($exe.Name, "$nombre.exe") | Set-Content $feed -NoNewline -Encoding utf8NoBOM
+          Get-Content $feed
+
+          $files = @($nuevoExe, "$nuevoExe.blockmap", $feed) | Where-Object { Test-Path $_ }
+          $notes = @"
+          Instalador de DeepSeek Harness **$env:VERSION** con los cambios locales:
+          Ollama como proveedor, sin modelos online ni inicio de sesión de DeepSeek, sin telemetría y con interfaz en español.
+
+          - Versión oficial: [$env:ETIQUETA](https://github.com/deepseek-ai/deepseek-harness/releases/tag/$env:ETIQUETA)
+          - Versión interna de la app: ``$env:BUILD``
+          - Si ya tienes la app instalada, se actualiza sola (Application → Check for Updates).
+          - Instalación nueva: descarga ``$nombre.exe`` y ejecútalo.
+          "@
+          gh release create $nombre $files --title $nombre --notes $notes --latest
