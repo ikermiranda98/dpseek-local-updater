@@ -7,6 +7,8 @@ que se mantiene al día sola:
 - **sin inicio de sesión**, sin telemetría ni analítica,
 - interfaz en **español** (Ajustes → General → Idioma → Español),
 - permite **eliminar chats** de verdad (la oficial solo los archiva),
+- el **contexto lo decide la app**: una barra en el selector de cada chat, con el
+  recomendado medido para tu equipo,
 - se **actualiza automáticamente** con cada versión nueva de DeepSeek, conservando
   estos cambios.
 
@@ -16,15 +18,11 @@ que se mantiene al día sola:
 
 1. Instala [Ollama](https://ollama.com) y descarga el modelo que vayas a usar
    (por defecto `Qwen3.6-35B-A3B-Uncensored:latest`, ver *Modelos*).
-2. Fija el contexto de Ollama (una vez; luego reinicia Ollama):
-   ```
-   setx OLLAMA_CONTEXT_LENGTH 65536
-   ```
-3. Descarga el instalador `.exe` del
+2. Descarga el instalador `.exe` del
    [último Release](../../releases/latest)
    (`dsh-v<versión>-local.exe`) y ejecútalo. Como no está firmado, Windows SmartScreen avisará:
    «Más información» → «Ejecutar de todas formas».
-4. En la app: Ajustes → General → Idioma → **Español**.
+3. En la app: Ajustes → General → Idioma → **Español**.
 
 La app guarda sus datos en `%USERPROFILE%\.dsh`. Si en ese PC se usó la versión
 oficial, el token de su cuenta de DeepSeek puede seguir guardado ahí, pero esta
@@ -57,6 +55,40 @@ Para forzar una compilación: pestaña **Actions** → *Compilar instalador* →
   trabajo* (ya existía en la oficial). Solo lo quita de la lista; sus chats pasan
   a «Sin agrupar», desde donde se pueden eliminar uno a uno.
 
+## Contexto de cada chat
+
+En el selector de modelo de cada chat, debajo de «Modelo», hay una **barra de
+contexto**: a la izquierda «Más rápido», a la derecha «Más contexto», un punto por
+tamaño (32K, 64K, 128K, 256K, hasta el máximo de cada modelo) y la marca
+**«Recomendado»**, que es el mejor contexto para tu equipo, medido por la app. Los
+chats nuevos empiezan en el recomendado. Los tamaños se cambian en
+`config.json` → `contexto.tamanos`.
+
+Cómo funciona:
+
+- Ollama no acepta que se le pida el contexto por la API que usa la app, así que
+  cada tamaño es una **variante del modelo** con el contexto fijado
+  (`modelo:dsh-ctx-131072`, `modelo:dsh-ctx-auto`…). Se crean solas al abrir la
+  app, **no ocupan disco** (comparten los ficheros del modelo) y no aparecen en el
+  selector como modelos aparte (la barra elige entre ellas), aunque sí en
+  `ollama list`. `OLLAMA_CONTEXT_LENGTH` deja de importar.
+- **Recomendado** (variante `dsh-ctx-auto`): la primera vez que la app ve un
+  modelo (o si cambias de tarjeta gráfica o de versión de Ollama) lo mide en
+  segundo plano, solo con Ollama libre:
+  lo carga con varios contextos y elige el mayor con el que la parte del modelo
+  que va en la gráfica no se reduce (más allá, Ollama mueve capas a la CPU y va
+  más lento). Tarda alrededor de un minuto y el resultado queda en
+  `%USERPROFILE%\.dsh\storages\local-contexto.json` (bórralo para volver a
+  medir). Hasta medirlo, el recomendado es `contexto.porDefecto`; el valor medido
+  se ve en la barra al volver a abrir la app.
+- La app sabe el tamaño exacto de cada opción y resume la conversación antes de
+  llegar al límite, así que Ollama nunca recorta texto en silencio.
+- Cambiar de contexto en mitad de un chat hace que Ollama recargue el modelo
+  (unos segundos).
+- Los chats creados antes de esta función tenían el modelo sin contexto
+  (`modelo:latest`): al escribir en ellos la app pide elegir un modelo; elige el
+  que quieras en el selector y sigue.
+
 ## Modelos y configuración (`config.json`)
 
 **El selector de modelos muestra todos los modelos que tengas en Ollama**: la app
@@ -69,11 +101,11 @@ Editar `config.json` en GitHub (o hacer push) recompila el instalador al momento
 | Campo | Para qué sirve |
 |---|---|
 | `ollamaUrl` | Dirección de Ollama (`http://127.0.0.1:11434`). |
-| `modeloPorDefecto` | Modelo con el que empiezan las sesiones nuevas. Tiene que existir en tu Ollama con ese nombre exacto. |
-| `modelosManuales` | Modelos que aparecen siempre, aunque Ollama esté apagado: `id` (nombre en Ollama; es el que se muestra, sin `:latest`), `contexto`, `imagenes`, `razonamiento` (y opcionalmente `nombre` para mostrar otro nombre). |
-| `contextoMaximo` | Ventana de contexto declarada (también para los modelos detectados). **No debe superar `OLLAMA_CONTEXT_LENGTH`**, o Ollama recorta el prompt sin avisar. |
+| `modeloPorDefecto` | Modelo con el que empiezan las sesiones nuevas (con el contexto recomendado). Tiene que existir en tu Ollama con ese nombre exacto. |
+| `modelosManuales` | Modelos que aparecen si Ollama está apagado al abrir la app: `id` (nombre en Ollama), `imagenes`, `razonamiento` y, opcionales, `contexto` y `nombre`. |
+| `contexto.porDefecto` | Contexto recomendado mientras un modelo no está medido (65536). |
+| `contexto.tamanos` | Puntos de la barra de contexto (los mayores que el máximo de un modelo se cambian por ese máximo). |
 | `maxTokensSalida` | Máximo de tokens por respuesta. |
-| `detectarModelosDeOllama` | Al compilar en un PC con Ollama, toma de allí los datos de los modelos fijos (en GitHub no hay Ollama y no hace falta). |
 | `actualizaciones` | Opcional. Dirección de actualizaciones para compilaciones hechas fuera de GitHub; en GitHub se usa automáticamente la de los Releases de este repositorio. |
 
 Si editas los modelos desde la app (Ajustes → Modelos → Ollama), esa lista pasa a
@@ -89,6 +121,7 @@ un `ERROR:` que explica qué falta (y la app sigue en la versión anterior).
 | Cambio | Dónde |
 |---|---|
 | Ollama como proveedor y modelo por defecto | `packages/bundle/base/cordis.patch.yml` |
+| Contexto elegible por chat (barra en el selector) y recomendado medido para el equipo | `packages/bundle/base/cordis.patch.yml` + `packages/client/ui-model-selection`; código en [`sistema/contexto/`](sistema/contexto) |
 | Sin ventana de bienvenida ni inicio de sesión | `apps/desktop/src/welcome-api.ts` |
 | Sin menú ni ajustes de la cuenta de DeepSeek | `packages/bundle/web-app/cordis.patch.yml` |
 | Sin modelos online de DeepSeek (cuenta y API) | `packages/bundle/base/cordis.patch.yml` |

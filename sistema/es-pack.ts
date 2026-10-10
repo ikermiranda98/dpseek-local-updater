@@ -1657,7 +1657,11 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "search.clear": "Borrar búsqueda",
     "search.empty": "No hay modelos que coincidan.",
     "empty.models": "No hay modelos disponibles.",
-    "empty.efforts": "Este modelo no ofrece niveles de razonamiento."
+    "empty.efforts": "Este modelo no ofrece niveles de razonamiento.",
+    "context.label": "Contexto",
+    "context.faster": "Más rápido",
+    "context.more": "Más contexto",
+    "context.recommended": "Recomendado"
   },
   "permission.access": {
     "mode": "Modo de acceso, actual: {name}",

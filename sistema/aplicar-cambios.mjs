@@ -1,5 +1,5 @@
 // Aplica las modificaciones locales (Ollama, sin inicio de sesión, sin telemetría,
-// idioma español, eliminar chats) sobre una copia del repositorio de DeepSeek Harness.
+// idioma español, eliminar chats, contexto por chat) sobre una copia del repositorio de DeepSeek Harness.
 //
 // Uso: node sistema/aplicar-cambios.mjs <ruta-del-repositorio>
 //
@@ -154,72 +154,69 @@ function editRows(find, edit) {
   return count
 }
 
-// ── Modelos de Ollama ──────────────────────────────────────────────────────────
+// ── Modelos de Ollama y su contexto ───────────────────────────────────────────
 // La lista de modelos se resuelve al ARRANCAR la app: una expresión !!js de la
-// configuración pregunta a Ollama (/api/tags) qué modelos hay y los añade a los de
-// config.json. Así el selector muestra siempre lo que tengas descargado, aunque el
-// instalador se compile en GitHub (sin Ollama). Si Ollama no responde en unos
-// segundos, se usan solo los modelos de config.json.
+// configuración ejecuta sistema/contexto/arranque.cjs, que pregunta a Ollama qué
+// modelos hay y ofrece cada uno con varios tamaños de contexto («Auto» y los de
+// config.json → contexto.tamanos). Ollama ignora el contexto pedido por su API
+// compatible con OpenAI, así que cada tamaño es una variante del modelo con
+// num_ctx fijado (no ocupa disco). «Auto» usa el óptimo que mide
+// sistema/contexto/calibrar.cjs en este equipo. Si Ollama no responde, se usan
+// los modelos de "modelosManuales" con el contexto por defecto.
 
-async function buildTimeModels() {
-  const manual = config.modelosManuales ?? []
-  if (!config.detectarModelosDeOllama) return manual
-  try {
-    const response = await fetch(new URL('/api/tags', config.ollamaUrl), { signal: AbortSignal.timeout(5000) })
-    const { models } = await response.json()
-    const detected = models
-      .filter((m) => (m.capabilities ?? ['completion']).includes('completion'))
-      .map((m) => ({
-        id: m.name,
-        
-        contexto: Math.min(config.contextoMaximo, m.details?.context_length ?? config.contextoMaximo),
-        imagenes: (m.capabilities ?? []).includes('vision'),
-        razonamiento: (m.capabilities ?? []).includes('thinking'),
-      }))
-    const byId = new Map(detected.map((m) => [m.id, m]))
-    for (const m of manual) byId.set(m.id, { ...byId.get(m.id), ...m })
-    return [...byId.values()]
-  } catch {
-    // En GitHub Actions no hay Ollama: es lo normal, la app los consulta al arrancar.
-    return manual
-  }
+const contexto = {
+  porDefecto: config.contexto?.porDefecto ?? config.contextoMaximo ?? 65536,
+  tamanos: config.contexto?.tamanos ?? [32768, 65536, 131072, 262144],
+}
+if (!Number.isInteger(contexto.porDefecto) || !contexto.tamanos.every(Number.isInteger)) {
+  fail('"contexto" de config.json debe tener "porDefecto" y "tamanos" en números enteros de tokens')
 }
 
 const yamlString = (s) => `'${String(s).replaceAll("'", "''")}'`
 const EFFORTS = { off: 'none', low: 'low', medium: 'medium', high: 'high' }
 
-/** Modelo de config.json en el formato del adaptador llm-pi-ai. */
-const toPiAi = (m) => ({
-  id: m.id,
-  // Por defecto, el nombre real de Ollama (sin :latest) para distinguir variantes.
-  name: m.nombre ?? m.id.replace(/:latest$/, ''),
-  contextWindow: m.contexto ?? config.contextoMaximo,
-  maxTokens: config.maxTokensSalida,
-  input: m.imagenes ? ['text', 'image'] : ['text'],
-  reasoningEfforts: m.razonamiento ? EFFORTS : false,
-})
+/** Variante de un modelo de Ollama con el contexto fijado (debe coincidir con arranque.cjs). */
+function variantName(name, label) {
+  const i = name.lastIndexOf(':')
+  const [base, tag] = i < 0 ? [name, 'latest'] : [name.slice(0, i), name.slice(i + 1)]
+  return `${base}:${tag === 'latest' ? '' : tag + '-'}dsh-ctx-${label}`
+}
+
+/** Modelo de "modelosManuales" (sin Ollama al arrancar) en el formato de llm-pi-ai. */
+const toPiAi = (m) => {
+  const ctx = m.contexto ?? contexto.porDefecto
+  return {
+    id: variantName(m.id, 'auto'),
+    name: `${m.nombre ?? m.id.replace(/:latest$/, '')} · Auto ${ctx % 1024 === 0 ? ctx / 1024 + 'K' : ctx} (sin medir)`,
+    contextWindow: ctx,
+    maxTokens: Math.min(config.maxTokensSalida, Math.floor(ctx / 2)),
+    input: m.imagenes ? ['text', 'image'] : ['text'],
+    reasoningEfforts: m.razonamiento ? EFFORTS : false,
+  }
+}
 
 /**
- * Expresión que la app evalúa al arrancar: consulta Ollama con un proceso Node
- * síncrono (la configuración no admite esperas) y devuelve los modelos fijos más
- * los descargados en Ollama. Cualquier fallo devuelve solo los fijos.
+ * Expresión que la app evalúa al arrancar: ejecuta arranque.cjs en un proceso
+ * Node síncrono (la configuración no admite esperas) y usa su salida como lista
+ * de modelos. Cualquier fallo devuelve los modelos fijos.
  */
 function runtimeModelsExpression(fixed) {
-  const tags = new URL('/api/tags', config.ollamaUrl).href
-  const probe = `fetch(${JSON.stringify(tags)},{signal:AbortSignal.timeout(4000)})` +
-    '.then(r=>r.json()).then(j=>process.stdout.write(JSON.stringify(j.models||[])),()=>process.exit(1))'
-  const max = config.contextoMaximo
+  const startup = readFileSync(join(here, 'contexto', 'arranque.cjs'), 'utf8')
+  const calibrator = readFileSync(join(here, 'contexto', 'calibrar.cjs'), 'utf8')
+  const settings = {
+    ollama: new URL(config.ollamaUrl).origin,
+    sizes: contexto.tamanos,
+    defaultCtx: contexto.porDefecto,
+    maxTokens: config.maxTokensSalida,
+    efforts: EFFORTS,
+  }
   return [
     '((fixed) => { try {',
-    `const out = process.getBuiltinModule('node:child_process').execFileSync(process.execPath, ['-e', ${JSON.stringify(probe)}],`,
-    "{ env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, timeout: 6000, windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });",
-    'const seen = new Set(fixed.map((m) => m.id));',
-    "const found = JSON.parse(out).filter((m) => (m.capabilities || ['completion']).includes('completion') && !seen.has(m.name))",
-    ".map((m) => { const caps = m.capabilities || []; return { id: m.name, name: m.name.replace(/:latest$/, ''),",
-    `contextWindow: Math.min(${max}, (m.details && m.details.context_length) || ${max}),`,
-    `maxTokens: ${config.maxTokensSalida}, input: caps.includes('vision') ? ['text', 'image'] : ['text'],`,
-    `reasoningEfforts: caps.includes('thinking') ? ${JSON.stringify(EFFORTS)} : false }; });`,
-    'return [...fixed, ...found];',
+    `const out = process.getBuiltinModule('node:child_process').execFileSync(process.execPath, ['-e', ${JSON.stringify(startup)}],`,
+    `{ env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_CTX: ${JSON.stringify(JSON.stringify(settings))}, DSH_CTX_CALIBRAR: ${JSON.stringify(calibrator)} },`,
+    "timeout: 20000, windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });",
+    'const models = JSON.parse(out);',
+    'return Array.isArray(models) && models.length > 0 ? models : fixed;',
     `} catch (error) { return fixed; } })(${JSON.stringify(fixed)})`,
   ].join(' ')
 }
@@ -227,9 +224,9 @@ function runtimeModelsExpression(fixed) {
 function piAiBlock(models) {
   return [
     '# Ollama local por su API compatible con OpenAI. Ollama ignora el token;',
-    '# la cabecera fija evita depender de credenciales guardadas. contextWindow',
-    '# no debe superar OLLAMA_CONTEXT_LENGTH o Ollama recorta el prompt en silencio.',
-    '# models: los de config.json más los descargados en Ollama (se consulta al arrancar).',
+    '# la cabecera fija evita depender de credenciales guardadas.',
+    '# models: cada modelo de Ollama con varios contextos (Auto y fijos), resuelto al',
+    '# arrancar por sistema/contexto/arranque.cjs de dpseek-local-updater.',
     'providers:',
     '  ollama:',
     '    displayName: Ollama (local)',
@@ -246,20 +243,21 @@ function piAiBlock(models) {
 
 // ── 1. Ollama como proveedor y modelo por defecto ─────────────────────────────
 
-const models = await buildTimeModels()
-if (models.length === 0) fail('no hay ningún modelo: arranca Ollama o rellena "modelosManuales" en config.json')
-const defaultModel = models.find((m) => m.id === config.modeloPorDefecto) ?? models[0]
-if (defaultModel.id !== config.modeloPorDefecto) warn(`el modelo por defecto "${config.modeloPorDefecto}" no está; se usa "${defaultModel.id}"`)
+const models = config.modelosManuales ?? []
+if (!models.some((m) => m.id === config.modeloPorDefecto)) {
+  models.unshift({ id: config.modeloPorDefecto })
+}
+const defaultModelId = variantName(config.modeloPorDefecto, 'auto')
 
 if (editRows((l) => rowsById(l, 'llm-pi-ai'), (l, r) => setConfig(l, r, piAiBlock(models))) === 0) {
   fail('no se encuentra la fila "llm-pi-ai" (adaptador multiproveedor) en packages/bundle; el adaptador ha cambiado de nombre')
 }
-done.push(`Ollama: ${models.length} modelo(s) de config.json + los que haya en Ollama al arrancar la app`)
+done.push(`Ollama: los modelos que haya al arrancar, con contexto Auto y ${contexto.tamanos.join('/')} tokens`)
 
-if (editRows((l) => rowsById(l, 'agent-default-model'), (l, r) => setConfig(l, r, ['provider: ollama', `model: ${yamlString(defaultModel.id)}`])) === 0) {
+if (editRows((l) => rowsById(l, 'agent-default-model'), (l, r) => setConfig(l, r, ['provider: ollama', `model: ${yamlString(defaultModelId)}`])) === 0) {
   fail('no se encuentra la fila "agent-default-model" en packages/bundle')
 }
-done.push(`modelo por defecto: ${defaultModel.id}`)
+done.push(`modelo por defecto: ${defaultModelId}`)
 
 // ── 2. Sin cuenta ni modelos online de DeepSeek, telemetría ni analítica ──────
 // Los adaptadores de modelos de DeepSeek se desactivan: si en ~/.dsh queda un
@@ -589,6 +587,95 @@ else done.push(`búsqueda web desactivada (${toolWeb} fila/s)`)
     write(uiLocales, locales)
   }
   done.push('opción «Eliminar sesión» en el menú de cada chat')
+}
+
+// ── 8. Barra de contexto en el selector de modelo ─────────────────────────────
+// El selector muestra una entrada por modelo y, debajo de «Modelo», una barra con
+// los tamaños de contexto (sistema/contexto/ContextSlider.tsx); «Recomendado» es
+// el óptimo medido para el equipo (variante automática).
+
+{
+  const dir = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client')
+  const select = join(dir, 'ModelSelect.tsx')
+  const locales = join(dir, 'locales.ts')
+  for (const file of [select, locales]) {
+    if (!existsSync(file)) fail(`no existe ${rel(file)}; no se puede añadir la barra de contexto`)
+  }
+  copyFileSync(join(here, 'contexto', 'ContextSlider.tsx'), join(dir, 'ContextSlider.tsx'))
+  copyFileSync(join(here, 'contexto', 'ContextSlider.module.css'), join(dir, 'ContextSlider.module.css'))
+
+  let text = read(select)
+  const edits = [
+    [
+      "import { orderModelProviders } from './provider-order.ts'\n",
+      "import { orderModelProviders } from './provider-order.ts'\n"
+        + "import { ContextSlider, contextListModels, contextTriggerName, sameContextModel } from './ContextSlider.tsx'\n",
+      "from './ContextSlider.tsx'",
+    ],
+    [
+      "models: rankByName(group.models, showSearch ? query.trim() : ''),",
+      "models: rankByName(contextListModels(group.models), showSearch ? query.trim() : ''),",
+      'rankByName(contextListModels(',
+    ],
+    [
+      ': currentChoice?.model.name\n',
+      ': contextTriggerName(currentChoice?.model.name)\n',
+      'contextTriggerName(currentChoice',
+    ],
+    [
+      'const selected = state.current?.provider === group.id && state.current.model === model.id',
+      'const selected = state.current?.provider === group.id && sameContextModel(state.current.model, model.id)',
+      'sameContextModel(state.current.model',
+    ],
+  ]
+  for (const [from, to, marker] of edits) {
+    if (text.includes(marker)) continue
+    if (!text.includes(from)) fail(`no se encuentra en ${rel(select)}: ${from.trim().slice(0, 70)}`)
+    text = text.replace(from, to)
+  }
+  if (!text.includes('<ContextSlider')) {
+    const re = /(<span className=\{css\.cellLabel\}>\{t\('menu\.model'\)\}<\/span>[\s\S]*?<\/button>\r?\n)/
+    if (!re.test(text)) fail(`no se encuentra la fila «Modelo» del menú en ${rel(select)}`)
+    text = text.replace(re, (row) => row + [
+      '              {/* Local build: context-size bar (see ContextSlider.tsx). */}',
+      '              <ContextSlider',
+      '                models={groups.find(group => group.id === state.current?.provider)?.models ?? []}',
+      '                current={state.current?.model}',
+      '                disabled={busy}',
+      '                onSelect={(modelId) => {',
+      '                  if (state.current === null) return',
+      '                  const { provider, reasoningEffort } = state.current',
+      '                  choose({ provider, model: modelId, ...reasoningEffort === undefined ? {} : { reasoningEffort } })',
+      '                }}',
+      '                t={t}',
+      '              />',
+      '',
+    ].join('\n'))
+  }
+  write(select, text)
+
+  let dict = read(locales)
+  if (!dict.includes("'context.label'")) {
+    const zhEnd = /^\} satisfies Record<string, string>/m
+    const enEnd = /^\} satisfies Record<ModelKey, string>/m
+    if (!zhEnd.test(dict) || !enEnd.test(dict)) fail(`no se encuentran los diccionarios zh/en en ${rel(locales)}`)
+    dict = dict.replace(zhEnd, [
+      "  'context.label': '上下文',",
+      "  'context.faster': '更快',",
+      "  'context.more': '更多上下文',",
+      "  'context.recommended': '推荐',",
+      '} satisfies Record<string, string>',
+    ].join('\n'))
+    dict = dict.replace(enEnd, [
+      "  'context.label': 'Context',",
+      "  'context.faster': 'Faster',",
+      "  'context.more': 'More context',",
+      "  'context.recommended': 'Recommended',",
+      '} satisfies Record<ModelKey, string>',
+    ].join('\n'))
+    write(locales, dict)
+  }
+  done.push('barra de contexto en el selector de modelo')
 }
 
 console.log('\nCambios aplicados:')
