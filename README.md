@@ -6,6 +6,7 @@ que se mantiene al día sola:
 - usa tus modelos de **Ollama**, sin modelos online ni cuenta de DeepSeek (no gasta saldo),
 - **sin inicio de sesión**, sin telemetría ni analítica,
 - interfaz en **español** (Ajustes → General → Idioma → Español),
+- permite **eliminar chats** de verdad (la oficial solo los archiva),
 - se **actualiza automáticamente** con cada versión nueva de DeepSeek, conservando
   estos cambios.
 
@@ -41,6 +42,20 @@ No hay que hacer nada:
 
 Para forzar una compilación: pestaña **Actions** → *Compilar instalador* →
 *Run workflow* (marca «forzar» si ya existe un instalador para esa versión).
+
+## Eliminar chats y proyectos
+
+- **Chat** (también los de «Sin agrupar»): menú `⋯` del chat en la barra lateral →
+  **Eliminar sesión** → confirmar. Se borra del disco la conversación, sus
+  subagentes y su historial (`%USERPROFILE%\.dsh\sessions\…`). Los archivos de la
+  carpeta de trabajo no se tocan. **No se puede deshacer**: si dudas, usa
+  «Archivar».
+- Si el chat está abierto o se ha usado desde que abriste la app, sigue cargado en memoria: se
+  detiene y desaparece de la lista al momento, pero sus ficheros se borran la
+  próxima vez que abras la app (así no se corrompe nada si aún estaba escribiendo).
+- **Proyecto** (espacio de trabajo): menú del proyecto → *Eliminar espacio de
+  trabajo* (ya existía en la oficial). Solo lo quita de la lista; sus chats pasan
+  a «Sin agrupar», desde donde se pueden eliminar uno a uno.
 
 ## Modelos y configuración (`config.json`)
 
@@ -80,6 +95,7 @@ un `ERROR:` que explica qué falta (y la app sigue en la versión anterior).
 | Sin telemetría ni analítica | `cordis.patch.yml` |
 | Sin búsqueda web (usa la API de DeepSeek); la lectura de páginas se mantiene | bundles y presets |
 | Idioma español | `packages/client/locale` + [`sistema/es-pack.json`](sistema/es-pack.json) |
+| «Eliminar sesión» en el menú de cada chat (borrado definitivo, con confirmación) | `packages/api/session-controller` (método `session.deletePermanently`) + `packages/client/ui-workspace`; código en [`sistema/borrar-chats/`](sistema/borrar-chats) |
 | Instalador sin firma, sin la «actualización obligatoria» de DeepSeek | `apps/desktop/scripts` |
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |
 

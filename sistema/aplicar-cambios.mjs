@@ -1,5 +1,5 @@
 // Aplica las modificaciones locales (Ollama, sin inicio de sesión, sin telemetría,
-// idioma español) sobre una copia del repositorio de DeepSeek Harness.
+// idioma español, eliminar chats) sobre una copia del repositorio de DeepSeek Harness.
 //
 // Uso: node sistema/aplicar-cambios.mjs <ruta-del-repositorio>
 //
@@ -403,6 +403,192 @@ else done.push(`búsqueda web desactivada (${toolWeb} fila/s)`)
     }
     done.push(`actualizaciones desde ${url}`)
   }
+}
+
+// ── 7. Eliminar chats ─────────────────────────────────────────────────────────
+// La versión oficial solo archiva (y al eliminar un espacio de trabajo sus chats
+// pasan a «Sin agrupar»). Se añade «Eliminar sesión» al menú de cada chat: el
+// Host borra la carpeta del chat y la de sus subagentes (sistema/borrar-chats/
+// local-delete.ts) y la interfaz pide confirmación (DeleteSession.tsx).
+
+{
+  const src = join(here, 'borrar-chats')
+  const hostDir = join(repo, 'packages', 'api', 'session-controller', 'src')
+  const hostIndex = join(hostDir, 'index.ts')
+  const hostTypes = join(hostDir, 'types.ts')
+  const uiDir = join(repo, 'packages', 'client', 'ui-workspace', 'src', 'client')
+  const uiIndex = join(uiDir, 'index.ts')
+  const uiLocales = join(uiDir, 'locales.ts')
+  for (const file of [hostIndex, hostTypes, uiIndex, uiLocales]) {
+    if (!existsSync(file)) fail(`no existe ${rel(file)}; no se puede añadir «Eliminar sesión»`)
+  }
+  if (!existsSync(join(uiDir, 'session-actions'))) fail(`no existe ${rel(join(uiDir, 'session-actions'))}`)
+
+  // Host: método remoto session.deletePermanently y filtro de la lista.
+  copyFileSync(join(src, 'local-delete.ts'), join(hostDir, 'local-delete.ts'))
+  // El paquete enumera sus ficheros uno a uno: el nuevo tiene que estar en la lista.
+  const hostTsconfig = join(hostDir, '..', 'tsconfig.host.json')
+  if (existsSync(hostTsconfig)) {
+    const tsconfig = JSON.parse(read(hostTsconfig))
+    if (Array.isArray(tsconfig.files) && !tsconfig.files.includes('src/local-delete.ts')) {
+      tsconfig.files.push('src/local-delete.ts')
+      write(hostTsconfig, JSON.stringify(tsconfig, null, 2))
+    }
+  }
+
+  let types = read(hostTypes)
+  if (!types.includes('interface SessionRemoveRequest')) {
+    types = types.trimEnd() + '\n\n' + [
+      '/** Local build: permanently delete one Session and its subagents. */',
+      'export interface SessionRemoveRequest {',
+      '  readonly sessionId: SessionId',
+      '}',
+      '',
+      '/** Local build: Sessions removed now, and attached ones removed at next start. */',
+      'export interface SessionRemoveValue {',
+      '  readonly deletedSessionIds: readonly SessionId[]',
+      '  readonly pendingSessionIds: readonly SessionId[]',
+      '}',
+    ].join('\n')
+    write(hostTypes, types)
+  }
+
+  let host = read(hostIndex)
+  if (!host.includes("from './local-delete.ts'")) {
+    const anchor = host.match(/^import \{ ApiSessionList \} from '\.\/list\.ts'\r?\n/m)
+    if (!anchor) fail(`no se encuentra el import de './list.ts' en ${rel(hostIndex)}`)
+    host = host.replace(anchor[0], anchor[0] + [
+      "import { LocalSessionDeleter } from './local-delete.ts'",
+      "import type { SessionRemoveRequest, SessionRemoveValue } from './types.ts'",
+      '',
+    ].join('\n'))
+  }
+  if (!host.includes("@Remote('deletePermanently')")) {
+    const at = host.indexOf("  @Remote('list')")
+    const doc = at < 0 ? -1 : host.lastIndexOf('  /**', at)
+    if (doc < 0) fail(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
+    host = host.slice(0, doc) + [
+      '  /** Local build: lazily created permanent-delete helper (see local-delete.ts). */',
+      '  private localDeleterInstance: LocalSessionDeleter | undefined',
+      '',
+      '  private localDeleter(): LocalSessionDeleter {',
+      '    this.localDeleterInstance ??= new LocalSessionDeleter(this.ctx)',
+      '    return this.localDeleterInstance',
+      '  }',
+      '',
+      '  /**',
+      '   * Local build: archive (stopping its work) and permanently delete one',
+      '   * Session with its subagents. Sessions still attached in this process are',
+      '   * hidden and removed at the next start.',
+      '   * @param request - Session identity.',
+      '   * @returns Sessions removed now and Sessions pending removal.',
+      '   */',
+      "  @Remote('deletePermanently')",
+      '  deletePermanently(request: SessionRemoveRequest): Promise<SessionRemoveValue> {',
+      '    return this.localDeleter().delete(request.sessionId)',
+      '  }',
+      '',
+      '',
+    ].join('\n') + host.slice(doc)
+  }
+  const listLine = 'return { items: await this.listState.list(signal) }'
+  if (host.includes(listLine)) {
+    host = host.replace(listLine, [
+      '// Local build: first remove what the previous run left pending, then',
+      '    // hide Sessions whose deletion waits for the next start.',
+      '    const hidden = await this.localDeleter().hidden()',
+      '    const items = await this.listState.list(signal)',
+      '    return { items: hidden.size === 0 ? items : items.filter(item => !hidden.has(item.sessionId)) }',
+    ].join('\n'))
+  } else if (!host.includes('this.localDeleter().hidden()')) {
+    warn(`no se encuentra el cuerpo de session.list en ${rel(hostIndex)}: los chats borrados con la sesión abierta se verán hasta reiniciar`)
+  }
+  write(hostIndex, host)
+
+  // Interfaz: fila «Eliminar sesión» en el menú del chat y diálogo de confirmación.
+  copyFileSync(join(src, 'DeleteSession.tsx'), join(uiDir, 'session-actions', 'DeleteSession.tsx'))
+
+  let ui = read(uiIndex)
+  if (!ui.includes("from './session-actions/DeleteSession.tsx'")) {
+    const anchor = ui.match(/^import .* from '\.\/session-actions\/ArchiveSession\.tsx'\r?\n/m)
+    if (!anchor) fail(`no se encuentra el import de ArchiveSession.tsx en ${rel(uiIndex)}`)
+    ui = ui.replace(anchor[0], anchor[0] + [
+      'import {',
+      '  DeleteSessionMenuItem, SessionDeleteDialog,',
+      '  type DeleteSessionInjected, type SessionDeleteDialogInjected, type SessionDeleteRequest,',
+      "} from './session-actions/DeleteSession.tsx'",
+      '',
+    ].join('\n'))
+  }
+  if (!ui.includes("'remote.session'")) {
+    const re = /^(export const inject = \[[^\]]*?)'remote',/m
+    if (!re.test(ui)) fail(`no se encuentra la lista inject de ${rel(uiIndex)}`)
+    ui = ui.replace(re, "$1'remote', 'remote.session',")
+  }
+  if (!ui.includes("id: 'local-delete'")) {
+    const anchor = ui.match(/^([ \t]*)ctx\.slots\.inject\('conversation\.hero\.workspace'/m)
+    if (!anchor) fail(`no se encuentra el final de apply() en ${rel(uiIndex)}`)
+    for (const needed of ['uiWorkspace.archiveSession(', 'sessions.list.getSnapshot()', 'createSnapshotStore']) {
+      if (!ui.includes(needed)) fail(`${rel(uiIndex)} ya no usa ${needed}; revisa «Eliminar sesión»`)
+    }
+    const pad = anchor[1]
+    ui = ui.replace(anchor[0], [
+      '// Local build: permanent delete — a menu row after Archive and its confirmation.',
+      'const deleteRequest = createSnapshotStore<SessionDeleteRequest | null>(null)',
+      'const deleteInjected = (): DeleteSessionInjected => ({',
+      '  requestSessionDelete: (sessionId) => {',
+      '    const displayTitle = sessions.list.getSnapshot().byId[sessionId]?.displayTitle ?? sessionId',
+      '    deleteRequest.set({ sessionId, displayTitle })',
+      '  },',
+      '})',
+      'const deleteDialogInjected = (): SessionDeleteDialogInjected => ({',
+      '  hooks: { deleteRequest },',
+      '  settleSessionDelete: () => { deleteRequest.set(null) },',
+      '  deleteSession: async (sessionId) => {',
+      '    // Archiving first stops its work and leaves the view if it is open.',
+      '    await uiWorkspace.archiveSession(sessionId, { stopActivity: true })',
+      '    const result = await ctx.remote.session.deletePermanently({ sessionId })',
+      '    if (!result.ok) throw new Error(result.error.message)',
+      '    await sessions.refresh()',
+      '  },',
+      '})',
+      "ctx.slots.inject('sidebar.workspaces.session.menu.item', () => ctx.slots.register(",
+      "  { name: 'sidebar.workspaces.session.menu.item', id: 'local-delete', order: 500, locale: NS, inject: deleteInjected },",
+      '  DeleteSessionMenuItem,',
+      '))',
+      "ctx.slots.inject('shell.overlay', () => ctx.slots.register(",
+      "  { name: 'shell.overlay', id: 'workspace.session-delete', locale: NS, inject: deleteDialogInjected },",
+      '  SessionDeleteDialog,',
+      '))',
+    ].map((line) => (line === '' ? '' : pad + line)).join('\n') + '\n' + anchor[0])
+  }
+  write(uiIndex, ui)
+
+  // Textos: chino e inglés en el diccionario oficial; el español va en es-pack.json.
+  let locales = read(uiLocales)
+  if (!locales.includes("'menu.deleteSession'")) {
+    const zhEnd = /^\} satisfies Record<string, string>/m
+    const enEnd = /^\} satisfies Record<WorkspaceKey, string>/m
+    if (!zhEnd.test(locales) || !enEnd.test(locales)) fail(`no se encuentran los diccionarios zh/en en ${rel(uiLocales)}`)
+    locales = locales.replace(zhEnd, [
+      "  'menu.deleteSession': '删除会话',",
+      "  'deleteSession.title': '删除此会话？',",
+      "  'deleteSession.desc': '将永久删除“{title}”：对话、子智能体及其历史记录。工作目录中的文件不受影响。此操作无法撤销。',",
+      "  'deleteSession.action': '删除',",
+      "  'deleteSession.pending': '正在删除会话…',",
+      '} satisfies Record<string, string>',
+    ].join('\n'))
+    locales = locales.replace(enEnd, [
+      "  'menu.deleteSession': 'Delete session',",
+      "  'deleteSession.title': 'Delete this session?',",
+      "  'deleteSession.desc': '“{title}” will be permanently deleted: the conversation, its subagents and its history. Files in the working folder are not touched. This cannot be undone.',",
+      "  'deleteSession.action': 'Delete',",
+      "  'deleteSession.pending': 'Deleting session…',",
+      '} satisfies Record<WorkspaceKey, string>',
+    ].join('\n'))
+    write(uiLocales, locales)
+  }
+  done.push('opción «Eliminar sesión» en el menú de cada chat')
 }
 
 console.log('\nCambios aplicados:')

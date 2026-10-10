@@ -753,7 +753,12 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "time.days": "{n} d",
     "time.months": "{n} mes.",
     "time.years": "{n} a",
-    "time.ago": "hace {t}"
+    "time.ago": "hace {t}",
+    "menu.deleteSession": "Eliminar sesión",
+    "deleteSession.title": "¿Eliminar esta sesión?",
+    "deleteSession.desc": "Se borrará «{title}» definitivamente: la conversación, sus subagentes y su historial. Los archivos de la carpeta de trabajo no se tocan. No se puede deshacer.",
+    "deleteSession.action": "Eliminar",
+    "deleteSession.pending": "Eliminando sesión…"
   },
   "pluginManager": {
     "panel": "Plugins",
