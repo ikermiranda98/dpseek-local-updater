@@ -55,7 +55,7 @@ Editar `config.json` en GitHub (o hacer push) recompila el instalador al momento
 |---|---|
 | `ollamaUrl` | Dirección de Ollama (`http://127.0.0.1:11434`). |
 | `modeloPorDefecto` | Modelo con el que empiezan las sesiones nuevas. Tiene que existir en tu Ollama con ese nombre exacto. |
-| `modelosManuales` | Modelos que aparecen siempre, aunque Ollama esté apagado: `id` (nombre en Ollama), `nombre`, `contexto`, `imagenes`, `razonamiento`. |
+| `modelosManuales` | Modelos que aparecen siempre, aunque Ollama esté apagado: `id` (nombre en Ollama; es el que se muestra, sin `:latest`), `contexto`, `imagenes`, `razonamiento` (y opcionalmente `nombre` para mostrar otro nombre). |
 | `contextoMaximo` | Ventana de contexto declarada (también para los modelos detectados). **No debe superar `OLLAMA_CONTEXT_LENGTH`**, o Ollama recorta el prompt sin avisar. |
 | `maxTokensSalida` | Máximo de tokens por respuesta. |
 | `detectarModelosDeOllama` | Al compilar en un PC con Ollama, toma de allí los datos de los modelos fijos (en GitHub no hay Ollama y no hace falta). |

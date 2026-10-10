@@ -171,7 +171,7 @@ async function buildTimeModels() {
       .filter((m) => (m.capabilities ?? ['completion']).includes('completion'))
       .map((m) => ({
         id: m.name,
-        nombre: m.name.replace(/:latest$/, ''),
+        
         contexto: Math.min(config.contextoMaximo, m.details?.context_length ?? config.contextoMaximo),
         imagenes: (m.capabilities ?? []).includes('vision'),
         razonamiento: (m.capabilities ?? []).includes('thinking'),
@@ -191,7 +191,8 @@ const EFFORTS = { off: 'none', low: 'low', medium: 'medium', high: 'high' }
 /** Modelo de config.json en el formato del adaptador llm-pi-ai. */
 const toPiAi = (m) => ({
   id: m.id,
-  name: m.nombre ?? m.id,
+  // Por defecto, el nombre real de Ollama (sin :latest) para distinguir variantes.
+  name: m.nombre ?? m.id.replace(/:latest$/, ''),
   contextWindow: m.contexto ?? config.contextoMaximo,
   maxTokens: config.maxTokensSalida,
   input: m.imagenes ? ['text', 'image'] : ['text'],

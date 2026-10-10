@@ -7,7 +7,6 @@
   "modelosManuales": [
     {
       "id": "Qwen3.6-35B-A3B-Uncensored:latest",
-      "nombre": "Qwen3.6 35B A3B",
       "contexto": 65536,
       "imagenes": true,
       "razonamiento": true
