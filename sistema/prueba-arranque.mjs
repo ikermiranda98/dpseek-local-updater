@@ -24,13 +24,13 @@ const PORT = 9393
 const LIMIT_MS = 4 * 60_000
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms) })
 
-// Datos aparte: no toca los de una app instalada ni choca con ella si está abierta.
+// Datos aparte (DSH_HOME y --user-data-dir): no toca los de una app instalada ni
+// choca con ella si está abierta (la app solo admite una ventana por carpeta de datos).
 const scratch = mkdtempSync(join(tmpdir(), 'dsh-prueba-'))
-const child = spawn(exe, [`--remote-debugging-port=${PORT}`], {
+const child = spawn(exe, [`--remote-debugging-port=${PORT}`, `--user-data-dir=${join(scratch, 'user-data')}`], {
   env: {
     ...process.env,
     DSH_HOME: join(scratch, 'home'),
-    DSH_DESKTOP_USER_DATA_DIR: join(scratch, 'user-data'),
     DSH_DESKTOP_OPEN_DEVTOOLS: '0',
   },
   stdio: 'ignore',
