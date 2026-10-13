@@ -973,6 +973,144 @@ optional('no volver a ofrecer una versión retirada', (tx) => {
       + '      this.candidate = result.isUpdateAvailable && gt(version, this.currentVersion()) && !localSkippedVersion(version) ? version : undefined')
 })
 
+// ── 14. Botón «Optimizar» junto a cada modelo ─────────────────────────────────
+// Vuelve a medir el modelo en este equipo (contexto recomendado y capas en la
+// gráfica) con el medidor de sistema/contexto/calibrar.cjs, en segundo plano.
+// Host: session.optimizeLocalModel y session.localOptimizeStatus
+// (sistema/contexto/local-optimize.ts). Interfaz: LocalOptimizeButton.tsx.
+
+optional('botón «Optimizar» junto a cada modelo del selector', (tx) => {
+  const select = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client', 'ModelSelect.tsx')
+  const selectionIndex = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client', 'index.ts')
+  const selectionLocales = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client', 'locales.ts')
+  const hostIndex = join(hostDir, 'index.ts')
+  const hostTypes = join(hostDir, 'types.ts')
+  // Si DeepSeek añade su propia optimización de modelos, se usa la suya.
+  if (officialKeys(selectionLocales).some((key) => /optimi[sz]e|tune|benchmark/i.test(key))) {
+    official('la optimización de modelos')
+  }
+
+  // Host.
+  tx.copy(join(here, 'contexto', 'local-optimize.ts'), join(hostDir, 'local-optimize.ts'))
+  tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-optimize.ts')
+  let types = tx.read(hostTypes)
+  if (!types.includes('interface SessionOptimizeModelRequest')) {
+    types = types.trimEnd() + '\n\n' + [
+      '/** Local build: re-measure one Ollama model on this machine. */',
+      'export interface SessionOptimizeModelRequest {',
+      '  readonly model: string',
+      '}',
+      '',
+      '/** Local build: whether the measurement started and which model is being measured. */',
+      'export interface SessionOptimizeModelValue {',
+      '  readonly started: boolean',
+      '  readonly running: string | null',
+      '}',
+      '',
+      '/** Local build: measurement status request (no fields are required). */',
+      'export interface SessionOptimizeStatusRequest {',
+      '  readonly model?: string',
+      '}',
+      '',
+      '/** Local build: model being measured, empty when unknown, null when idle. */',
+      'export interface SessionOptimizeStatusValue {',
+      '  readonly running: string | null',
+      '}',
+    ].join('\n')
+    tx.write(hostTypes, types)
+  }
+  tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n", [
+    "import { ApiSessionList } from './list.ts'",
+    "import { localOptimizeModel as runLocalOptimize, localOptimizeStatus as readLocalOptimizeStatus } from './local-optimize.ts'",
+    'import type {',
+    '  SessionOptimizeModelRequest, SessionOptimizeModelValue, SessionOptimizeStatusRequest, SessionOptimizeStatusValue,',
+    "} from './types.ts'",
+    '',
+  ].join('\n'), "from './local-optimize.ts'")
+  let host = tx.read(hostIndex)
+  if (!host.includes("@Remote('optimizeLocalModel')")) {
+    const at = host.indexOf("  @Remote('list')")
+    const doc = at < 0 ? -1 : host.lastIndexOf('  /**', at)
+    if (doc < 0) skip(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
+    host = host.slice(0, doc) + [
+      '  /**',
+      '   * Local build: re-measure one Ollama model on this machine in the background',
+      '   * (recommended context and GPU layers; see local-optimize.ts).',
+      '   * @param request - model id or one of its context variants.',
+      '   * @returns whether it started and which model is being measured.',
+      '   */',
+      "  @Remote('optimizeLocalModel')",
+      '  async optimizeLocalModel(request: SessionOptimizeModelRequest): Promise<SessionOptimizeModelValue> {',
+      '    return runLocalOptimize(request.model)',
+      '  }',
+      '',
+      '  /**',
+      '   * Local build: model being re-measured, if any.',
+      '   * @param _request - no fields are required.',
+      '   * @returns the model being measured, or null.',
+      '   */',
+      "  @Remote('localOptimizeStatus')",
+      '  async localOptimizeStatus(_request: SessionOptimizeStatusRequest): Promise<SessionOptimizeStatusValue> {',
+      '    return readLocalOptimizeStatus()',
+      '  }',
+      '',
+      '',
+    ].join('\n') + host.slice(doc)
+    tx.write(hostIndex, host)
+  }
+
+  // Interfaz: el botón junto a cada fila de la lista de modelos.
+  const dir = dirname(select)
+  tx.copy(join(here, 'contexto', 'LocalOptimizeButton.tsx'), join(dir, 'LocalOptimizeButton.tsx'))
+  tx.copy(join(here, 'contexto', 'LocalOptimizeButton.module.css'), join(dir, 'LocalOptimizeButton.module.css'))
+  tx.replace(select, "import css from './ModelSelect.module.css'\n",
+    "import css from './ModelSelect.module.css'\n"
+      + "import { LocalOptimizeButton } from './LocalOptimizeButton.tsx'\n"
+      + "import localOptimizeCss from './LocalOptimizeButton.module.css'\n",
+    "from './LocalOptimizeButton.tsx'")
+  let text = tx.read(select)
+  if (!text.includes('<LocalOptimizeButton')) {
+    const open = /return \(\n(\s*)<button\n(\s*)ref=\{itemRef\(\)\}\n\s*type="button"\n\s*role="menuitemradio"\n/
+    const close = /(<\/button>\n)(\s*)\)\n(\s*)\}\)\}/
+    if (!open.test(text) || !close.test(text)) skip(`no se encuentran las filas de la lista de modelos en ${rel(select)}`)
+    text = text.replace(open, (all, pad, inner) => `return (\n${pad}<div className={localOptimizeCss.row} key={model.id}>\n${pad}<button\n${inner}ref={itemRef()}\n${inner}type="button"\n${inner}role="menuitemradio"\n`)
+    text = text.replace(close, (all, end, pad, pad2) => `${end}${pad}  {/* Local build: «Optimizar» (LocalOptimizeButton.tsx). */}\n${pad}  <LocalOptimizeButton model={model.id} t={t} />\n${pad}</div>\n${pad})\n${pad2}})}`)
+    tx.write(select, text)
+  }
+  tx.replace(selectionIndex, 'ctx.plugin(ModelDirectoryResolver)\n', [
+    'ctx.plugin(ModelDirectoryResolver)',
+    '  // Local build: «Optimizar» button next to each model (LocalOptimizeButton.tsx).',
+    '  ctx.effect(() => {',
+    '    setLocalOptimizer({',
+    '      optimize: async (model) => {',
+    '        const result = await ctx.remote.session.optimizeLocalModel({ model })',
+    '        if (!result.ok) throw new Error(result.error.message)',
+    '        return result.value',
+    '      },',
+    '      status: async () => {',
+    '        const result = await ctx.remote.session.localOptimizeStatus({})',
+    '        if (!result.ok) throw new Error(result.error.message)',
+    '        return result.value',
+    '      },',
+    '    })',
+    '    return () => { setLocalOptimizer(undefined) }',
+    "  }, 'ui-model-selection: local optimizer')",
+    '',
+  ].join('\n'), 'setLocalOptimizer({')
+  tx.replace(selectionIndex, "import { ModelSelect } from './ModelSelect.tsx'\n",
+    "import { ModelSelect } from './ModelSelect.tsx'\nimport { setLocalOptimizer } from './LocalOptimizeButton.tsx'\n",
+    "import { setLocalOptimizer }")
+  addLocaleKeys(tx, selectionLocales, 'ModelKey', {
+    'local.optimize.title': '针对本机优化：测量推荐上下文和可放入显卡的层数（会多次加载模型，约需几分钟）',
+    'local.optimize.running': '正在优化此模型…（后台进行；重新打开应用后可看到新的推荐值）',
+    'local.optimize.other': '正在优化另一个模型，请稍候',
+  }, {
+    'local.optimize.title': 'Optimize for this computer: measures the recommended context and how many layers fit on the GPU (loads the model several times, takes a few minutes)',
+    'local.optimize.running': 'Optimizing this model… (in the background; reopen the app to see the new recommended value)',
+    'local.optimize.other': 'Another model is being optimized; please wait',
+  })
+})
+
 console.log('\nCambios aplicados:')
 for (const line of done) console.log(`  - ${line}`)
 if (omitted.length > 0) {

@@ -133,6 +133,9 @@ jobs:
 
       - name: Crear el instalador
         working-directory: D:\dsh
+        env:
+          # Las pruebas del empaquetado abren la app: sin medidor, precarga ni arranque de Ollama.
+          DSH_LOCAL_SIN_AYUDANTES: '1'
         run: |
           # Número de versión mayor que el oficial para que la app lo vea como
           # actualización: <versión>.<fecha>.<ejecución> (las versiones estables

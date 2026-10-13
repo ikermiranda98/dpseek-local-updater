@@ -67,7 +67,8 @@ Para forzar una compilación: pestaña **Actions** → *Compilar instalador* →
   app se queda en la versión anterior, que funciona, hasta que se adapte.
 - **Las funciones añadidas** (idioma español, menús en español, eliminar chats,
   selección de varios, barra de contexto, chats antiguos al contexto recomendado,
-  avisos de respuesta terminada, no volver a ofrecer una versión retirada):
+  avisos de respuesta terminada, no volver a ofrecer una versión retirada, botón
+  «Optimizar»):
   - si DeepSeek añade la misma función, **se queda la oficial** y la nuestra no se
     aplica;
   - si algo suyo ha cambiado y la nuestra no encaja, esa función **se omite entera**
@@ -114,13 +115,32 @@ Cómo funciona:
   `ollama list`. `OLLAMA_CONTEXT_LENGTH` deja de importar.
 - **Recomendado** (variante `dsh-ctx-auto`): la primera vez que la app ve un
   modelo (o si cambias de tarjeta gráfica o de versión de Ollama) lo mide en
-  segundo plano, solo con Ollama libre:
-  lo carga con varios contextos y elige el mayor con el que la parte del modelo
-  que va en la gráfica no se reduce (más allá, Ollama mueve capas a la CPU y va
-  más lento). Tarda alrededor de un minuto y el resultado queda en
-  `%USERPROFILE%\.dsh\storages\local-contexto.json` (bórralo para volver a
-  medir). Hasta medirlo, el recomendado es `contexto.porDefecto`; el valor medido
-  se ve en la barra al volver a abrir la app.
+  segundo plano, solo con Ollama libre: lo carga con cada tamaño de contexto,
+  **mide la velocidad real** de generación y elige el mayor tamaño que mantiene al
+  menos el 85 % de la velocidad del más rápido. Tarda unos minutos por modelo
+  (más en los densos, por el ajuste de capas) y el resultado queda en
+  `%USERPROFILE%\.dsh\storages\local-contexto.json`. Hasta medirlo, el
+  recomendado es `contexto.porDefecto`; el valor medido se ve en la barra al volver
+  a abrir la app.
+- **Modelos densos que no caben en la gráfica** (por ejemplo, de 27.000 millones
+  de parámetros con 8 GB): Ollama deja libre más memoria de la gráfica de la
+  necesaria y el modelo va varias veces más lento. Al medirlos, la app busca para
+  cada tamaño de contexto cuántas capas caben en la memoria real de la gráfica
+  (con 400 MB de margen) y las fija en sus variantes (`num_gpu`). En una RTX 4060
+  de 8 GB, un modelo de 27.000 millones en IQ2_XS pasó de 4,8 a 12,2 tok/s con 32K
+  y de unos 4 a 7,6 tok/s con 64K. A los modelos MoE (como Qwen…-A3B) no se les
+  toca: Ollama ya los reparte bien.
+- **Botón «Optimizar»** (el icono de velocímetro junto a cada modelo de la lista
+  del selector): vuelve a medir ese modelo ahora, en segundo plano (carga el
+  modelo varias veces; unos minutos). Si había un modelo cargado, lo descarga
+  primero. Úsalo tras cambiar de gráfica, de versión de Ollama o de ajustes de
+  Ollama; el nuevo recomendado se ve al volver a abrir la app (las capas se
+  aplican al momento).
+- **Compresión del contexto de Ollama** (`OLLAMA_FLASH_ATTENTION=1` y
+  `OLLAMA_KV_CACHE_TYPE=q8_0`, variables de usuario de Windows; hay que reiniciar
+  Ollama): reduce la memoria del contexto. En el equipo de pruebas aceleró los
+  modelos densos (de 8,5 a 13,1 tok/s con 32K) y no frenó a los MoE (Qwen: 34,3 →
+  36,5 tok/s). Si se activa o se quita, la app vuelve a medir los modelos.
 - La app sabe el tamaño exacto de cada opción y resume la conversación antes de
   llegar al límite, así que Ollama nunca recorta texto en silencio.
 - Cambiar de contexto en mitad de un chat hace que Ollama recargue el modelo
@@ -181,8 +201,9 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Cambio | Dónde |
 |---|---|
 | Ollama como proveedor y modelo por defecto | `packages/bundle/base/cordis.patch.yml` |
-| Contexto por variantes, recomendado medido, modelo listo y limpieza de variantes | `packages/bundle/base/cordis.patch.yml`; código en [`sistema/contexto/`](sistema/contexto) (`arranque.cjs`, `calibrar.cjs`, `precarga.cjs`) |
+| Contexto por variantes, recomendado y capas en la gráfica medidos, modelo listo y limpieza de variantes | `packages/bundle/base/cordis.patch.yml`; código en [`sistema/contexto/`](sistema/contexto) (`arranque.cjs`, `calibrar.cjs`, `precarga.cjs`) |
 | Barra de contexto en el selector (opcional) | `packages/client/ui-model-selection` (`ContextSlider.tsx`) |
+| Botón «Optimizar» junto a cada modelo (opcional) | `packages/api/session-controller` (`local-optimize.ts`) + `packages/client/ui-model-selection` (`LocalOptimizeButton.tsx`) |
 | Chats antiguos al contexto recomendado (opcional) | `packages/api/session-controller` y `packages/core/agent-default-model` (`local-ollama.ts`) |
 | Sin ventana de bienvenida ni inicio de sesión | `apps/desktop/src/welcome-api.ts` |
 | Sin menú ni ajustes de la cuenta de DeepSeek | `packages/bundle/web-app/cordis.patch.yml` |

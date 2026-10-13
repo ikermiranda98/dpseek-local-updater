@@ -26,6 +26,9 @@ const cfg = JSON.parse(process.env.DSH_CTX)
 const MARK = 'dsh-ctx-'
 const home = (process.env.DSH_HOME || '').trim() || join(homedir(), '.dsh')
 const cacheFile = join(home, 'storages', 'local-contexto.json')
+// Prueba de arranque y compilación (DSH_LOCAL_SIN_AYUDANTES=1): solo lectura. Con datos
+// temporales, sin mediciones, reescribiría las variantes que ha ajustado la app de verdad.
+const readOnly = process.env.DSH_LOCAL_SIN_AYUDANTES === '1'
 
 async function api(path, body) {
   const init = body === undefined
@@ -52,7 +55,7 @@ function baseOf(name) {
 const labelOf = (name) => (VARIANT.exec(name) || [])[3]
 /** Borra una variante de la app (solo nombres dsh-ctx-; nunca un modelo descargado). */
 async function remove(name) {
-  if (baseOf(name) === undefined) return
+  if (baseOf(name) === undefined || readOnly) return
   await fetch(cfg.ollama + '/api/delete', {
     method: 'DELETE', body: JSON.stringify({ model: name }), signal: AbortSignal.timeout(8000),
   }).catch(() => undefined)
@@ -175,6 +178,8 @@ function launchHelper(name, code, extraEnv) {
  * está, `ollama serve`. Espera hasta 12 s a que conteste.
  */
 async function ensureOllama() {
+  // La prueba de arranque (sistema/prueba-arranque.mjs) no arranca nada en el equipo.
+  if (process.env.DSH_LOCAL_SIN_AYUDANTES === '1') return
   const ready = () => api('/api/version').then(() => true, () => false)
   if (await ready()) return
   if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(cfg.ollama)) return
@@ -218,6 +223,7 @@ async function main() {
   const cache = readCache()
   const result = []
   const pending = []
+  const specs = {}
   for (const m of tags) {
     if (isVariant(m.name)) continue
     if (!(m.capabilities || ['completion']).includes('completion')) continue
@@ -251,17 +257,27 @@ async function main() {
     const fresh = measured !== undefined && measured.digest === m.digest
       && measured.ollama === version && measured.gpu === gpu && Number.isInteger(measured.optimo)
     const auto = Math.min(fresh ? measured.optimo : cfg.defaultCtx, max)
-    if (!fresh) pending.push({ model: m.name, digest: m.digest, sizes, declared: auto })
+    const arch = info['general.architecture']
+    // Denso = sin expertos (los MoE ya los reparte bien Ollama). Ollama cuenta una
+    // capa más que los bloques (la de salida): «offloaded 46/66 layers».
+    const dense = !info[`${arch}.expert_count`]
+    const layers = Number(info[`${arch}.block_count`]) + 1 || undefined
+    specs[m.name] = { model: m.name, digest: m.digest, sizes, declared: auto, dense, layers, thinking: caps.includes('thinking') }
+    if (!fresh) pending.push(specs[m.name])
 
-    // Variantes: se crean solo si faltan; la automática también si cambió su valor.
+    // Variantes: se crean si faltan o si su contexto o sus capas en la gráfica
+    // (medidas para los modelos densos) no son los esperados.
     for (const [label, ctx] of [['auto', auto], ...sizes.map((s) => [String(s), s])]) {
       const name = variantName(m.name, label)
+      const gpuLayers = fresh && measured.capas ? measured.capas[ctx] : undefined
       let ready = existing.has(name)
-      if (ready && label === 'auto') {
+      if (ready) {
         const current = (await api('/api/show', { model: name })).parameters || ''
-        ready = Number((current.match(/num_ctx\s+(\d+)/) || [])[1]) === ctx
+        const param = (key) => Number((current.match(new RegExp(`${key}\\s+(\\d+)`)) || [])[1]) || undefined
+        ready = param('num_ctx') === ctx && param('num_gpu') === gpuLayers
       }
-      if (!ready) await api('/api/create', { model: name, from: m.name, parameters: { num_ctx: ctx }, stream: false })
+      const parameters = gpuLayers === undefined ? { num_ctx: ctx } : { num_ctx: ctx, num_gpu: gpuLayers }
+      if (!ready && !readOnly) await api('/api/create', { model: name, from: m.name, parameters, stream: false })
     }
 
     const common = (ctx) => ({
@@ -280,11 +296,24 @@ async function main() {
 
   // La medición carga el modelo varias veces: va en segundo plano, en un proceso
   // independiente que sigue aunque se cierre la app.
+  // La prueba de arranque no deja medidores ni precargas en marcha.
+  const helpers = process.env.DSH_LOCAL_SIN_AYUDANTES !== '1'
   mkdirSync(join(home, 'storages'), { recursive: true })
-  const calibrationLock = cacheFile.replace(/.json$/, '.lock')
-  if (pending.length > 0 && process.env.DSH_CTX_CALIBRAR && !alive(lockParts(calibrationLock).pid)) {
-    const job = { ollama: cfg.ollama, cacheFile, gpu, version, models: pending }
-    launchHelper('calibrar', process.env.DSH_CTX_CALIBRAR, { DSH_CTX_JOB: JSON.stringify(job) })
+  const calibrationLock = cacheFile.replace(/\.json$/, '.lock')
+  // Memoria real de la gráfica menos un margen para Windows y otras apps: las
+  // capas que la superen irían a la memoria compartida, mucho más lenta.
+  const totalMiB = Number((/,\s*(\d+)\s*MiB/.exec(gpu) || [])[1])
+  const vramLimit = totalMiB > 0 ? (totalMiB - 400) * 1024 * 1024 : undefined
+  const jobBase = { ollama: cfg.ollama, cacheFile, gpu, version, vramLimit }
+  if (helpers && process.env.DSH_CTX_CALIBRAR) {
+    // Lo que necesita el botón «Optimizar» (local-optimize.ts) para medir cualquier modelo.
+    const calibrator = join(home, 'storages', 'local-calibrar.cjs')
+    require('node:fs').writeFileSync(calibrator, process.env.DSH_CTX_CALIBRAR)
+    require('node:fs').writeFileSync(join(home, 'storages', 'local-optimizar.json'),
+      JSON.stringify({ calibrator, job: jobBase, models: specs }, null, 1))
+  }
+  if (helpers && pending.length > 0 && process.env.DSH_CTX_CALIBRAR && !alive(lockParts(calibrationLock).pid)) {
+    launchHelper('calibrar', process.env.DSH_CTX_CALIBRAR, { DSH_CTX_JOB: JSON.stringify({ ...jobBase, models: pending }) })
   }
   // Modelo listo mientras la app está abierta (precarga.cjs). La app es el proceso
   // que ha lanzado este script: cuando se cierre, la precarga lo verá y lo descargará.
@@ -293,7 +322,7 @@ async function main() {
   const keeping = lockParts(keepLock)
   // La app evalúa su configuración varias veces: basta una precarga por apertura.
   const running = alive(keeping.pid) && keeping.host === process.ppid
-  if (process.env.DSH_CTX_PRECARGA && !running && result.some((r) => r.id === preferred)) {
+  if (helpers && process.env.DSH_CTX_PRECARGA && !running && result.some((r) => r.id === preferred)) {
     const keep = {
       ollama: cfg.ollama,
       model: preferred,

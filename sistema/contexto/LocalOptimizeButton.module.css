@@ -1,0 +1,44 @@
+/* Botón «Optimizar» de cada modelo del selector (dpseek-local-updater). */
+
+/* La fila del modelo y su botón, uno junto al otro. */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.row > button:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.optimize {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.optimize:hover:not(:disabled),
+.optimize:focus-visible {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+}
+
+.optimize:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.optimize[data-error] {
+  color: var(--dsw-alias-state-error-primary);
+}

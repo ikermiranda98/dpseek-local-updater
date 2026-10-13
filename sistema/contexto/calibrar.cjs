@@ -1,13 +1,17 @@
-// Medición del contexto óptimo de cada modelo (añadido por dpseek-local-updater).
+// Medición del contexto óptimo y de las capas en la gráfica de cada modelo
+// (añadido por dpseek-local-updater).
 //
 // Lo lanza arranque.cjs en segundo plano cuando un modelo no tiene medición para
-// este equipo (modelo, versión de Ollama y tarjeta gráfica). Carga el modelo con
-// varios tamaños de contexto y mira en /api/ps cuánto queda en la gráfica:
-//   - si con el tamaño menor el modelo cabe entero en la gráfica, el óptimo es el
-//     mayor tamaño con el que sigue cabiendo entero;
-//   - si no cabe (parte va a la CPU), el óptimo es el mayor tamaño con el que la
-//     parte en la gráfica no se reduce: a partir de ahí Ollama saca capas de la
-//     gráfica para hacer sitio al contexto y el modelo va más lento.
+// este equipo (modelo, versión de Ollama, tarjeta gráfica y compresión de
+// contexto), y el botón «Optimizar» cuando se pide. Para cada tamaño de contexto:
+//   - Modelos densos que no caben en la gráfica: Ollama deja más memoria de la
+//     gráfica libre de la necesaria y el modelo va varias veces más lento. Se busca
+//     el máximo de capas (num_gpu) que caben en la memoria real de la gráfica, con
+//     un margen, y se guarda en sus variantes.
+//   - Los demás (MoE como Qwen…-A3B, o modelos que caben enteros) se dejan como los
+//     reparte Ollama, que ya acierta.
+//   - En todos se mide la velocidad de generación real. El recomendado es el mayor
+//     tamaño que mantiene al menos el 85 % de la velocidad del más rápido.
 // Solo mide con Ollama libre (ningún modelo cargado) y se aparta si alguien lo
 // usa mientras mide. El resultado va a <DSH_HOME>/storages/local-contexto.json.
 'use strict'
@@ -18,6 +22,7 @@ const job = JSON.parse(process.env.DSH_CTX_JOB)
 const lockFile = job.cacheFile.replace(/\.json$/, '.lock')
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms) })
 const TOLERANCE = 0.99
+const KEEP_SPEED = 0.85
 const MAX_WAIT_MS = 3 * 60 * 60 * 1000
 
 async function api(path, body, timeoutMs = 10000) {
@@ -68,13 +73,17 @@ async function waitIdle(deadline) {
   }
 }
 
-/** Carga el modelo con un contexto y devuelve lo que ocupa en total y en la gráfica. */
-async function measure(model, ctx) {
+/**
+ * Carga el modelo con un contexto (y, si se indica, un número de capas en la
+ * gráfica) y devuelve lo que ocupa en total y en la gráfica.
+ */
+async function measure(model, ctx, layers) {
   if ((await loaded()).length > 0) throw new Busy()
+  const options = layers === undefined ? { num_ctx: ctx } : { num_ctx: ctx, num_gpu: layers }
   try {
-    await api('/api/generate', { model, keep_alive: '5m', options: { num_ctx: ctx } }, 15 * 60_000)
+    await api('/api/generate', { model, keep_alive: '5m', options }, 15 * 60_000)
   } catch (error) {
-    // Ollama rechaza cargarlo si no cabe en memoria: ese tamaño no sirve.
+    // Ollama rechaza cargarlo si no cabe en memoria: esa combinación no sirve.
     if (error instanceof Error && /HTTP 5\d\d/.test(error.message)) return undefined
     throw error
   }
@@ -82,22 +91,100 @@ async function measure(model, ctx) {
   const entry = models.find((m) => m.name === model)
   await api('/api/generate', { model, keep_alive: 0 }).catch(() => undefined)
   if (models.length !== 1 || entry === undefined || entry.context_length !== ctx) throw new Busy()
-  return { ctx, size: entry.size, vram: entry.size_vram }
+  return { ctx, ...(layers === undefined ? {} : { capas: layers }), size: entry.size, vram: entry.size_vram }
 }
 
-async function calibrate(model, sizes) {
-  const base = await measure(model, sizes[0])
-  if (base === undefined) return { optimo: sizes[0], medidas: [] }
-  const whole = base.vram >= base.size * TOLERANCE
-  const fits = (r) => r !== undefined && (whole ? r.vram >= r.size * TOLERANCE : r.vram >= base.vram * TOLERANCE)
-  const medidas = [base]
-  for (const ctx of [...sizes].reverse()) {
-    if (ctx === sizes[0]) break
-    const r = await measure(model, ctx)
-    if (r !== undefined) medidas.push(r)
-    if (fits(r)) return { optimo: ctx, medidas }
+/**
+ * Máximo de capas en la gráfica que caben en la memoria real (job.vramLimit)
+ * con un contexto, por bisección. Devuelve la medición con esas capas.
+ */
+async function tuneLayers(model, ctx, total, floor) {
+  let best = floor
+  let lo = 1
+  let hi = total
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2)
+    const r = await measure(model, ctx, mid)
+    if (r !== undefined && r.vram <= job.vramLimit) {
+      if (best === undefined || r.vram >= best.vram) best = r
+      lo = mid + 1
+    } else {
+      hi = mid - 1
+    }
   }
-  return { optimo: sizes[0], medidas }
+  return best
+}
+
+const PROMPT = 'Escribe un párrafo de unas 80 palabras sobre la historia de los relojes mecánicos.'
+
+/**
+ * Carga el modelo con un contexto (y, si se indica, unas capas en la gráfica) y
+ * mide la velocidad de generación: una respuesta corta para calentar y otra para
+ * medir, sin recargar.
+ */
+async function speed(item, ctx, layers) {
+  if ((await loaded()).length > 0) throw new Busy()
+  const options = layers === undefined ? { num_ctx: ctx } : { num_ctx: ctx, num_gpu: layers }
+  const ask = (n) => api('/api/generate', {
+    model: item.model,
+    prompt: PROMPT,
+    stream: false,
+    keep_alive: '5m',
+    ...(item.thinking ? { think: false } : {}),
+    options: { ...options, num_predict: n },
+  }, 15 * 60_000)
+  let result
+  try {
+    await ask(8)
+    result = await ask(64)
+  } catch (error) {
+    // Ollama rechaza cargarlo si no cabe en memoria: esa combinación no sirve.
+    if (error instanceof Error && /HTTP 5\d\d/.test(error.message)) return undefined
+    throw error
+  }
+  const models = await loaded()
+  const entry = models.find((m) => m.name === item.model)
+  await api('/api/generate', { model: item.model, keep_alive: 0 }).catch(() => undefined)
+  if (models.length !== 1 || entry === undefined || entry.context_length !== ctx) throw new Busy()
+  const tps = result.eval_count > 0 && result.eval_duration > 0 ? result.eval_count / (result.eval_duration / 1e9) : 0
+  return {
+    ctx, ...(layers === undefined ? {} : { capas: layers }), size: entry.size, vram: entry.size_vram, tps: Math.round(tps * 10) / 10,
+  }
+}
+
+/**
+ * Para cada tamaño de contexto: en los modelos densos que no caben, ajusta las
+ * capas en la gráfica; después mide la velocidad real. El recomendado es el mayor
+ * tamaño que mantiene al menos el 85 % de la velocidad del más rápido.
+ */
+async function calibrate(item) {
+  const { model, sizes, dense, layers } = item
+  const tuning = dense && Number.isInteger(layers) && layers > 0 && Number.isFinite(job.vramLimit)
+  const capas = {}
+  const medidas = []
+  for (const ctx of sizes) {
+    let gpuLayers
+    if (tuning) {
+      const plain = await measure(model, ctx)
+      if (plain !== undefined) {
+        medidas.push(plain)
+        if (plain.vram < plain.size * TOLERANCE) {
+          const tuned = await tuneLayers(model, ctx, layers, plain)
+          if (tuned !== undefined && tuned.capas !== undefined) {
+            capas[ctx] = tuned.capas
+            gpuLayers = tuned.capas
+          }
+        }
+      }
+    }
+    const timed = await speed(item, ctx, gpuLayers)
+    if (timed !== undefined) medidas.push(timed)
+  }
+  const timed = medidas.filter((m) => m.tps > 0)
+  if (timed.length === 0) return { optimo: sizes[0], capas, medidas }
+  const best = Math.max(...timed.map((m) => m.tps))
+  const optimo = Math.max(...timed.filter((m) => m.tps >= best * KEEP_SPEED).map((m) => m.ctx))
+  return { optimo, capas, medidas }
 }
 
 function save(model, digest, result) {
@@ -113,22 +200,54 @@ function save(model, digest, result) {
   renameSync(tmp, job.cacheFile)
 }
 
+function variantName(name, label) {
+  const i = name.lastIndexOf(':')
+  const [base, tag] = i < 0 ? [name, 'latest'] : [name.slice(0, i), name.slice(i + 1)]
+  return `${base}:${tag === 'latest' ? '' : tag + '-'}dsh-ctx-${label}`
+}
+
+/** Variante con su contexto y, si se ajustaron, sus capas en la gráfica. */
+function variant(model, label, ctx, layers) {
+  const parameters = layers === undefined ? { num_ctx: ctx } : { num_ctx: ctx, num_gpu: layers }
+  return api('/api/create', { model: variantName(model, label), from: model, parameters, stream: false })
+}
+
+/** Descarga lo que tenga Ollama cargado (solo cuando el usuario pide optimizar). */
+async function unloadAll() {
+  for (const m of await loaded()) await api('/api/generate', { model: m.name, keep_alive: 0 }).catch(() => undefined)
+}
+
+/** Qué modelo se mide ahora, para que el botón «Optimizar» lo muestre. */
+const stateFile = job.cacheFile.replace(/\.json$/, '.estado.json')
+
 async function main() {
   if (!takeLock()) return
   try {
     const deadline = Date.now() + MAX_WAIT_MS
-    for (const { model, digest, sizes, declared } of job.models) {
+    for (const item of job.models) {
+      writeFileSync(stateFile, JSON.stringify({ model: item.model, inicio: new Date().toISOString() }))
+      // Desde el botón se mide ya; si alguien vuelve a usar Ollama, se espera.
+      let force = job.force === true
       for (;;) {
-        await waitIdle(deadline)
+        if (force) {
+          await unloadAll()
+          force = false
+        } else {
+          await waitIdle(deadline)
+        }
         try {
-          const result = await calibrate(model, sizes)
-          save(model, digest, result)
+          const result = await calibrate(item)
+          save(item.model, item.digest, result)
+          // Las capas ajustadas se aplican ya a las variantes de tamaño fijo (mismo
+          // contexto, solo cambia el reparto).
+          for (const [ctx, layers] of Object.entries(result.capas ?? {})) {
+            await variant(item.model, ctx, Number(ctx), layers).catch(() => undefined)
+          }
           // La app declaró `declared` al arrancar y resume la conversación según
           // ese valor: la variante automática solo puede crecer hasta el próximo
           // arranque (si el óptimo es menor, se aplica al volver a abrir la app).
-          if (result.optimo >= declared) {
-            const name = autoName(model)
-            await api('/api/create', { model: name, from: model, parameters: { num_ctx: result.optimo }, stream: false })
+          if (result.optimo >= item.declared) {
+            await variant(item.model, 'auto', result.optimo, result.capas?.[result.optimo])
           }
           break
         } catch (error) {
@@ -138,14 +257,9 @@ async function main() {
       }
     }
   } finally {
+    rmSync(stateFile, { force: true })
     rmSync(lockFile, { force: true })
   }
-}
-
-function autoName(name) {
-  const i = name.lastIndexOf(':')
-  const [base, tag] = i < 0 ? [name, 'latest'] : [name.slice(0, i), name.slice(i + 1)]
-  return `${base}:${tag === 'latest' ? '' : tag + '-'}dsh-ctx-auto`
 }
 
 main().catch(() => process.exit(1))

@@ -1671,7 +1671,10 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "local.context.label": "Contexto",
     "local.context.faster": "Más rápido",
     "local.context.more": "Más contexto",
-    "local.context.recommended": "Recomendado"
+    "local.context.recommended": "Recomendado",
+    "local.optimize.title": "Optimizar para este equipo: mide el contexto recomendado y cuántas capas caben en la gráfica (carga el modelo varias veces; tarda unos minutos)",
+    "local.optimize.running": "Optimizando este modelo… (en segundo plano; el nuevo recomendado se ve al volver a abrir la app)",
+    "local.optimize.other": "Se está optimizando otro modelo; espera a que termine"
   },
   "permission.access": {
     "mode": "Modo de acceso, actual: {name}",

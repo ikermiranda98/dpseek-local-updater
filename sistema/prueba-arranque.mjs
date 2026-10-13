@@ -32,6 +32,8 @@ const child = spawn(exe, [`--remote-debugging-port=${PORT}`, `--user-data-dir=${
     ...process.env,
     DSH_HOME: join(scratch, 'home'),
     DSH_DESKTOP_OPEN_DEVTOOLS: '0',
+    // Sin medición de contexto, precarga ni arranque de Ollama: es solo una comprobación.
+    DSH_LOCAL_SIN_AYUDANTES: '1',
   },
   stdio: 'ignore',
   windowsHide: true,
