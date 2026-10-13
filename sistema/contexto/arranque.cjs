@@ -221,6 +221,25 @@ async function main() {
   const display = (name) => names[name] || name
   const gpu = gpuSignature()
   const cache = readCache()
+  // Limpieza automática de variantes (interruptor del selector; activada por
+  // defecto): las de tamaño fijo no se crean aquí, se crean al usarlas
+  // (local-optimize.ts) y se borran tras 7 días sin uso. El uso lo anotan
+  // precarga.cjs y local-optimize.ts; las que nunca se han usado se borran ya
+  // (si hacen falta, se recrean al momento).
+  const readStorage = (file, fallback) => {
+    try {
+      return JSON.parse(readFileSync(join(home, 'storages', file), 'utf8'))
+    } catch {
+      return fallback
+    }
+  }
+  const cleanup = readStorage('local-ajustes.json', {}).limpiezaVariantes !== false
+  const usage = readStorage('local-variantes-uso.json', {})
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000
+  const stale = (name) => {
+    const last = Date.parse(usage[name] || '')
+    return !Number.isFinite(last) || Date.now() - last > WEEK_MS
+  }
   const result = []
   const pending = []
   const specs = {}
@@ -270,6 +289,14 @@ async function main() {
     for (const [label, ctx] of [['auto', auto], ...sizes.map((s) => [String(s), s])]) {
       const name = variantName(m.name, label)
       const gpuLayers = fresh && measured.capas ? measured.capas[ctx] : undefined
+      if (cleanup && label !== 'auto') {
+        if (!existing.has(name)) continue
+        if (stale(name)) {
+          await remove(name)
+          existing.delete(name)
+          continue
+        }
+      }
       let ready = existing.has(name)
       if (ready) {
         const current = (await api('/api/show', { model: name })).parameters || ''
@@ -329,6 +356,7 @@ async function main() {
       bases: [...bases],
       hostPid: process.ppid,
       lockFile: keepLock,
+      usageFile: join(home, 'storages', 'local-variantes-uso.json'),
       calibrationLock,
     }
     launchHelper('precarga', process.env.DSH_CTX_PRECARGA, { DSH_CTX_KEEP: JSON.stringify(keep) })

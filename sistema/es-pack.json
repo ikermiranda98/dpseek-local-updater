@@ -1669,8 +1669,16 @@
   "local.context.more": "Más contexto",
   "local.context.recommended": "Recomendado",
   "local.optimize.title": "Optimizar para este equipo: mide el contexto recomendado y cuántas capas caben en la gráfica (carga el modelo varias veces; tarda unos minutos)",
-  "local.optimize.running": "Optimizando este modelo… (en segundo plano; el nuevo recomendado se ve al volver a abrir la app)",
-  "local.optimize.other": "Se está optimizando otro modelo; espera a que termine"
+  "local.optimize.running": "Optimizando este modelo: {percent} (en segundo plano; el nuevo recomendado se ve al volver a abrir la app)",
+  "local.optimize.other": "Se está optimizando otro modelo; espera a que termine",
+  "local.optimize.done": "Optimizado: las capas nuevas ya se usan; el nuevo contexto recomendado se ve al volver a abrir la app",
+  "local.cleanup.label": "Limpieza automática de variantes",
+  "local.cleanup.hint": "Deja en Ollama solo la variante recomendada de cada modelo; los demás tamaños de contexto se crean al usarlos y se borran tras 7 días sin uso (las variantes apenas ocupan disco)",
+  "local.unused.badge": "Sin usar · {size}",
+  "local.unused.title": "Sin usar desde hace {days} días · ocupa {size}",
+  "local.delete.title": "Eliminar del disco ({size})",
+  "local.delete.confirm": "¿Borrar {size}?",
+  "local.delete.done": "Eliminado"
  },
  "permission.access": {
   "mode": "Modo de acceso, actual: {name}",

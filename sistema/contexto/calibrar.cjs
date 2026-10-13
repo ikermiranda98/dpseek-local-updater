@@ -60,6 +60,24 @@ function takeLock() {
 
 class Busy extends Error {}
 
+/**
+ * Qué modelo se mide y cuánto lleva, para el botón «Optimizar»: cada carga del
+ * modelo es un paso; el total se estima al empezar cada modelo.
+ */
+const stateFile = job.cacheFile.replace(/\.json$/, '.estado.json')
+let state = { model: '', inicio: '', hechos: 0, total: 1 }
+function writeState() {
+  try {
+    writeFileSync(stateFile, JSON.stringify(state))
+  } catch {
+    // El progreso es orientativo: si no se puede escribir, la medición sigue.
+  }
+}
+function stepDone() {
+  state.hechos = Math.min(state.hechos + 1, state.total)
+  writeState()
+}
+
 async function loaded() {
   return (await api('/api/ps')).models || []
 }
@@ -90,6 +108,7 @@ async function measure(model, ctx, layers) {
   const models = await loaded()
   const entry = models.find((m) => m.name === model)
   await api('/api/generate', { model, keep_alive: 0 }).catch(() => undefined)
+  stepDone()
   if (models.length !== 1 || entry === undefined || entry.context_length !== ctx) throw new Busy()
   return { ctx, ...(layers === undefined ? {} : { capas: layers }), size: entry.size, vram: entry.size_vram }
 }
@@ -145,6 +164,7 @@ async function speed(item, ctx, layers) {
   const models = await loaded()
   const entry = models.find((m) => m.name === item.model)
   await api('/api/generate', { model: item.model, keep_alive: 0 }).catch(() => undefined)
+  stepDone()
   if (models.length !== 1 || entry === undefined || entry.context_length !== ctx) throw new Busy()
   const tps = result.eval_count > 0 && result.eval_duration > 0 ? result.eval_count / (result.eval_duration / 1e9) : 0
   return {
@@ -162,6 +182,11 @@ async function calibrate(item) {
   const tuning = dense && Number.isInteger(layers) && layers > 0 && Number.isFinite(job.vramLimit)
   const capas = {}
   const medidas = []
+  // Pasos por tamaño: denso = reparto de Ollama + bisección de capas + velocidad;
+  // los demás, solo la velocidad.
+  state.total = sizes.length * (tuning ? 2 + Math.ceil(Math.log2(layers + 1)) : 1)
+  state.hechos = 0
+  writeState()
   for (const ctx of sizes) {
     let gpuLayers
     if (tuning) {
@@ -217,15 +242,14 @@ async function unloadAll() {
   for (const m of await loaded()) await api('/api/generate', { model: m.name, keep_alive: 0 }).catch(() => undefined)
 }
 
-/** Qué modelo se mide ahora, para que el botón «Optimizar» lo muestre. */
-const stateFile = job.cacheFile.replace(/\.json$/, '.estado.json')
 
 async function main() {
   if (!takeLock()) return
   try {
     const deadline = Date.now() + MAX_WAIT_MS
     for (const item of job.models) {
-      writeFileSync(stateFile, JSON.stringify({ model: item.model, inicio: new Date().toISOString() }))
+      state = { model: item.model, inicio: new Date().toISOString(), hechos: 0, total: 1 }
+      writeState()
       // Desde el botón se mide ya; si alguien vuelve a usar Ollama, se espera.
       let force = job.force === true
       for (;;) {
@@ -238,10 +262,14 @@ async function main() {
         try {
           const result = await calibrate(item)
           save(item.model, item.digest, result)
-          // Las capas ajustadas se aplican ya a las variantes de tamaño fijo (mismo
-          // contexto, solo cambia el reparto).
+          state.hechos = state.total
+          writeState()
+          // Las capas ajustadas se aplican ya a las variantes de tamaño fijo que
+          // existan (mismo contexto, solo cambia el reparto). Las que no existen no
+          // se crean: con la limpieza automática se crean al usarlas, ya con estas capas.
           for (const [ctx, layers] of Object.entries(result.capas ?? {})) {
-            await variant(item.model, ctx, Number(ctx), layers).catch(() => undefined)
+            const exists = await api('/api/show', { model: variantName(item.model, ctx) }).then(() => true, () => false)
+            if (exists) await variant(item.model, ctx, Number(ctx), layers).catch(() => undefined)
           }
           // La app declaró `declared` al arrancar y resume la conversación según
           // ese valor: la variante automática solo puede crecer hasta el próximo

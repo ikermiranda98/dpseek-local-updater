@@ -691,7 +691,8 @@ optional('barra de contexto en el selector de modelo', (tx) => {
   const locales = join(dir, 'locales.ts')
   // Si DeepSeek añade su propio control de contexto, se usa el suyo.
   if (officialKeys(locales).some((key) => /context/i.test(key))
-    || sourceMatches(join(repo, 'packages'), /\bnum_ctx\b/, ['ContextSlider.tsx', 'local-ollama.ts'])) {
+    || sourceMatches(join(repo, 'packages'), /\bnum_ctx\b/,
+      ['ContextSlider.tsx', 'local-ollama.ts', 'local-optimize.ts', 'LocalOptimizeButton.tsx'])) {
     official('un control del contexto')
   }
   tx.copy(join(here, 'contexto', 'ContextSlider.tsx'), join(dir, 'ContextSlider.tsx'))
@@ -973,24 +974,29 @@ optional('no volver a ofrecer una versión retirada', (tx) => {
       + '      this.candidate = result.isUpdateAvailable && gt(version, this.currentVersion()) && !localSkippedVersion(version) ? version : undefined')
 })
 
-// ── 14. Botón «Optimizar» junto a cada modelo ─────────────────────────────────
-// Vuelve a medir el modelo en este equipo (contexto recomendado y capas en la
-// gráfica) con el medidor de sistema/contexto/calibrar.cjs, en segundo plano.
-// Host: session.optimizeLocalModel y session.localOptimizeStatus
-// (sistema/contexto/local-optimize.ts). Interfaz: LocalOptimizeButton.tsx.
+// ── 14. Herramientas de modelos en el selector ────────────────────────────────
+// Junto a cada modelo de la lista: «Optimizar» (vuelve a medirlo en este equipo
+// con sistema/contexto/calibrar.cjs, con un anillo de progreso) y, si lleva 30
+// días sin usarse, lo que ocupa y un botón para borrarlo del disco. En el menú, el
+// interruptor «Limpieza automática de variantes»: en Ollama solo queda la variante
+// recomendada; las demás se crean al usarlas (antes de cada mensaje) y se borran
+// tras 7 días sin uso. Host: sistema/contexto/local-optimize.ts. Interfaz:
+// LocalOptimizeButton.tsx.
 
-optional('botón «Optimizar» junto a cada modelo del selector', (tx) => {
-  const select = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client', 'ModelSelect.tsx')
-  const selectionIndex = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client', 'index.ts')
-  const selectionLocales = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client', 'locales.ts')
+optional('herramientas de modelos en el selector (optimizar, limpieza y modelos sin usar)', (tx) => {
+  const selectionDir = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client')
+  const select = join(selectionDir, 'ModelSelect.tsx')
+  const selectionIndex = join(selectionDir, 'index.ts')
+  const selectionLocales = join(selectionDir, 'locales.ts')
   const hostIndex = join(hostDir, 'index.ts')
   const hostTypes = join(hostDir, 'types.ts')
-  // Si DeepSeek añade su propia optimización de modelos, se usa la suya.
-  if (officialKeys(selectionLocales).some((key) => /optimi[sz]e|tune|benchmark/i.test(key))) {
-    official('la optimización de modelos')
+  const commands = join(hostDir, 'commands.ts')
+  // Si DeepSeek añade su propia gestión de modelos, se usa la suya.
+  if (officialKeys(selectionLocales).some((key) => /optimi[sz]e|tune|benchmark|cleanup|unused/i.test(key))) {
+    official('la gestión de modelos en el selector')
   }
 
-  // Host.
+  // Host: llamadas remotas.
   tx.copy(join(here, 'contexto', 'local-optimize.ts'), join(hostDir, 'local-optimize.ts'))
   tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-optimize.ts')
   let types = tx.read(hostTypes)
@@ -1007,23 +1013,64 @@ optional('botón «Optimizar» junto a cada modelo del selector', (tx) => {
       '  readonly running: string | null',
       '}',
       '',
-      '/** Local build: measurement status request (no fields are required). */',
-      'export interface SessionOptimizeStatusRequest {',
+      '/** Local build: request without required fields. */',
+      'export interface SessionLocalEmptyRequest {',
       '  readonly model?: string',
       '}',
       '',
-      '/** Local build: model being measured, empty when unknown, null when idle. */',
+      '/** Local build: measurement in progress (model, progress 0-1) and whether variant cleanup is on. */',
       'export interface SessionOptimizeStatusValue {',
       '  readonly running: string | null',
+      '  readonly progress: number | null',
+      '  readonly cleanup: boolean',
+      '}',
+      '',
+      '/** Local build: turn automatic variant cleanup on or off. */',
+      'export interface SessionLocalCleanupRequest {',
+      '  readonly enabled: boolean',
+      '}',
+      '',
+      '/** Local build: whether automatic variant cleanup is on. */',
+      'export interface SessionLocalCleanupValue {',
+      '  readonly cleanup: boolean',
+      '}',
+      '',
+      '/** Local build: one Ollama model with its size and idle time. */',
+      'export interface SessionLocalModelInfo {',
+      '  readonly id: string',
+      '  readonly sizeBytes: number',
+      '  readonly lastUsed: string | null',
+      '  readonly idleDays: number',
+      '  readonly unused: boolean',
+      '}',
+      '',
+      '/** Local build: Ollama models with their size and idle time. */',
+      'export interface SessionLocalModelsValue {',
+      '  readonly models: readonly SessionLocalModelInfo[]',
+      '}',
+      '',
+      '/** Local build: delete one Ollama model (and its context variants) from disk. */',
+      'export interface SessionLocalDeleteModelRequest {',
+      '  readonly model: string',
+      '}',
+      '',
+      '/** Local build: names removed from Ollama. */',
+      'export interface SessionLocalDeleteModelValue {',
+      '  readonly deleted: readonly string[]',
       '}',
     ].join('\n')
     tx.write(hostTypes, types)
   }
   tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n", [
     "import { ApiSessionList } from './list.ts'",
-    "import { localOptimizeModel as runLocalOptimize, localOptimizeStatus as readLocalOptimizeStatus } from './local-optimize.ts'",
+    'import {',
+    '  localDeleteModel, localModelsInfo, localOptimizeModel as runLocalOptimize,',
+    '  localOptimizeStatus as readLocalOptimizeStatus, localSetCleanup,',
+    "} from './local-optimize.ts'",
     'import type {',
-    '  SessionOptimizeModelRequest, SessionOptimizeModelValue, SessionOptimizeStatusRequest, SessionOptimizeStatusValue,',
+    '  SessionLocalCleanupRequest, SessionLocalCleanupValue, SessionLocalDeleteModelRequest,',
+    '  SessionLocalDeleteModelValue, SessionLocalEmptyRequest, SessionLocalModelsValue,',
+    '  SessionOptimizeModelRequest, SessionOptimizeModelValue, SessionOptimizeStatusValue,',
     "} from './types.ts'",
     '',
   ].join('\n'), "from './local-optimize.ts'")
@@ -1045,56 +1092,99 @@ optional('botón «Optimizar» junto a cada modelo del selector', (tx) => {
       '  }',
       '',
       '  /**',
-      '   * Local build: model being re-measured, if any.',
+      '   * Local build: model being re-measured, progress and variant-cleanup setting.',
       '   * @param _request - no fields are required.',
-      '   * @returns the model being measured, or null.',
+      '   * @returns the current state.',
       '   */',
       "  @Remote('localOptimizeStatus')",
-      '  async localOptimizeStatus(_request: SessionOptimizeStatusRequest): Promise<SessionOptimizeStatusValue> {',
+      '  async localOptimizeStatus(_request: SessionLocalEmptyRequest): Promise<SessionOptimizeStatusValue> {',
       '    return readLocalOptimizeStatus()',
+      '  }',
+      '',
+      '  /**',
+      '   * Local build: turn automatic cleanup of unused context variants on or off.',
+      '   * @param request - the new setting.',
+      '   * @returns the stored setting.',
+      '   */',
+      "  @Remote('localSetCleanup')",
+      '  async localSetCleanup(request: SessionLocalCleanupRequest): Promise<SessionLocalCleanupValue> {',
+      '    return localSetCleanup(request.enabled)',
+      '  }',
+      '',
+      '  /**',
+      '   * Local build: Ollama models with their size and idle time.',
+      '   * @param _request - no fields are required.',
+      '   * @returns one row per Ollama model (without context variants).',
+      '   */',
+      "  @Remote('localModelsInfo')",
+      '  async localModelsInfo(_request: SessionLocalEmptyRequest): Promise<SessionLocalModelsValue> {',
+      '    return localModelsInfo()',
+      '  }',
+      '',
+      '  /**',
+      '   * Local build: delete one Ollama model and its context variants from disk.',
+      '   * @param request - model id or one of its context variants.',
+      '   * @returns the names removed from Ollama.',
+      '   */',
+      "  @Remote('localDeleteModel')",
+      '  async localDeleteModel(request: SessionLocalDeleteModelRequest): Promise<SessionLocalDeleteModelValue> {',
+      '    return localDeleteModel(request.model)',
       '  }',
       '',
       '',
     ].join('\n') + host.slice(doc)
     tx.write(hostIndex, host)
   }
+  // Antes de cada mensaje: la variante del chat tiene que existir en Ollama (con
+  // la limpieza activada, las que no se usan se borran).
+  tx.replace(commands, "} from './agent.ts'\n", "} from './agent.ts'\nimport { ensureLocalVariant } from './local-optimize.ts'\n",
+    "import { ensureLocalVariant }")
+  tx.replace(commands,
+    '    const agent = await this.resolveAgent(request.sessionId)\n    if (hasPromptRequest(agent, request.requestId)) return { accepted: true }\n',
+    '    const agent = await this.resolveAgent(request.sessionId)\n    if (hasPromptRequest(agent, request.requestId)) return { accepted: true }\n'
+      + '    // Local build: recreate the context variant if automatic cleanup removed it.\n'
+      + '    await ensureLocalVariant(this.agents.selectionFor(agent).current).catch(() => undefined)\n',
+    'await ensureLocalVariant(')
 
-  // Interfaz: el botón junto a cada fila de la lista de modelos.
-  const dir = dirname(select)
-  tx.copy(join(here, 'contexto', 'LocalOptimizeButton.tsx'), join(dir, 'LocalOptimizeButton.tsx'))
-  tx.copy(join(here, 'contexto', 'LocalOptimizeButton.module.css'), join(dir, 'LocalOptimizeButton.module.css'))
+  // Interfaz.
+  tx.copy(join(here, 'contexto', 'LocalOptimizeButton.tsx'), join(selectionDir, 'LocalOptimizeButton.tsx'))
+  tx.copy(join(here, 'contexto', 'LocalOptimizeButton.module.css'), join(selectionDir, 'LocalOptimizeButton.module.css'))
   tx.replace(select, "import css from './ModelSelect.module.css'\n",
     "import css from './ModelSelect.module.css'\n"
-      + "import { LocalOptimizeButton } from './LocalOptimizeButton.tsx'\n"
+      + "import { LocalCleanupSwitch, LocalModelExtras } from './LocalOptimizeButton.tsx'\n"
       + "import localOptimizeCss from './LocalOptimizeButton.module.css'\n",
     "from './LocalOptimizeButton.tsx'")
   let text = tx.read(select)
-  if (!text.includes('<LocalOptimizeButton')) {
+  if (!text.includes('<LocalModelExtras')) {
     const open = /return \(\n(\s*)<button\n(\s*)ref=\{itemRef\(\)\}\n\s*type="button"\n\s*role="menuitemradio"\n/
     const close = /(<\/button>\n)(\s*)\)\n(\s*)\}\)\}/
     if (!open.test(text) || !close.test(text)) skip(`no se encuentran las filas de la lista de modelos en ${rel(select)}`)
     text = text.replace(open, (all, pad, inner) => `return (\n${pad}<div className={localOptimizeCss.row} key={model.id}>\n${pad}<button\n${inner}ref={itemRef()}\n${inner}type="button"\n${inner}role="menuitemradio"\n`)
-    text = text.replace(close, (all, end, pad, pad2) => `${end}${pad}  {/* Local build: «Optimizar» (LocalOptimizeButton.tsx). */}\n${pad}  <LocalOptimizeButton model={model.id} t={t} />\n${pad}</div>\n${pad})\n${pad2}})}`)
-    tx.write(select, text)
+    text = text.replace(close, (all, end, pad, pad2) => `${end}${pad}  {/* Local build: model tools (LocalOptimizeButton.tsx). */}\n${pad}  <LocalModelExtras model={model.id} t={t} />\n${pad}</div>\n${pad})\n${pad2}})}`)
   }
+  if (!text.includes('<LocalCleanupSwitch')) {
+    const effort = /^(\s*)\{reasoning !== undefined && \(\n/m
+    if (!effort.test(text)) skip(`no se encuentra la fila de razonamiento del menú en ${rel(select)}`)
+    text = text.replace(effort, (row, pad) => `${pad}{/* Local build: automatic variant cleanup switch. */}\n${pad}<LocalCleanupSwitch t={t} />\n${row}`)
+  }
+  tx.write(select, text)
   tx.replace(selectionIndex, 'ctx.plugin(ModelDirectoryResolver)\n', [
     'ctx.plugin(ModelDirectoryResolver)',
-    '  // Local build: «Optimizar» button next to each model (LocalOptimizeButton.tsx).',
+    '  // Local build: model tools in the selector (LocalOptimizeButton.tsx).',
     '  ctx.effect(() => {',
+    '    const unwrap = <T>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {',
+    '      if (!result.ok) throw new Error(result.error.message)',
+    '      return result.value',
+    '    }',
     '    setLocalOptimizer({',
-    '      optimize: async (model) => {',
-    '        const result = await ctx.remote.session.optimizeLocalModel({ model })',
-    '        if (!result.ok) throw new Error(result.error.message)',
-    '        return result.value',
-    '      },',
-    '      status: async () => {',
-    '        const result = await ctx.remote.session.localOptimizeStatus({})',
-    '        if (!result.ok) throw new Error(result.error.message)',
-    '        return result.value',
-    '      },',
+    '      optimize: async model => unwrap(await ctx.remote.session.optimizeLocalModel({ model })),',
+    '      status: async () => unwrap(await ctx.remote.session.localOptimizeStatus({})),',
+    '      setCleanup: async enabled => unwrap(await ctx.remote.session.localSetCleanup({ enabled })),',
+    '      models: async () => unwrap(await ctx.remote.session.localModelsInfo({})),',
+    '      deleteModel: async model => unwrap(await ctx.remote.session.localDeleteModel({ model })),',
     '    })',
     '    return () => { setLocalOptimizer(undefined) }',
-    "  }, 'ui-model-selection: local optimizer')",
+    "  }, 'ui-model-selection: local model tools')",
     '',
   ].join('\n'), 'setLocalOptimizer({')
   tx.replace(selectionIndex, "import { ModelSelect } from './ModelSelect.tsx'\n",
@@ -1102,12 +1192,28 @@ optional('botón «Optimizar» junto a cada modelo del selector', (tx) => {
     "import { setLocalOptimizer }")
   addLocaleKeys(tx, selectionLocales, 'ModelKey', {
     'local.optimize.title': '针对本机优化：测量推荐上下文和可放入显卡的层数（会多次加载模型，约需几分钟）',
-    'local.optimize.running': '正在优化此模型…（后台进行；重新打开应用后可看到新的推荐值）',
+    'local.optimize.running': '正在优化此模型：{percent}（后台进行；重新打开应用后可看到新的推荐值）',
+    'local.optimize.done': '已优化：新的层数已生效；重新打开应用后可看到新的推荐上下文',
     'local.optimize.other': '正在优化另一个模型，请稍候',
+    'local.cleanup.label': '自动清理模型变体',
+    'local.cleanup.hint': '在 Ollama 中只保留每个模型的推荐变体；其他上下文大小在使用时创建，7 天未使用后删除（变体几乎不占磁盘空间）',
+    'local.unused.badge': '未使用 · {size}',
+    'local.unused.title': '已 {days} 天未使用，占用 {size}',
+    'local.delete.title': '从磁盘删除（{size}）',
+    'local.delete.confirm': '删除 {size}？',
+    'local.delete.done': '已删除',
   }, {
     'local.optimize.title': 'Optimize for this computer: measures the recommended context and how many layers fit on the GPU (loads the model several times, takes a few minutes)',
-    'local.optimize.running': 'Optimizing this model… (in the background; reopen the app to see the new recommended value)',
+    'local.optimize.running': 'Optimizing this model: {percent} (in the background; reopen the app to see the new recommended value)',
+    'local.optimize.done': 'Optimized: the new GPU layers are already in use; reopen the app to see the new recommended context',
     'local.optimize.other': 'Another model is being optimized; please wait',
+    'local.cleanup.label': 'Automatic variant cleanup',
+    'local.cleanup.hint': 'Keeps only the recommended variant of each model in Ollama; other context sizes are created when used and deleted after 7 days without use (variants take almost no disk space)',
+    'local.unused.badge': 'Unused · {size}',
+    'local.unused.title': 'Unused for {days} days · takes {size}',
+    'local.delete.title': 'Delete from disk ({size})',
+    'local.delete.confirm': 'Delete {size}?',
+    'local.delete.done': 'Deleted',
   })
 })
 

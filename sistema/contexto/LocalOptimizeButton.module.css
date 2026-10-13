@@ -42,3 +42,112 @@
 .optimize[data-error] {
   color: var(--dsw-alias-state-error-primary);
 }
+
+/* Anillo de progreso: pista tenue y arco que se completa desde arriba. */
+.optimize {
+  position: relative;
+}
+
+.ring {
+  position: absolute;
+  inset: 3px;
+  width: 22px;
+  height: 22px;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+
+.ringTrack {
+  fill: none;
+  stroke: var(--dsw-alias-label-tertiary);
+  stroke-width: 2;
+  opacity: 0.25;
+}
+
+.ringFill {
+  fill: none;
+  stroke: var(--dsw-alias-state-business-primary);
+  stroke-width: 2;
+  stroke-linecap: round;
+  transition: stroke-dasharray 600ms ease;
+}
+
+/* Marca de modelo sin usar y botón de borrar (dos clics). */
+.badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.deleteArmed {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-interactive-bg-hover-danger);
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Fila del interruptor de limpieza, con el aspecto de las filas del menú. */
+.cleanupRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+  padding: 0 8px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.cleanupLabel {
+  white-space: nowrap;
+}
+
+.switch {
+  position: relative;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  background: var(--dsw-alias-interactive-bg-hover);
+  cursor: pointer;
+  transition: background 140ms ease;
+}
+
+.switch[data-on] {
+  background: var(--dsw-alias-state-business-primary);
+}
+
+.switch:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+}
+
+.switchKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-primary);
+  transition: left 140ms ease;
+}
+
+.switch[data-on] .switchKnob {
+  left: 16px;
+  background: #fff;
+}

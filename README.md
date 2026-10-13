@@ -109,8 +109,8 @@ Cómo funciona:
 
 - Ollama no acepta que se le pida el contexto por la API que usa la app, así que
   cada tamaño es una **variante del modelo** con el contexto fijado
-  (`modelo:dsh-ctx-131072`, `modelo:dsh-ctx-auto`…). Se crean solas al abrir la
-  app, **no ocupan disco** (comparten los ficheros del modelo) y no aparecen en el
+  (`modelo:dsh-ctx-131072`, `modelo:dsh-ctx-auto`…). Las crea la app (ver
+  «Limpieza automática de variantes» más abajo), **apenas ocupan disco** (comparten los ficheros del modelo) y no aparecen en el
   selector como modelos aparte (la barra elige entre ellas), aunque sí en
   `ollama list`. `OLLAMA_CONTEXT_LENGTH` deja de importar.
 - **Recomendado** (variante `dsh-ctx-auto`): la primera vez que la app ve un
@@ -133,7 +133,9 @@ Cómo funciona:
 - **Botón «Optimizar»** (el icono de velocímetro junto a cada modelo de la lista
   del selector): vuelve a medir ese modelo ahora, en segundo plano (carga el
   modelo varias veces; unos minutos). Si había un modelo cargado, lo descarga
-  primero. Úsalo tras cambiar de gráfica, de versión de Ollama o de ajustes de
+  primero. Mientras mide, un anillo alrededor del icono se va completando con el
+  progreso (pasa el ratón por encima para ver el porcentaje); al dar la vuelta
+  entera aparece una marca ✓. Úsalo tras cambiar de gráfica, de versión de Ollama o de ajustes de
   Ollama; el nuevo recomendado se ve al volver a abrir la app (las capas se
   aplican al momento).
 - **Compresión del contexto de Ollama** (`OLLAMA_FLASH_ATTENTION=1` y
@@ -154,6 +156,18 @@ Cómo funciona:
   cargado) y, mientras la app sigue abierta, se mantiene cargado el que estés
   usando; al cerrarla se descarga y se libera la memoria. Se aparta mientras se
   mide el contexto.
+- **Limpieza automática de variantes** (interruptor al final del menú del
+  selector; activado por defecto): solo se guarda en Ollama la variante
+  recomendada (`dsh-ctx-auto`). Las demás se crean al enviar el primer mensaje con
+  ese tamaño (unos segundos) y se borran al abrir la app si llevan **7 días** sin
+  usarse. Así puedes mover la barra cuando quieras sin que `ollama list` se llene
+  de variantes. Desactivado, se crean todas al abrir la app y no se borra ninguna.
+- **Modelos sin usar**: un modelo que no usas desde hace **30 días** (o desde que
+  lo descargaste, si nunca lo has usado) aparece en la lista del selector con la
+  marca «Sin usar · X GB» y una papelera. El primer clic pide confirmación
+  («¿Borrar X GB?», 4 segundos); el segundo lo borra del disco con todas sus
+  variantes. Es lo único de la app que borra un modelo descargado, y siempre a
+  mano.
 - **Limpieza**: si borras un modelo con `ollama rm`, la app borra sus variantes al
   abrirse (si no, seguirían ocupando su espacio en disco). También las de tamaños
   que quites de `contexto.tamanos`. Solo toca nombres `dsh-ctx-`, nunca un modelo

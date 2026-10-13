@@ -62,6 +62,14 @@ function launch(file: string, args: readonly string[], env: NodeJS.ProcessEnv): 
   child.unref()
 }
 
+/** Estado de la medición: qué modelo se mide (null si ninguno) y cuánto lleva (0 a 1). */
+export interface LocalOptimizeStatus {
+  readonly running: string | null
+  readonly progress: number | null
+  /** Si la limpieza automática de variantes está activada. */
+  readonly cleanup: boolean
+}
+
 /** Resultado del botón: si ha empezado y qué modelo se está midiendo. */
 export interface LocalOptimizeResult {
   readonly started: boolean
@@ -70,21 +78,32 @@ export interface LocalOptimizeResult {
 
 /**
  * Qué modelo se está midiendo ahora (cadena vacía si se mide pero no se sabe
- * cuál; null si no se mide nada).
+ * cuál; null si no se mide nada) y qué parte lleva hecha.
  */
-export function localOptimizeStatus(): { readonly running: string | null } {
+export function localOptimizeStatus(): LocalOptimizeStatus {
+  return { ...measureStatus(), cleanup: localCleanupEnabled() }
+}
+
+function measureStatus(): Omit<LocalOptimizeStatus, 'cleanup'> {
   const dir = storages()
   try {
     const pid = Number(readFileSync(join(dir, 'local-contexto.lock'), 'utf8').trim().split(':')[0])
-    if (!alive(pid)) return { running: null }
+    if (!alive(pid)) return { running: null, progress: null }
   } catch {
-    return { running: null }
+    return { running: null, progress: null }
   }
   try {
-    const state = JSON.parse(readFileSync(join(dir, 'local-contexto.estado.json'), 'utf8')) as { model?: unknown }
-    return { running: typeof state.model === 'string' ? state.model : '' }
+    const state = JSON.parse(readFileSync(join(dir, 'local-contexto.estado.json'), 'utf8')) as {
+      model?: unknown, hechos?: unknown, total?: unknown
+    }
+    const done = Number(state.hechos)
+    const total = Number(state.total)
+    return {
+      running: typeof state.model === 'string' ? state.model : '',
+      progress: total > 0 && done >= 0 ? Math.min(1, done / total) : null,
+    }
   } catch {
-    return { running: '' }
+    return { running: '', progress: null }
   }
 }
 
@@ -121,4 +140,145 @@ export function localOptimizeModel(modelId: string): LocalOptimizeResult {
     ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_CTX_JOB: JSON.stringify(job),
   })
   return { started: true, running: model }
+}
+
+// ── Limpieza de variantes y modelos sin usar ──────────────────────────────────
+// Con la limpieza activada (local-ajustes.json → limpiezaVariantes, activada por
+// defecto), en Ollama solo queda la variante recomendada de cada modelo: las de
+// otros tamaños se crean aquí justo antes de usarlas y arranque.cjs las borra tras
+// 7 días sin uso. precarga.cjs anota cada minuto qué variantes están en uso
+// (local-variantes-uso.json); con eso se sabe también qué modelos llevan 30 días
+// sin usarse, para ofrecer borrarlos del disco.
+
+const UNUSED_DAYS = 30
+const DAY_MS = 24 * 60 * 60 * 1000
+
+function readJson<T>(file: string, fallback: T): T {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as T
+  } catch {
+    return fallback
+  }
+}
+
+function readSpec(): OptimizeSpec | undefined {
+  return readJson<OptimizeSpec | undefined>(join(storages(), 'local-optimizar.json'), undefined)
+}
+
+function ollamaUrl(): string {
+  const url = readSpec()?.job.ollama
+  return typeof url === 'string' ? url : 'http://127.0.0.1:11434'
+}
+
+async function ollama(path: string, body?: unknown, method = body === undefined ? 'GET' : 'POST'): Promise<Response> {
+  return fetch(ollamaUrl() + path, {
+    method,
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    signal: AbortSignal.timeout(15_000),
+  })
+}
+
+/** Si la limpieza automática de variantes está activada (lo está por defecto). */
+export function localCleanupEnabled(): boolean {
+  return readJson<{ limpiezaVariantes?: unknown }>(join(storages(), 'local-ajustes.json'), {}).limpiezaVariantes !== false
+}
+
+/** Activa o desactiva la limpieza automática de variantes. */
+export function localSetCleanup(enabled: boolean): { readonly cleanup: boolean } {
+  const file = join(storages(), 'local-ajustes.json')
+  writeFileSync(file, JSON.stringify({ ...readJson<Record<string, unknown>>(file, {}), limpiezaVariantes: enabled }, null, 1))
+  return { cleanup: enabled }
+}
+
+function recordUse(name: string): void {
+  const file = join(storages(), 'local-variantes-uso.json')
+  try {
+    writeFileSync(file, JSON.stringify({ ...readJson<Record<string, string>>(file, {}), [name]: new Date().toISOString() }))
+  } catch {
+    // Solo sirve para la limpieza: si no se puede anotar, se sigue.
+  }
+}
+
+/**
+ * Crea la variante de contexto de una selección si falta (con la limpieza
+ * activada, las que no se usan se borran). Se llama antes de cada mensaje.
+ */
+export async function ensureLocalVariant(selection: { readonly provider: string; readonly model: string }): Promise<void> {
+  if (selection.provider !== 'ollama') return
+  const match = /^(.*):(?:(.+)-)?dsh-ctx-(auto|\d+)$/.exec(selection.model)
+  if (match === null) return
+  recordUse(selection.model)
+  const shown = await ollama('/api/show', { model: selection.model })
+  if (shown.ok) return
+  const base = `${match[1] ?? ''}:${match[2] ?? 'latest'}`
+  const spec = readSpec()
+  const cache = spec === undefined ? {} : readJson<Record<string, { optimo?: number, capas?: Record<string, number> }>>(spec.job.cacheFile, {})
+  const declared = Number(spec?.models[base]?.declared)
+  const ctx = match[3] === 'auto' ? (cache[base]?.optimo ?? (declared > 0 ? declared : 65536)) : Number(match[3])
+  const layers = cache[base]?.capas?.[String(ctx)]
+  const parameters = layers === undefined ? { num_ctx: ctx } : { num_ctx: ctx, num_gpu: layers }
+  await ollama('/api/create', { model: selection.model, from: base, parameters, stream: false })
+}
+
+/** Un modelo de Ollama visto desde el selector: lo que ocupa y si lleva tiempo sin usarse. */
+export interface LocalModelInfo {
+  readonly id: string
+  readonly sizeBytes: number
+  readonly lastUsed: string | null
+  readonly idleDays: number
+  readonly unused: boolean
+}
+
+/** Modelos de Ollama (sin variantes) con su tamaño y su último uso. */
+export async function localModelsInfo(): Promise<{ readonly models: readonly LocalModelInfo[] }> {
+  const response = await ollama('/api/tags')
+  if (!response.ok) return { models: [] }
+  const tags = ((await response.json()) as { models?: { name: string, size: number, modified_at: string }[] }).models ?? []
+  const usage = readJson<Record<string, string>>(join(storages(), 'local-variantes-uso.json'), {})
+  const now = Date.now()
+  return {
+    models: tags.filter(tag => !VARIANT.test(tag.name)).map((tag) => {
+      const uses = Object.entries(usage)
+        .filter(([name]) => name === tag.name || baseModel(name) === tag.name)
+        .map(([, date]) => Date.parse(date))
+        .filter(Number.isFinite)
+      const lastUse = uses.length === 0 ? undefined : Math.max(...uses)
+      // Sin usos anotados, cuenta desde que se descargó.
+      const since = lastUse ?? Date.parse(tag.modified_at)
+      const idleDays = Number.isFinite(since) ? Math.floor((now - since) / DAY_MS) : 0
+      return {
+        id: tag.name,
+        sizeBytes: tag.size,
+        lastUsed: lastUse === undefined ? null : new Date(lastUse).toISOString(),
+        idleDays,
+        unused: idleDays >= UNUSED_DAYS,
+      }
+    }),
+  }
+}
+
+/** Borra del disco un modelo de Ollama y todas sus variantes de la app. */
+export async function localDeleteModel(modelId: string): Promise<{ readonly deleted: readonly string[] }> {
+  const base = baseModel(modelId)
+  const response = await ollama('/api/tags')
+  if (!response.ok) throw new RemoteError('gateway/internal', 'Ollama no responde; no se ha borrado nada.', {})
+  const tags = ((await response.json()) as { models?: { name: string }[] }).models ?? []
+  const names = tags.map(tag => tag.name).filter(name => name === base || (VARIANT.test(name) && baseModel(name) === base))
+  if (!names.includes(base)) throw new RemoteError('gateway/internal', `Ollama no tiene el modelo ${base}.`, {})
+  const deleted: string[] = []
+  // Primero las variantes y al final el modelo, que es el que libera el disco.
+  for (const name of [...names.filter(name => name !== base), base]) {
+    const result = await ollama('/api/delete', { model: name }, 'DELETE')
+    if (result.ok) deleted.push(name)
+  }
+  if (!deleted.includes(base)) throw new RemoteError('gateway/internal', `Ollama no ha podido borrar ${base}.`, {})
+  const spec = readSpec()
+  if (spec !== undefined) {
+    const cache = readJson<Record<string, unknown>>(spec.job.cacheFile, {})
+    if (base in cache) {
+      const { [base]: _old, ...rest } = cache
+      writeFileSync(spec.job.cacheFile, JSON.stringify(rest, null, 2))
+    }
+  }
+  return { deleted }
 }

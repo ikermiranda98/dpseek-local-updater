@@ -48,6 +48,27 @@ const mine = () => {
 const ours = (name) => /(:|-)dsh-ctx-(auto|\d+)$/.test(name) || job.bases.includes(name)
 const loaded = async () => (await api('/api/ps')).models || []
 
+/**
+ * Anota qué variantes y modelos están cargados: con eso la limpieza borra las
+ * variantes sin uso en 7 días y el selector marca los modelos sin uso en 30.
+ */
+function recordUse(models) {
+  if (!job.usageFile || models.length === 0) return
+  let usage = {}
+  try {
+    usage = JSON.parse(readFileSync(job.usageFile, 'utf8'))
+  } catch {
+    // Primer uso anotado.
+  }
+  const now = new Date().toISOString()
+  for (const m of models) usage[m.name] = now
+  try {
+    writeFileSync(job.usageFile, JSON.stringify(usage))
+  } catch {
+    // Solo sirve para la limpieza: si no se puede anotar, se sigue.
+  }
+}
+
 async function main() {
   // La copia más reciente de la app manda: la anterior lo verá y se retirará
   // sin descargar nada.
@@ -66,6 +87,7 @@ async function main() {
     if (!existsSync(job.calibrationLock)) {
       try {
         const models = await loaded()
+        recordUse(models.filter((m) => ours(m.name)))
         // Nada cargado (al abrir la app o tras una medición): se carga el modelo por defecto.
         if (models.length === 0) await api('/api/generate', { model: job.model, keep_alive: KEEP })
         for (const m of models) {
