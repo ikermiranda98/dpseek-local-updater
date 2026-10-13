@@ -151,6 +151,20 @@ jobs:
             Start-Sleep -Seconds 20
           }
 
+      - name: Probar que la app arranca
+        # Abre la app recién compilada con datos temporales y espera a que cargue la
+        # interfaz: si no arranca, no se publica (y nadie la recibe como
+        # actualización). De paso cuenta los textos que faltan por traducir.
+        run: |
+          $unpacked = "$env:CODIGO/apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts/win-unpacked"
+          $app = Get-ChildItem $unpacked -Filter '*.exe' | Where-Object { $_.Name -notmatch 'uninstall|elevate' } | Select-Object -First 1
+          if (-not $app) { Get-ChildItem $unpacked; throw 'No se encuentra el ejecutable de la app' }
+          node sistema/prueba-arranque.mjs $app.FullName "$env:RUNNER_TEMP/traducciones.md"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if (Test-Path "$env:RUNNER_TEMP/traducciones.md") {
+            Get-Content "$env:RUNNER_TEMP/traducciones.md" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          }
+
       - name: Publicar el Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -173,16 +187,22 @@ jobs:
           (Get-Content $feed -Raw).Replace($exe.Name, "$nombre.exe") | Set-Content $feed -NoNewline -Encoding utf8NoBOM
           Get-Content $feed
 
-          $files = @($nuevoExe, "$nuevoExe.blockmap", $feed) | Where-Object { Test-Path $_ }
+          # Con cada Release va el script para volver a una versión anterior.
+          $volver = Join-Path $dir 'volver-a-version-anterior.ps1'
+          Copy-Item sistema/volver-a-version-anterior.ps1 $volver
+          $files = @($nuevoExe, "$nuevoExe.blockmap", $feed, $volver) | Where-Object { Test-Path $_ }
           $notes = @"
           Instalador de DeepSeek Harness **$env:VERSION** con los cambios locales:
-          Ollama como proveedor, sin modelos online ni inicio de sesión de DeepSeek, sin telemetría, interfaz en español, eliminar chats (uno o varios a la vez), barra de contexto en el selector de cada chat (con el recomendado medido para tu equipo) y el modelo listo mientras la app está abierta.
+          Ollama como proveedor, sin modelos online ni inicio de sesión de DeepSeek, sin telemetría, interfaz en español, eliminar chats (uno o varios a la vez), barra de contexto en el selector de cada chat (con el recomendado medido para tu equipo), el modelo listo mientras la app está abierta, nombres cortos de los modelos y aviso de Windows al terminar una respuesta.
 
           - Versión oficial: [$env:ETIQUETA](https://github.com/deepseek-ai/deepseek-harness/releases/tag/$env:ETIQUETA)
           - Versión interna de la app: ``$env:BUILD``
           - Si ya tienes la app instalada, se actualiza sola (Application → Check for Updates).
           - Instalación nueva: descarga ``$nombre.exe`` y ejecútalo.
+          - Si esta versión te da problemas: descarga ``volver-a-version-anterior.ps1`` y ejecútalo (clic derecho → Ejecutar con PowerShell).
           "@
+          $traducciones = Join-Path $env:RUNNER_TEMP 'traducciones.md'
+          if (Test-Path $traducciones) { $notes += "`n`n" + (Get-Content $traducciones -Raw) }
           $omitidos = Join-Path $env:RUNNER_TEMP 'omitidos.md'
           if ((Test-Path $omitidos) -and (Get-Item $omitidos).Length -gt 0) {
             $notes += "`n`n**Funciones nuestras omitidas en esta versión** (la oficial ya las trae o no encajan con su código):`n" + (Get-Content $omitidos -Raw)

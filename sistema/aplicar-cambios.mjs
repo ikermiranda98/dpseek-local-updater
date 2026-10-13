@@ -276,12 +276,16 @@ function variantName(name, label) {
   return `${base}:${tag === 'latest' ? '' : tag + '-'}dsh-ctx-${label}`
 }
 
+/** Nombre corto (como en arranque.cjs, sin desempatar): sin origen, sin -GGUF ni :latest. */
+const fallbackName = (id) => id.replace(/:latest$/, '').split('/').pop().replace(/[-_.]gguf(?=$|:)/i, '').replace(/^(.*?)(:[^:]*)$/, (all, name, tag) => (id.includes('/') ? name : all))
+
 /** Modelo de "modelosManuales" (sin Ollama al arrancar) en el formato de llm-pi-ai. */
 const toPiAi = (m) => {
   const ctx = m.contexto ?? contexto.porDefecto
   return {
     id: variantName(m.id, 'auto'),
-    name: `${m.nombre ?? m.id.replace(/:latest$/, '')} · Auto ${ctx % 1024 === 0 ? ctx / 1024 + 'K' : ctx} (sin medir)`,
+    // Solo se usa si Ollama no responde al abrir la app: el nombre lo dice.
+    name: `${m.nombre ?? config.nombres?.[m.id] ?? fallbackName(m.id)} · Ollama no responde`,
     contextWindow: ctx,
     maxTokens: Math.min(config.maxTokensSalida, Math.floor(ctx / 2)),
     input: m.imagenes ? ['text', 'image'] : ['text'],
@@ -301,6 +305,7 @@ function runtimeModelsExpression(fixed) {
   const settings = {
     ollama: new URL(config.ollamaUrl).origin,
     defaultModel: config.modeloPorDefecto,
+    names: config.nombres ?? {},
     sizes: contexto.tamanos,
     defaultCtx: contexto.porDefecto,
     maxTokens: config.maxTokensSalida,
@@ -310,7 +315,7 @@ function runtimeModelsExpression(fixed) {
     '((fixed) => { try {',
     `const out = process.getBuiltinModule('node:child_process').execFileSync(process.execPath, ['-e', ${JSON.stringify(startup)}],`,
     `{ env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_CTX: ${JSON.stringify(JSON.stringify(settings))}, DSH_CTX_CALIBRAR: ${JSON.stringify(calibrator)}, DSH_CTX_PRECARGA: ${JSON.stringify(keeper)} },`,
-    "timeout: 20000, windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });",
+    "timeout: 30000, windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });",
     'const models = JSON.parse(out);',
     'return Array.isArray(models) && models.length > 0 ? models : fixed;',
     `} catch (error) { return fixed; } })(${JSON.stringify(fixed)})`,
@@ -880,6 +885,92 @@ optional('chats antiguos pasan solos al contexto recomendado', (tx) => {
   // Lo que ve el selector de modelo del chat.
   tx.replace(projection, 'view: state => ({ lastUsed: state.lastUsed, next: state.pending ?? state.lastUsed }),',
     'view: state => ({ lastUsed: localOllamaSelection(state.lastUsed), next: localOllamaSelection(state.pending ?? state.lastUsed) }),')
+})
+
+// ── 11. Menús y diálogos de la ventana en español ─────────────────────────────
+// La ventana (menús Aplicación/Edición, salir, actualizaciones…) solo trae inglés
+// y chino. Se añade el español (sistema/escritorio/locale-es.ts) cuando la app
+// está en español; las claves que falten salen en inglés.
+
+optional('menús y diálogos de la ventana en español', (tx) => {
+  const src = join(repo, 'apps', 'desktop', 'src')
+  const locale = join(src, 'locale.ts')
+  const text = tx.read(locale)
+  // Si DeepSeek añade el español al escritorio, se usa el suyo (sin contar nuestras líneas).
+  const theirs = text.split('\n').filter((line) => !line.includes('esDesktop') && !line.includes('local-build')).join('\n')
+  if (/export const es\b/.test(theirs)) official('el español en los menús de la ventana')
+  tx.copy(join(here, 'escritorio', 'locale-es.ts'), join(src, 'locale-es.ts'))
+  const clientTsconfig = join(src, '..', 'tsconfig.client.json')
+  const client = JSON.parse(tx.read(clientTsconfig))
+  if (Array.isArray(client.include) && client.include.includes('src/locale.ts') && !client.include.includes('src/locale-es.ts')) {
+    client.include.push('src/locale-es.ts')
+    tx.write(clientTsconfig, JSON.stringify(client, null, 2))
+  }
+  tx.replace(locale, '/** Typed English and Chinese copy owned by the Electron shell. */\n',
+    "/** Typed English and Chinese copy owned by the Electron shell. */\nimport { esDesktop } from './locale-es.ts'\n",
+    "from './locale-es.ts'")
+  tx.replace(locale, '} as const satisfies DesktopMessages\n',
+    '} as const satisfies DesktopMessages\n\n/** Local build: Spanish copy; keys it lacks fall back to English. */\n'
+      + 'export const es: DesktopMessages = { ...en, ...esDesktop }\n',
+    '...esDesktop')
+  tx.replace(locale, "readonly id: 'en' | 'zh-CN'\n", "readonly id: 'en' | 'zh-CN' | 'es'\n")
+  tx.replace(locale, 'export function resolveDesktopLocale(locale: string): DesktopLocale {\n',
+    'export function resolveDesktopLocale(locale: string): DesktopLocale {\n'
+      + "  if (locale.toLowerCase().startsWith('es')) return { id: 'es', messages: es } // local-build\n",
+    "return { id: 'es', messages: es }")
+  tx.replace(locale, "if (selected === 'zh' || selected === 'en') return resolveDesktopLocale(selected)",
+    "if (selected === 'zh' || selected === 'en' || selected === 'es') return resolveDesktopLocale(selected)")
+  tx.replace(locale, "if (primary === 'zh' || primary === 'en') return resolveDesktopLocale(primary)",
+    "if (primary === 'zh' || primary === 'en' || primary === 'es') return resolveDesktopLocale(primary)")
+})
+
+// ── 12. Aviso de Windows al terminar una respuesta ────────────────────────────
+// Si la ventana no tiene el foco cuando un chat termina, sale una notificación con
+// su título; al pulsarla se abre (sistema/avisos/local-reply-notifications.ts).
+
+optional('aviso de Windows al terminar una respuesta en segundo plano', (tx) => {
+  // Si DeepSeek añade sus propios avisos en la interfaz, se usan los suyos.
+  if (sourceMatches(join(repo, 'packages', 'client'), /new Notification\(/, ['local-reply-notifications.ts'])) {
+    official('avisos de respuesta terminada')
+  }
+  tx.copy(join(here, 'avisos', 'local-reply-notifications.ts'), join(uiDir, 'local-reply-notifications.ts'))
+  tx.replace(uiIndex, "import { WorkspacePicker } from './WorkspacePicker.tsx'\n",
+    "import { WorkspacePicker } from './WorkspacePicker.tsx'\nimport { installLocalReplyNotifications } from './local-reply-notifications.ts'\n",
+    "from './local-reply-notifications.ts'")
+  let ui = tx.read(uiIndex)
+  if (!ui.includes('installLocalReplyNotifications(sessions')) {
+    const anchor = ui.match(/^([ \t]*)ctx\.slots\.inject\('conversation\.hero\.workspace'/m)
+    if (!anchor) skip(`no se encuentra el final de apply() en ${rel(uiIndex)}`)
+    const pad = anchor[1]
+    ui = ui.replace(anchor[0], () => [
+      '// Local build: Windows notification when a reply finishes in the background.',
+      'ctx.effect(() => installLocalReplyNotifications(sessions, (sessionId) => { uiWorkspace.openSession(sessionId) }),',
+      "  'ui-workspace: local reply notifications')",
+    ].map((line) => pad + line).join('\n') + '\n' + anchor[0])
+    tx.write(uiIndex, ui)
+  }
+})
+
+// ── 13. No volver a ofrecer una versión retirada ──────────────────────────────
+// sistema/volver-a-version-anterior.ps1 instala un Release anterior y anota la
+// versión retirada; la app no la vuelve a ofrecer, pero sí la siguiente.
+
+optional('no volver a ofrecer una versión retirada', (tx) => {
+  const src = join(repo, 'apps', 'desktop', 'src')
+  const coordinator = join(src, 'update-coordinator.ts')
+  tx.copy(join(here, 'escritorio', 'local-skip-version.ts'), join(src, 'local-skip-version.ts'))
+  let text = tx.read(coordinator)
+  if (!text.includes("from './local-skip-version.ts'")) {
+    const lastImport = [...text.matchAll(/^import [^\n]*\n|^} from '[^']+'\n/gm)].pop()
+    if (lastImport === undefined) skip(`no se encuentran los imports de ${rel(coordinator)}`)
+    const at = lastImport.index + lastImport[0].length
+    text = text.slice(0, at) + "import { localSkippedVersion } from './local-skip-version.ts'\n" + text.slice(at)
+    tx.write(coordinator, text)
+  }
+  tx.replace(coordinator,
+    'this.candidate = result.isUpdateAvailable && gt(version, this.currentVersion()) ? version : undefined',
+    '// Local build: a version rolled back with volver-a-version-anterior.ps1 is not offered again.\n'
+      + '      this.candidate = result.isUpdateAvailable && gt(version, this.currentVersion()) && !localSkippedVersion(version) ? version : undefined')
 })
 
 console.log('\nCambios aplicados:')

@@ -5,7 +5,11 @@ que se mantiene al día sola:
 
 - usa tus modelos de **Ollama**, sin modelos online ni cuenta de DeepSeek (no gasta saldo),
 - **sin inicio de sesión**, sin telemetría ni analítica,
-- interfaz en **español** (Ajustes → General → Idioma → Español),
+- interfaz en **español** (Ajustes → General → Idioma → Español), también los
+  menús y diálogos de la ventana,
+- **nombres cortos** de los modelos (los de Hugging Face sin `hf.co/autor/…-GGUF`),
+- arranca **Ollama** si está apagado y **avisa con una notificación** cuando
+  termina una respuesta con la ventana en segundo plano,
 - permite **eliminar chats** de verdad, uno o varios a la vez (la oficial solo los
   archiva),
 - el **contexto lo decide la app**: una barra en el selector de cada chat, con el
@@ -37,8 +41,21 @@ No hay que hacer nada:
 1. Cada 6 horas, GitHub Actions comprueba si DeepSeek ha publicado una versión
    nueva. Si la hay, descarga su código, aplica los cambios de este repositorio,
    crea el instalador y lo publica como Release.
-2. La app instalada lo detecta (Application → Check for Updates, o sola cada
-   pocos minutos), lo descarga y se instala con «Install and Restart».
+2. Antes de publicarlo, **abre la app compilada y comprueba que arranca**; si no
+   carga, no se publica y nadie la recibe. De paso cuenta los textos nuevos que
+   faltan por traducir y los pone en las notas del Release.
+3. La app instalada lo detecta (Aplicación → Buscar actualizaciones, o sola cada
+   pocos minutos), lo descarga y se instala con «Instalar y reiniciar».
+
+### Volver a la versión anterior
+
+Si una versión te da problemas: descarga `volver-a-version-anterior.ps1` de
+cualquier Release (o de [`sistema/`](sistema/volver-a-version-anterior.ps1)) y
+ejecútalo (clic derecho → *Ejecutar con PowerShell*). Te enseña las versiones
+publicadas, descarga la que elijas, comprueba que es la publicada (sha512), la
+instala y anota la versión de la que vienes para que la app **no te la vuelva a
+ofrecer** (la siguiente que se publique, sí). Tus chats y ajustes no se tocan.
+Con `-Probar` solo descarga y comprueba, sin instalar.
 
 Para forzar una compilación: pestaña **Actions** → *Compilar instalador* →
 *Run workflow* (marca «forzar» si ya existe un instalador para esa versión).
@@ -48,8 +65,9 @@ Para forzar una compilación: pestaña **Actions** → *Compilar instalador* →
 - **Lo imprescindible** (Ollama, sin cuenta ni inicio de sesión, el instalador y las
   actualizaciones): si ya no encaja, la compilación se detiene con un `ERROR:` y la
   app se queda en la versión anterior, que funciona, hasta que se adapte.
-- **Las funciones añadidas** (idioma español, eliminar chats, selección de varios,
-  barra de contexto, chats antiguos al contexto recomendado):
+- **Las funciones añadidas** (idioma español, menús en español, eliminar chats,
+  selección de varios, barra de contexto, chats antiguos al contexto recomendado,
+  avisos de respuesta terminada, no volver a ofrecer una versión retirada):
   - si DeepSeek añade la misma función, **se queda la oficial** y la nuestra no se
     aplica;
   - si algo suyo ha cambiado y la nuestra no encaja, esa función **se omite entera**
@@ -125,8 +143,18 @@ Cómo funciona:
 
 **El selector de modelos muestra todos los modelos que tengas en Ollama**: la app
 se los pregunta a Ollama cada vez que arranca (descarga uno nuevo con `ollama pull`
-y reinicia la app para verlo). Los modelos solo de embeddings no aparecen. Si
-Ollama no está en marcha al abrir la app, solo aparecen los de `modelosManuales`.
+y reinicia la app para verlo). Los modelos solo de embeddings no aparecen.
+
+- **Ollama apagado**: al abrirse, la app lo arranca (la aplicación de Ollama, con
+  su icono junto al reloj) y espera hasta 12 s. Si aun así no responde, el
+  selector muestra los de `modelosManuales` con la etiqueta «Ollama no responde».
+- **Nombres**: se muestra un nombre corto. Los de Hugging Face
+  (`hf.co/Kujira/Underdog-Saluki-27B-1.0-MTP-Abliterated-GGUF:latest`) se quedan
+  en el nombre del modelo (`Underdog-Saluki-27B-1.0-MTP-Abliterated`): sin origen,
+  sin `-GGUF` y sin la etiqueta de cuantización. Los de la biblioteca de Ollama
+  conservan su etiqueta (`qwen3:8b`), salvo `:latest`. Si dos coincidieran, se
+  añade lo justo para distinguirlos (la etiqueta y, si hace falta, el autor). En
+  Ollama siguen llamándose igual; para ponerle otro nombre a uno, usa `nombres`.
 
 Editar `config.json` en GitHub (o hacer push) recompila el instalador al momento.
 
@@ -134,6 +162,7 @@ Editar `config.json` en GitHub (o hacer push) recompila el instalador al momento
 |---|---|
 | `ollamaUrl` | Dirección de Ollama (`http://127.0.0.1:11434`). |
 | `modeloPorDefecto` | Modelo con el que empiezan las sesiones nuevas (con el contexto recomendado). Tiene que existir en tu Ollama con ese nombre exacto. |
+| `nombres` | Nombres a mano: `{ "nombre en Ollama": "nombre que se muestra" }`, p. ej. `{ "hf.co/autor/Modelo-GGUF:Q4_K_M": "Modelo rápido" }`. |
 | `modelosManuales` | Modelos que aparecen si Ollama está apagado al abrir la app: `id` (nombre en Ollama), `imagenes`, `razonamiento` y, opcionales, `contexto` y `nombre`. |
 | `contexto.porDefecto` | Contexto recomendado mientras un modelo no está medido (65536). |
 | `contexto.tamanos` | Puntos de la barra de contexto (los mayores que el máximo de un modelo se cambian por ese máximo). |
@@ -163,13 +192,25 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Idioma español (opcional) | `packages/client/locale` + [`sistema/es-pack.json`](sistema/es-pack.json) |
 | «Eliminar sesión» en el menú de cada chat (opcional) | `packages/api/session-controller` (método `session.deletePermanently`) + `packages/client/ui-workspace`; código en [`sistema/borrar-chats/`](sistema/borrar-chats) |
 | Seleccionar varios chats y eliminarlos a la vez (opcional) | `packages/client/ui-workspace` (`BulkDelete.tsx`) |
+| Aviso de Windows al terminar una respuesta (opcional) | `packages/client/ui-workspace`; código en [`sistema/avisos/`](sistema/avisos) |
+| Menús y diálogos de la ventana en español (opcional) | `apps/desktop/src/locale.ts`; textos en [`sistema/escritorio/locale-es.ts`](sistema/escritorio/locale-es.ts) |
+| No volver a ofrecer una versión retirada (opcional) | `apps/desktop/src/update-coordinator.ts` (`local-skip-version.ts`) |
 | Instalador sin firma, sin la «actualización obligatoria» de DeepSeek | `apps/desktop/scripts` |
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |
+| Prueba de arranque y textos sin traducir antes de publicar | [`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs) en el workflow |
 
 Los textos que añadan versiones nuevas aparecen en inglés hasta que se traduzcan en
-`sistema/es-pack.json` (en `sistema/traduccion/` están los scripts para extraer
-los textos de la app y validar la traducción). Los menús nativos de la ventana
-(*Application/Edit*) solo existen en inglés y chino.
+`sistema/es-pack.json`; cada Release dice cuántos faltan y cuáles. En
+`sistema/traduccion/` están los scripts para extraer los textos de la app y validar
+la traducción. Los menús y diálogos de la ventana tienen su propia traducción
+(`sistema/escritorio/locale-es.ts`); lo que falte ahí sale en inglés.
+
+## Aviso al terminar una respuesta
+
+Si la ventana no está delante (otra app encima o minimizada) cuando un chat
+termina de responder, sale una notificación de Windows con el título del chat;
+al pulsarla se abre ese chat. Los subagentes no avisan. Se pueden silenciar desde
+la configuración de notificaciones de Windows (*DeepSeek Harness*).
 
 ## Licencia
 

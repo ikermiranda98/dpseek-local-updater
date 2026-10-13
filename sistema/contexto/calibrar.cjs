@@ -30,6 +30,7 @@ async function api(path, body, timeoutMs = 10000) {
 }
 
 function alive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
   try {
     process.kill(pid, 0)
     return true

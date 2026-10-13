@@ -28,6 +28,7 @@ async function api(path, body, timeoutMs = 15 * 60_000) {
 }
 
 function alive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
   try {
     process.kill(pid, 0)
     return true
@@ -38,7 +39,7 @@ function alive(pid) {
 
 const mine = () => {
   try {
-    return Number(readFileSync(job.lockFile, 'utf8')) === process.pid
+    return Number(readFileSync(job.lockFile, 'utf8').split(':')[0]) === process.pid
   } catch {
     return false
   }
@@ -50,7 +51,7 @@ const loaded = async () => (await api('/api/ps')).models || []
 async function main() {
   // La copia más reciente de la app manda: la anterior lo verá y se retirará
   // sin descargar nada.
-  writeFileSync(job.lockFile, String(process.pid))
+  writeFileSync(job.lockFile, `${process.pid}:${job.hostPid}`)
   // Deja arrancar antes al medidor, que tiene prioridad.
   await sleep(20_000)
   for (;;) {

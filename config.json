@@ -1,6 +1,7 @@
 {
   "ollamaUrl": "http://127.0.0.1:11434",
   "modeloPorDefecto": "Qwen3.6-35B-A3B-Uncensored:latest",
+  "nombres": {},
   "contexto": {
     "porDefecto": 65536,
     "tamanos": [32768, 65536, 131072, 262144]
