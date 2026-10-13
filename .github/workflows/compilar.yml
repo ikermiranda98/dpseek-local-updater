@@ -115,9 +115,16 @@ jobs:
         env:
           # La app buscará sus actualizaciones en los Releases de este repositorio.
           DSH_LOCAL_ACTUALIZACIONES: ${{ github.server_url }}/${{ github.repository }}/releases/latest/download
+          # Funciones nuestras omitidas (porque la oficial ya las trae o porque no
+          # encajan en esta versión); van a las notas del Release.
+          DSH_LOCAL_OMITIDOS: ${{ runner.temp }}/omitidos.md
         run: |
           node sistema/aplicar-cambios.mjs $env:CODIGO
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if ((Test-Path $env:DSH_LOCAL_OMITIDOS) -and (Get-Item $env:DSH_LOCAL_OMITIDOS).Length -gt 0) {
+            "### Funciones omitidas en esta versión" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+            Get-Content $env:DSH_LOCAL_OMITIDOS | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
+          }
           Copy-Item sistema/env.windows "$env:CODIGO/apps/desktop/.env.windows"
 
       - name: Instalar dependencias
@@ -169,11 +176,15 @@ jobs:
           $files = @($nuevoExe, "$nuevoExe.blockmap", $feed) | Where-Object { Test-Path $_ }
           $notes = @"
           Instalador de DeepSeek Harness **$env:VERSION** con los cambios locales:
-          Ollama como proveedor, sin modelos online ni inicio de sesión de DeepSeek, sin telemetría, interfaz en español, opción para eliminar chats y barra de contexto en el selector de cada chat (con el recomendado medido para tu equipo).
+          Ollama como proveedor, sin modelos online ni inicio de sesión de DeepSeek, sin telemetría, interfaz en español, eliminar chats (uno o varios a la vez), barra de contexto en el selector de cada chat (con el recomendado medido para tu equipo) y el modelo listo mientras la app está abierta.
 
           - Versión oficial: [$env:ETIQUETA](https://github.com/deepseek-ai/deepseek-harness/releases/tag/$env:ETIQUETA)
           - Versión interna de la app: ``$env:BUILD``
           - Si ya tienes la app instalada, se actualiza sola (Application → Check for Updates).
           - Instalación nueva: descarga ``$nombre.exe`` y ejecútalo.
           "@
+          $omitidos = Join-Path $env:RUNNER_TEMP 'omitidos.md'
+          if ((Test-Path $omitidos) -and (Get-Item $omitidos).Length -gt 0) {
+            $notes += "`n`n**Funciones nuestras omitidas en esta versión** (la oficial ya las trae o no encajan con su código):`n" + (Get-Content $omitidos -Raw)
+          }
           gh release create $nombre $files --title $nombre --notes $notes --latest

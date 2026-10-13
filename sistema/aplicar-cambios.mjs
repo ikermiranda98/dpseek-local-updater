@@ -5,8 +5,12 @@
 //
 // Es idempotente: se puede ejecutar varias veces sobre el mismo árbol. Edita los
 // ficheros localizando cada fila por el nombre del plugin o su id (no por número
-// de línea), así que sobrevive a cambios menores entre versiones. Si algo que es
-// imprescindible ya no existe, se detiene con un ERROR que explica qué falta.
+// de línea), así que sobrevive a cambios menores entre versiones.
+//   - Si algo imprescindible (Ollama, sin cuenta ni inicio de sesión, instalador,
+//     actualizaciones) ya no existe, se detiene con un ERROR que explica qué falta.
+//   - Las funciones añadidas se aplican enteras o se omiten con un AVISO, y si la
+//     versión oficial ya trae la misma función se queda la oficial (ver
+//     «Funciones añadidas: todo o nada, y la oficial manda»).
 
 import { existsSync, readdirSync, readFileSync, writeFileSync, copyFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
@@ -154,6 +158,96 @@ function editRows(find, edit) {
   return count
 }
 
+// ── Funciones añadidas: todo o nada, y la oficial manda ───────────────────────
+// Lo imprescindible (Ollama, sin cuenta ni inicio de sesión, instalador y
+// actualizaciones) detiene la compilación si no se puede aplicar: así la app se
+// queda en la versión anterior en vez de recibir una rota. Las funciones que
+// añadimos (idioma, eliminar chats, barra de contexto…) son opcionales:
+//   - si falta algo del código oficial que necesitan, se omite esa función entera
+//     (ningún fichero a medias) y el resto sigue;
+//   - si la versión oficial ya trae la misma función, se queda la oficial y la
+//     nuestra se omite.
+// Lo omitido se avisa aquí y en las notas del Release.
+
+const omitted = []
+class Skip extends Error {}
+const skip = (reason) => { throw new Skip(reason) }
+/** La versión oficial ya trae la función: se omite la nuestra. */
+const official = (what) => skip(`la versión oficial ya incluye ${what}; se usa la suya`)
+
+/**
+ * Aplica una función añadida en una transacción: las escrituras se preparan y
+ * solo llegan al disco si la función entera se puede aplicar.
+ * @returns si se aplicó.
+ */
+function optional(name, apply) {
+  const staged = new Map()
+  const copies = []
+  const tx = {
+    read(file) {
+      if (staged.has(file)) return staged.get(file)
+      if (!existsSync(file)) skip(`no existe ${rel(file)}`)
+      return read(file)
+    },
+    write(file, text) { staged.set(file, text) },
+    copy(from, to) {
+      if (!existsSync(dirname(to))) skip(`no existe ${rel(dirname(to))}`)
+      copies.push([from, to])
+    },
+    /** Sustituye `from` por `to` salvo que `marker` (por defecto `to`) ya esté. */
+    replace(file, from, to, marker = to) {
+      const text = tx.read(file)
+      if (text.includes(marker)) return
+      if (!text.includes(from)) skip(`no se encuentra en ${rel(file)}: ${from.trim().split('\n')[0].slice(0, 80)}`)
+      tx.write(file, text.replace(from, () => to))
+    },
+    /** Añade un fichero propio a la lista `files` de un tsconfig que los enumera. */
+    addToTsconfig(tsconfig, file) {
+      if (!existsSync(tsconfig)) return
+      const parsed = JSON.parse(tx.read(tsconfig))
+      if (Array.isArray(parsed.files) && !parsed.files.includes(file)) {
+        parsed.files.push(file)
+        tx.write(tsconfig, JSON.stringify(parsed, null, 2))
+      }
+    },
+  }
+  try {
+    apply(tx)
+  } catch (error) {
+    if (!(error instanceof Skip)) throw error
+    omitted.push(`${name}: ${error.message}`)
+    warn(`se omite «${name}»: ${error.message}`)
+    return false
+  }
+  for (const [from, to] of copies) copyFileSync(from, to)
+  for (const [file, text] of staged) write(file, text)
+  done.push(name)
+  return true
+}
+
+/** Busca `re` en los ficheros fuente (.ts/.tsx) bajo `dir`, sin tests ni compilados ni los nuestros. */
+function sourceMatches(dir, re, ownFiles = []) {
+  if (!existsSync(dir)) return false
+  const own = new Set(ownFiles)
+  const walk = (d) => {
+    for (const entry of readdirSync(d, { withFileTypes: true })) {
+      if (['node_modules', 'lib', 'tests', 'test', 'dist'].includes(entry.name)) continue
+      const full = join(d, entry.name)
+      if (entry.isDirectory()) { if (walk(full)) return true; continue }
+      if (!/\.tsx?$/.test(entry.name) || /\.(spec|test)\.tsx?$/.test(entry.name) || own.has(entry.name)) continue
+      if (re.test(read(full))) return true
+    }
+    return false
+  }
+  return walk(dir)
+}
+
+/** Claves de un diccionario de textos que no son nuestras (las nuestras empiezan por `local.`). */
+function officialKeys(file) {
+  if (!existsSync(file)) return []
+  return [...read(file).matchAll(/^\s*'([^']+)':/gm)].map((m) => m[1]).filter((key) => !key.startsWith('local.'))
+}
+
 // ── Modelos de Ollama y su contexto ───────────────────────────────────────────
 // La lista de modelos se resuelve al ARRANCAR la app: una expresión !!js de la
 // configuración ejecuta sistema/contexto/arranque.cjs, que pregunta a Ollama qué
@@ -203,8 +297,10 @@ const toPiAi = (m) => {
 function runtimeModelsExpression(fixed) {
   const startup = readFileSync(join(here, 'contexto', 'arranque.cjs'), 'utf8')
   const calibrator = readFileSync(join(here, 'contexto', 'calibrar.cjs'), 'utf8')
+  const keeper = readFileSync(join(here, 'contexto', 'precarga.cjs'), 'utf8')
   const settings = {
     ollama: new URL(config.ollamaUrl).origin,
+    defaultModel: config.modeloPorDefecto,
     sizes: contexto.tamanos,
     defaultCtx: contexto.porDefecto,
     maxTokens: config.maxTokensSalida,
@@ -213,7 +309,7 @@ function runtimeModelsExpression(fixed) {
   return [
     '((fixed) => { try {',
     `const out = process.getBuiltinModule('node:child_process').execFileSync(process.execPath, ['-e', ${JSON.stringify(startup)}],`,
-    `{ env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_CTX: ${JSON.stringify(JSON.stringify(settings))}, DSH_CTX_CALIBRAR: ${JSON.stringify(calibrator)} },`,
+    `{ env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_CTX: ${JSON.stringify(JSON.stringify(settings))}, DSH_CTX_CALIBRAR: ${JSON.stringify(calibrator)}, DSH_CTX_PRECARGA: ${JSON.stringify(keeper)} },`,
     "timeout: 20000, windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });",
     'const models = JSON.parse(out);',
     'return Array.isArray(models) && models.length > 0 ? models : fixed;',
@@ -315,21 +411,25 @@ else done.push(`búsqueda web desactivada (${toolWeb} fila/s)`)
 
 // ── 4. Idioma español ─────────────────────────────────────────────────────────
 
-{
+optional('idioma español (Ajustes → General → Idioma)', (tx) => {
   const localeDir = join(repo, 'packages', 'client', 'locale', 'src')
   const index = join(localeDir, 'client', 'index.ts')
-  if (!existsSync(index)) fail(`no existe ${rel(index)}; el sistema de idiomas ha cambiado`)
-  copyFileSync(join(here, 'es-pack.ts'), join(localeDir, 'locales', 'es-pack.ts'))
+  // Si DeepSeek añade el español, se usa su traducción.
+  const ownLine = (line) => line.includes('esPack') || line.includes("label: 'Español', fallback: 'en'") || line.includes('Local build: Spanish')
+  const officialEs = existsSync(join(localeDir, 'locales', 'es.ts'))
+    || existsSync(index) && tx.read(index).split('\n').filter((line) => !ownLine(line)).some((line) => /id:\s*['"]es['"]/.test(line))
+  if (officialEs) official('el idioma español')
 
-  let text = read(index)
+  tx.copy(join(here, 'es-pack.ts'), join(localeDir, 'locales', 'es-pack.ts'))
+  let text = tx.read(index)
   if (!text.includes("from '../locales/es-pack.ts'")) {
     const anchor = text.match(/^import .*from '\.\.\/locales\/index\.ts'\r?\n/m)
-    if (!anchor) fail(`no se encuentra el import de '../locales/index.ts' en ${rel(index)}`)
+    if (!anchor) skip(`no se encuentra el import de '../locales/index.ts' en ${rel(index)}`)
     text = text.replace(anchor[0], anchor[0] + "import { esPack } from '../locales/es-pack.ts'\n")
   }
   if (!text.includes('esPack)')) {
     const provide = text.match(/^(\s*)ctx\.provide\('locale', locale\)\r?\n/m)
-    if (!provide) fail(`no se encuentra ctx.provide('locale', locale) en ${rel(index)}`)
+    if (!provide) skip(`no se encuentra ctx.provide('locale', locale) en ${rel(index)}`)
     const pad = provide[1]
     text = text.replace(provide[0], [
       `${pad}// Local build: Spanish language pack; missing keys fall back to English.`,
@@ -338,9 +438,8 @@ else done.push(`búsqueda web desactivada (${toolWeb} fila/s)`)
       '',
     ].join('\n') + provide[0])
   }
-  write(index, text)
-  done.push('idioma español añadido (Ajustes → General → Idioma)')
-}
+  tx.write(index, text)
+})
 
 // ── 5. Instalador sin firmar: sin servidor de actualización obligatoria ───────
 // El empaquetado exige un servidor de "actualización obligatoria" de DeepSeek que
@@ -409,32 +508,38 @@ else done.push(`búsqueda web desactivada (${toolWeb} fila/s)`)
 // Host borra la carpeta del chat y la de sus subagentes (sistema/borrar-chats/
 // local-delete.ts) y la interfaz pide confirmación (DeleteSession.tsx).
 
-{
-  const src = join(here, 'borrar-chats')
-  const hostDir = join(repo, 'packages', 'api', 'session-controller', 'src')
+const hostDir = join(repo, 'packages', 'api', 'session-controller', 'src')
+const uiDir = join(repo, 'packages', 'client', 'ui-workspace', 'src', 'client')
+const uiIndex = join(uiDir, 'index.ts')
+const uiLocales = join(uiDir, 'locales.ts')
+
+/** Añade textos en chino e inglés al final de los dos diccionarios de un fichero de idiomas. */
+function addLocaleKeys(tx, file, keyType, zh, en) {
+  let text = tx.read(file)
+  if (text.includes(`'${Object.keys(en)[0]}'`)) return
+  const zhEnd = /^\} satisfies Record<string, string>/m
+  const enEnd = new RegExp(`^\\} satisfies Record<${keyType}, string>`, 'm')
+  if (!zhEnd.test(text) || !enEnd.test(text)) skip(`no se encuentran los diccionarios zh/en en ${rel(file)}`)
+  const lines = (dict) => Object.entries(dict).map(([k, v]) => `  '${k}': ${JSON.stringify(v)},`)
+  text = text.replace(zhEnd, [...lines(zh), '} satisfies Record<string, string>'].join('\n'))
+  text = text.replace(enEnd, [...lines(en), `} satisfies Record<${keyType}, string>`].join('\n'))
+  tx.write(file, text)
+}
+
+const deleteApplied = optional('opción «Eliminar sesión» en el menú de cada chat', (tx) => {
+  // Si DeepSeek añade el borrado de sesiones, se usa el suyo.
+  if (sourceMatches(hostDir, /@Remote\('(delete|deleteSession|removeSession)'\)/)
+    || sourceMatches(join(repo, 'packages', 'api', 'workspace-controller', 'src'), /@Remote\('(deleteSession|removeSession)'\)/)
+    || officialKeys(uiLocales).some((key) => /deleteSession|session\.delete|menu\.delete(?!Workspace)/i.test(key) && !/workspace/i.test(key))) {
+    official('el borrado de sesiones')
+  }
   const hostIndex = join(hostDir, 'index.ts')
   const hostTypes = join(hostDir, 'types.ts')
-  const uiDir = join(repo, 'packages', 'client', 'ui-workspace', 'src', 'client')
-  const uiIndex = join(uiDir, 'index.ts')
-  const uiLocales = join(uiDir, 'locales.ts')
-  for (const file of [hostIndex, hostTypes, uiIndex, uiLocales]) {
-    if (!existsSync(file)) fail(`no existe ${rel(file)}; no se puede añadir «Eliminar sesión»`)
-  }
-  if (!existsSync(join(uiDir, 'session-actions'))) fail(`no existe ${rel(join(uiDir, 'session-actions'))}`)
 
   // Host: método remoto session.deletePermanently y filtro de la lista.
-  copyFileSync(join(src, 'local-delete.ts'), join(hostDir, 'local-delete.ts'))
-  // El paquete enumera sus ficheros uno a uno: el nuevo tiene que estar en la lista.
-  const hostTsconfig = join(hostDir, '..', 'tsconfig.host.json')
-  if (existsSync(hostTsconfig)) {
-    const tsconfig = JSON.parse(read(hostTsconfig))
-    if (Array.isArray(tsconfig.files) && !tsconfig.files.includes('src/local-delete.ts')) {
-      tsconfig.files.push('src/local-delete.ts')
-      write(hostTsconfig, JSON.stringify(tsconfig, null, 2))
-    }
-  }
-
-  let types = read(hostTypes)
+  tx.copy(join(here, 'borrar-chats', 'local-delete.ts'), join(hostDir, 'local-delete.ts'))
+  tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-delete.ts')
+  let types = tx.read(hostTypes)
   if (!types.includes('interface SessionRemoveRequest')) {
     types = types.trimEnd() + '\n\n' + [
       '/** Local build: permanently delete one Session and its subagents. */',
@@ -448,23 +553,19 @@ else done.push(`búsqueda web desactivada (${toolWeb} fila/s)`)
       '  readonly pendingSessionIds: readonly SessionId[]',
       '}',
     ].join('\n')
-    write(hostTypes, types)
+    tx.write(hostTypes, types)
   }
-
-  let host = read(hostIndex)
-  if (!host.includes("from './local-delete.ts'")) {
-    const anchor = host.match(/^import \{ ApiSessionList \} from '\.\/list\.ts'\r?\n/m)
-    if (!anchor) fail(`no se encuentra el import de './list.ts' en ${rel(hostIndex)}`)
-    host = host.replace(anchor[0], anchor[0] + [
-      "import { LocalSessionDeleter } from './local-delete.ts'",
-      "import type { SessionRemoveRequest, SessionRemoveValue } from './types.ts'",
-      '',
-    ].join('\n'))
-  }
+  tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n", [
+    "import { ApiSessionList } from './list.ts'",
+    "import { LocalSessionDeleter } from './local-delete.ts'",
+    "import type { SessionRemoveRequest, SessionRemoveValue } from './types.ts'",
+    '',
+  ].join('\n'), "from './local-delete.ts'")
+  let host = tx.read(hostIndex)
   if (!host.includes("@Remote('deletePermanently')")) {
     const at = host.indexOf("  @Remote('list')")
     const doc = at < 0 ? -1 : host.lastIndexOf('  /**', at)
-    if (doc < 0) fail(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
+    if (doc < 0) skip(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
     host = host.slice(0, doc) + [
       '  /** Local build: lazily created permanent-delete helper (see local-delete.ts). */',
       '  private localDeleterInstance: LocalSessionDeleter | undefined',
@@ -488,50 +589,48 @@ else done.push(`búsqueda web desactivada (${toolWeb} fila/s)`)
       '',
       '',
     ].join('\n') + host.slice(doc)
+    tx.write(hostIndex, host)
   }
-  const listLine = 'return { items: await this.listState.list(signal) }'
-  if (host.includes(listLine)) {
-    host = host.replace(listLine, [
-      '// Local build: first remove what the previous run left pending, then',
-      '    // hide Sessions whose deletion waits for the next start.',
-      '    const hidden = await this.localDeleter().hidden()',
-      '    const items = await this.listState.list(signal)',
-      '    return { items: hidden.size === 0 ? items : items.filter(item => !hidden.has(item.sessionId)) }',
-    ].join('\n'))
-  } else if (!host.includes('this.localDeleter().hidden()')) {
-    warn(`no se encuentra el cuerpo de session.list en ${rel(hostIndex)}: los chats borrados con la sesión abierta se verán hasta reiniciar`)
-  }
-  write(hostIndex, host)
+  // Sin este filtro, un chat borrado con la sesión abierta se vería hasta reiniciar.
+  tx.replace(hostIndex, 'return { items: await this.listState.list(signal) }', [
+    '// Local build: first remove what the previous run left pending, then',
+    '    // hide Sessions whose deletion waits for the next start.',
+    '    const hidden = await this.localDeleter().hidden()',
+    '    const items = await this.listState.list(signal)',
+    '    return { items: hidden.size === 0 ? items : items.filter(item => !hidden.has(item.sessionId)) }',
+  ].join('\n'), 'this.localDeleter().hidden()')
 
   // Interfaz: fila «Eliminar sesión» en el menú del chat y diálogo de confirmación.
-  copyFileSync(join(src, 'DeleteSession.tsx'), join(uiDir, 'session-actions', 'DeleteSession.tsx'))
-
-  let ui = read(uiIndex)
-  if (!ui.includes("from './session-actions/DeleteSession.tsx'")) {
-    const anchor = ui.match(/^import .* from '\.\/session-actions\/ArchiveSession\.tsx'\r?\n/m)
-    if (!anchor) fail(`no se encuentra el import de ArchiveSession.tsx en ${rel(uiIndex)}`)
-    ui = ui.replace(anchor[0], anchor[0] + [
-      'import {',
-      '  DeleteSessionMenuItem, SessionDeleteDialog,',
-      '  type DeleteSessionInjected, type SessionDeleteDialogInjected, type SessionDeleteRequest,',
-      "} from './session-actions/DeleteSession.tsx'",
-      '',
-    ].join('\n'))
-  }
+  tx.copy(join(here, 'borrar-chats', 'DeleteSession.tsx'), join(uiDir, 'session-actions', 'DeleteSession.tsx'))
+  tx.replace(uiIndex, "} from './session-actions/ArchiveSession.tsx'\n", [
+    "} from './session-actions/ArchiveSession.tsx'",
+    'import {',
+    '  DeleteSessionMenuItem, SessionDeleteDialog,',
+    '  type DeleteSessionInjected, type SessionDeleteDialogInjected, type SessionDeleteRequest,',
+    "} from './session-actions/DeleteSession.tsx'",
+    '',
+  ].join('\n'), "from './session-actions/DeleteSession.tsx'")
+  let ui = tx.read(uiIndex)
   if (!ui.includes("'remote.session'")) {
     const re = /^(export const inject = \[[^\]]*?)'remote',/m
-    if (!re.test(ui)) fail(`no se encuentra la lista inject de ${rel(uiIndex)}`)
+    if (!re.test(ui)) skip(`no se encuentra la lista inject de ${rel(uiIndex)}`)
     ui = ui.replace(re, "$1'remote', 'remote.session',")
   }
   if (!ui.includes("id: 'local-delete'")) {
     const anchor = ui.match(/^([ \t]*)ctx\.slots\.inject\('conversation\.hero\.workspace'/m)
-    if (!anchor) fail(`no se encuentra el final de apply() en ${rel(uiIndex)}`)
+    if (!anchor) skip(`no se encuentra el final de apply() en ${rel(uiIndex)}`)
     for (const needed of ['uiWorkspace.archiveSession(', 'sessions.list.getSnapshot()', 'createSnapshotStore']) {
-      if (!ui.includes(needed)) fail(`${rel(uiIndex)} ya no usa ${needed}; revisa «Eliminar sesión»`)
+      if (!ui.includes(needed)) skip(`${rel(uiIndex)} ya no usa ${needed}`)
     }
     const pad = anchor[1]
-    ui = ui.replace(anchor[0], [
+    ui = ui.replace(anchor[0], () => [
       '// Local build: permanent delete — a menu row after Archive and its confirmation.',
+      'const localDeleteSession = async (sessionId: SessionId): Promise<void> => {',
+      '  // Archiving first stops its work and leaves the view if it is open.',
+      '  await uiWorkspace.archiveSession(sessionId, { stopActivity: true })',
+      '  const result = await ctx.remote.session.deletePermanently({ sessionId })',
+      '  if (!result.ok) throw new Error(result.error.message)',
+      '}',
       'const deleteRequest = createSnapshotStore<SessionDeleteRequest | null>(null)',
       'const deleteInjected = (): DeleteSessionInjected => ({',
       '  requestSessionDelete: (sessionId) => {',
@@ -543,10 +642,7 @@ else done.push(`búsqueda web desactivada (${toolWeb} fila/s)`)
       '  hooks: { deleteRequest },',
       '  settleSessionDelete: () => { deleteRequest.set(null) },',
       '  deleteSession: async (sessionId) => {',
-      '    // Archiving first stops its work and leaves the view if it is open.',
-      '    await uiWorkspace.archiveSession(sessionId, { stopActivity: true })',
-      '    const result = await ctx.remote.session.deletePermanently({ sessionId })',
-      '    if (!result.ok) throw new Error(result.error.message)',
+      '    await localDeleteSession(sessionId)',
       '    await sessions.refresh()',
       '  },',
       '})',
@@ -558,84 +654,57 @@ else done.push(`búsqueda web desactivada (${toolWeb} fila/s)`)
       "  { name: 'shell.overlay', id: 'workspace.session-delete', locale: NS, inject: deleteDialogInjected },",
       '  SessionDeleteDialog,',
       '))',
+      '// Local build: bulk delete hook (section 9).',
     ].map((line) => (line === '' ? '' : pad + line)).join('\n') + '\n' + anchor[0])
   }
-  write(uiIndex, ui)
+  tx.write(uiIndex, ui)
 
-  // Textos: chino e inglés en el diccionario oficial; el español va en es-pack.json.
-  let locales = read(uiLocales)
-  if (!locales.includes("'menu.deleteSession'")) {
-    const zhEnd = /^\} satisfies Record<string, string>/m
-    const enEnd = /^\} satisfies Record<WorkspaceKey, string>/m
-    if (!zhEnd.test(locales) || !enEnd.test(locales)) fail(`no se encuentran los diccionarios zh/en en ${rel(uiLocales)}`)
-    locales = locales.replace(zhEnd, [
-      "  'menu.deleteSession': '删除会话',",
-      "  'deleteSession.title': '删除此会话？',",
-      "  'deleteSession.desc': '将永久删除“{title}”：对话、子智能体及其历史记录。工作目录中的文件不受影响。此操作无法撤销。',",
-      "  'deleteSession.action': '删除',",
-      "  'deleteSession.pending': '正在删除会话…',",
-      '} satisfies Record<string, string>',
-    ].join('\n'))
-    locales = locales.replace(enEnd, [
-      "  'menu.deleteSession': 'Delete session',",
-      "  'deleteSession.title': 'Delete this session?',",
-      "  'deleteSession.desc': '“{title}” will be permanently deleted: the conversation, its subagents and its history. Files in the working folder are not touched. This cannot be undone.',",
-      "  'deleteSession.action': 'Delete',",
-      "  'deleteSession.pending': 'Deleting session…',",
-      '} satisfies Record<WorkspaceKey, string>',
-    ].join('\n'))
-    write(uiLocales, locales)
-  }
-  done.push('opción «Eliminar sesión» en el menú de cada chat')
-}
+  addLocaleKeys(tx, uiLocales, 'WorkspaceKey', {
+    'local.deleteSession.menu': '删除会话',
+    'local.deleteSession.title': '删除此会话？',
+    'local.deleteSession.desc': '将永久删除“{title}”：对话、子智能体及其历史记录。工作目录中的文件不受影响。此操作无法撤销。',
+    'local.deleteSession.action': '删除',
+    'local.deleteSession.pending': '正在删除会话…',
+  }, {
+    'local.deleteSession.menu': 'Delete session',
+    'local.deleteSession.title': 'Delete this session?',
+    'local.deleteSession.desc': '“{title}” will be permanently deleted: the conversation, its subagents and its history. Files in the working folder are not touched. This cannot be undone.',
+    'local.deleteSession.action': 'Delete',
+    'local.deleteSession.pending': 'Deleting session…',
+  })
+})
 
 // ── 8. Barra de contexto en el selector de modelo ─────────────────────────────
 // El selector muestra una entrada por modelo y, debajo de «Modelo», una barra con
 // los tamaños de contexto (sistema/contexto/ContextSlider.tsx); «Recomendado» es
-// el óptimo medido para el equipo (variante automática).
+// el óptimo medido para el equipo (variante automática). Sin la barra, el
+// selector sigue funcionando: muestra cada tamaño como una entrada aparte.
 
-{
+optional('barra de contexto en el selector de modelo', (tx) => {
   const dir = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client')
   const select = join(dir, 'ModelSelect.tsx')
   const locales = join(dir, 'locales.ts')
-  for (const file of [select, locales]) {
-    if (!existsSync(file)) fail(`no existe ${rel(file)}; no se puede añadir la barra de contexto`)
+  // Si DeepSeek añade su propio control de contexto, se usa el suyo.
+  if (officialKeys(locales).some((key) => /context/i.test(key))
+    || sourceMatches(join(repo, 'packages'), /\bnum_ctx\b/, ['ContextSlider.tsx', 'local-ollama.ts'])) {
+    official('un control del contexto')
   }
-  copyFileSync(join(here, 'contexto', 'ContextSlider.tsx'), join(dir, 'ContextSlider.tsx'))
-  copyFileSync(join(here, 'contexto', 'ContextSlider.module.css'), join(dir, 'ContextSlider.module.css'))
+  tx.copy(join(here, 'contexto', 'ContextSlider.tsx'), join(dir, 'ContextSlider.tsx'))
+  tx.copy(join(here, 'contexto', 'ContextSlider.module.css'), join(dir, 'ContextSlider.module.css'))
 
-  let text = read(select)
-  const edits = [
-    [
-      "import { orderModelProviders } from './provider-order.ts'\n",
-      "import { orderModelProviders } from './provider-order.ts'\n"
-        + "import { ContextSlider, contextListModels, contextTriggerName, sameContextModel } from './ContextSlider.tsx'\n",
-      "from './ContextSlider.tsx'",
-    ],
-    [
-      "models: rankByName(group.models, showSearch ? query.trim() : ''),",
-      "models: rankByName(contextListModels(group.models), showSearch ? query.trim() : ''),",
-      'rankByName(contextListModels(',
-    ],
-    [
-      ': currentChoice?.model.name\n',
-      ': contextTriggerName(currentChoice?.model.name)\n',
-      'contextTriggerName(currentChoice',
-    ],
-    [
-      'const selected = state.current?.provider === group.id && state.current.model === model.id',
-      'const selected = state.current?.provider === group.id && sameContextModel(state.current.model, model.id)',
-      'sameContextModel(state.current.model',
-    ],
-  ]
-  for (const [from, to, marker] of edits) {
-    if (text.includes(marker)) continue
-    if (!text.includes(from)) fail(`no se encuentra en ${rel(select)}: ${from.trim().slice(0, 70)}`)
-    text = text.replace(from, to)
-  }
+  tx.replace(select, "import { orderModelProviders } from './provider-order.ts'\n",
+    "import { orderModelProviders } from './provider-order.ts'\n"
+      + "import { ContextSlider, contextListModels, contextTriggerName, sameContextModel } from './ContextSlider.tsx'\n",
+    "from './ContextSlider.tsx'")
+  tx.replace(select, "models: rankByName(group.models, showSearch ? query.trim() : ''),",
+    "models: rankByName(contextListModels(group.models), showSearch ? query.trim() : ''),")
+  tx.replace(select, ': currentChoice?.model.name\n', ': contextTriggerName(currentChoice?.model.name)\n')
+  tx.replace(select, 'const selected = state.current?.provider === group.id && state.current.model === model.id',
+    'const selected = state.current?.provider === group.id && sameContextModel(state.current.model, model.id)')
+  let text = tx.read(select)
   if (!text.includes('<ContextSlider')) {
     const re = /(<span className=\{css\.cellLabel\}>\{t\('menu\.model'\)\}<\/span>[\s\S]*?<\/button>\r?\n)/
-    if (!re.test(text)) fail(`no se encuentra la fila «Modelo» del menú en ${rel(select)}`)
+    if (!re.test(text)) skip(`no se encuentra la fila «Modelo» del menú en ${rel(select)}`)
     text = text.replace(re, (row) => row + [
       '              {/* Local build: context-size bar (see ContextSlider.tsx). */}',
       '              <ContextSlider',
@@ -651,35 +720,176 @@ else done.push(`búsqueda web desactivada (${toolWeb} fila/s)`)
       '              />',
       '',
     ].join('\n'))
+    tx.write(select, text)
   }
-  write(select, text)
+  addLocaleKeys(tx, locales, 'ModelKey', {
+    'local.context.label': '上下文',
+    'local.context.faster': '更快',
+    'local.context.more': '更多上下文',
+    'local.context.recommended': '推荐',
+  }, {
+    'local.context.label': 'Context',
+    'local.context.faster': 'Faster',
+    'local.context.more': 'More context',
+    'local.context.recommended': 'Recommended',
+  })
+})
 
-  let dict = read(locales)
-  if (!dict.includes("'context.label'")) {
-    const zhEnd = /^\} satisfies Record<string, string>/m
-    const enEnd = /^\} satisfies Record<ModelKey, string>/m
-    if (!zhEnd.test(dict) || !enEnd.test(dict)) fail(`no se encuentran los diccionarios zh/en en ${rel(locales)}`)
-    dict = dict.replace(zhEnd, [
-      "  'context.label': '上下文',",
-      "  'context.faster': '更快',",
-      "  'context.more': '更多上下文',",
-      "  'context.recommended': '推荐',",
-      '} satisfies Record<string, string>',
-    ].join('\n'))
-    dict = dict.replace(enEnd, [
-      "  'context.label': 'Context',",
-      "  'context.faster': 'Faster',",
-      "  'context.more': 'More context',",
-      "  'context.recommended': 'Recommended',",
-      '} satisfies Record<ModelKey, string>',
-    ].join('\n'))
-    write(locales, dict)
+// ── 9. Eliminar varios chats a la vez ─────────────────────────────────────────
+// «Seleccionar varios» en el menú de un chat: casillas en la barra lateral y una
+// barra con «Todos», «Eliminar» y «Cancelar» (sistema/borrar-chats/BulkDelete.tsx).
+// Usa el borrado de la sección 7.
+
+optional('selección de varios chats para eliminarlos a la vez', (tx) => {
+  // Si DeepSeek añade la selección múltiple, se usa la suya.
+  if (officialKeys(uiLocales).some((key) => /select(ed|ion)|bulk|batch|multi/i.test(key))) {
+    official('la selección de varios chats')
   }
-  done.push('barra de contexto en el selector de modelo')
-}
+  if (!deleteApplied) skip('necesita «Eliminar sesión», que no se ha aplicado')
+  tx.copy(join(here, 'borrar-chats', 'BulkDelete.tsx'), join(uiDir, 'session-actions', 'BulkDelete.tsx'))
+  tx.copy(join(here, 'borrar-chats', 'BulkDelete.module.css'), join(uiDir, 'session-actions', 'BulkDelete.module.css'))
+  tx.replace(uiIndex, "} from './session-actions/DeleteSession.tsx'\n", [
+    "} from './session-actions/DeleteSession.tsx'",
+    'import {',
+    '  BulkDeleteBar, BulkSelectCheckbox, BulkSelectMenuItem,',
+    '  type BulkDeleteBarInjected, type BulkSelectInjected, type BulkSelection,',
+    "} from './session-actions/BulkDelete.tsx'",
+    '',
+  ].join('\n'), "from './session-actions/BulkDelete.tsx'")
+  let ui = tx.read(uiIndex)
+  if (!ui.includes("id: 'local-bulk-select'")) {
+    const anchor = ui.match(/^([ \t]*)\/\/ Local build: bulk delete hook \(section 9\)\.\r?\n/m)
+    if (!anchor) skip(`no se encuentra el punto de enganche de la sección 7 en ${rel(uiIndex)}`)
+    if (!ui.includes('workspaces.list.getSnapshot()')) skip(`${rel(uiIndex)} ya no usa workspaces.list.getSnapshot()`)
+    const pad = anchor[1]
+    ui = ui.replace(anchor[0], () => [
+      '// Local build: select several sessions and delete them together.',
+      'const bulkSelection = createSnapshotStore<BulkSelection>({ active: false, ids: [] })',
+      'const titleOf = (id: SessionId): string => sessions.list.getSnapshot().byId[id]?.displayTitle ?? id',
+      'const bulkSelectInjected = (): BulkSelectInjected => ({',
+      '  hooks: { selection: bulkSelection },',
+      '  startSelection: (sessionId) => { bulkSelection.set({ active: true, ids: [sessionId] }) },',
+      '  toggleSelected: (sessionId) => {',
+      '    const { ids } = bulkSelection.getSnapshot()',
+      '    bulkSelection.set({ active: true, ids: ids.includes(sessionId) ? ids.filter(id => id !== sessionId) : [...ids, sessionId] })',
+      '  },',
+      '})',
+      'const bulkBarInjected = (): BulkDeleteBarInjected => ({',
+      '  hooks: { selection: bulkSelection },',
+      '  toggleAll: () => {',
+      '    // Los chats que se ven en la barra lateral: ni subagentes, ni en blanco, ni archivados.',
+      '    const list = sessions.list.getSnapshot()',
+      '    const archived = new Set(workspaces.list.getSnapshot().archivedSessionIds)',
+      '    const all = list.ids.filter((id) => {',
+      '      const row = list.byId[id]',
+      "      return row !== undefined && row.parentId === undefined && row.origin !== 'subagent' && !row.blank && !archived.has(id)",
+      '    })',
+      '    const { ids } = bulkSelection.getSnapshot()',
+      '    bulkSelection.set({ active: true, ids: all.every(id => ids.includes(id)) ? [] : all })',
+      '  },',
+      '  cancelSelection: () => { bulkSelection.set({ active: false, ids: [] }) },',
+      '  titlesOf: ids => ids.map(titleOf),',
+      '  deleteMany: async (ids, progress) => {',
+      '    const failed: SessionId[] = []',
+      '    let done = 0',
+      '    for (const id of ids) {',
+      '      try { await localDeleteSession(id) } catch { failed.push(id) }',
+      '      progress(++done)',
+      '    }',
+      '    await sessions.refresh()',
+      '    // Quedan seleccionados los que no se pudieron borrar.',
+      '    bulkSelection.set({ active: true, ids: failed })',
+      '    return failed.map(titleOf)',
+      '  },',
+      '})',
+      "ctx.slots.inject('sidebar.workspaces.session.menu.item', () => ctx.slots.register(",
+      "  { name: 'sidebar.workspaces.session.menu.item', id: 'local-bulk-select', order: 450, locale: NS, inject: bulkSelectInjected },",
+      '  BulkSelectMenuItem,',
+      '))',
+      "ctx.slots.inject('sidebar.session.row.leading', () => ctx.slots.register(",
+      "  { name: 'sidebar.session.row.leading', id: 'local-bulk-checkbox', order: 0, locale: NS, inject: bulkSelectInjected },",
+      '  BulkSelectCheckbox,',
+      '))',
+      "ctx.slots.inject('shell.overlay', () => ctx.slots.register(",
+      "  { name: 'shell.overlay', id: 'workspace.local-bulk-delete', locale: NS, inject: bulkBarInjected },",
+      '  BulkDeleteBar,',
+      '))',
+    ].map((line) => (line === '' ? '' : pad + line)).join('\n') + '\n')
+    tx.write(uiIndex, ui)
+  }
+  addLocaleKeys(tx, uiLocales, 'WorkspaceKey', {
+    'local.bulk.menu': '选择多个',
+    'local.bulk.select': '选择会话',
+    'local.bulk.count': '已选择 {n} 个',
+    'local.bulk.all': '全部',
+    'local.bulk.title': '删除 {n} 个会话？',
+    'local.bulk.desc': '将永久删除它们及其子智能体和历史记录。工作目录中的文件不受影响。此操作无法撤销。',
+    'local.bulk.confirm': '删除 {n} 个',
+    'local.bulk.more': '以及另外 {n} 个',
+    'local.bulk.progress': '正在删除第 {done} 个，共 {n} 个…',
+    'local.bulk.failed': '无法删除：{titles}',
+  }, {
+    'local.bulk.menu': 'Select several',
+    'local.bulk.select': 'Select session',
+    'local.bulk.count': '{n} selected',
+    'local.bulk.all': 'All',
+    'local.bulk.title': 'Delete {n} sessions?',
+    'local.bulk.desc': 'They will be permanently deleted, with their subagents and history. Files in the working folders are not touched. This cannot be undone.',
+    'local.bulk.confirm': 'Delete {n}',
+    'local.bulk.more': 'and {n} more',
+    'local.bulk.progress': 'Deleting {done} of {n}…',
+    'local.bulk.failed': 'Could not delete: {titles}',
+  })
+})
+
+// ── 10. Chats antiguos al contexto recomendado ────────────────────────────────
+// Los chats anteriores al contexto por chat guardaron el modelo sin variante
+// (`Qwen…:latest`), que ya no está en el catálogo. Al leerlos se traducen a la
+// variante recomendada (sistema/contexto/local-ollama.ts), sin tocar su registro.
+
+optional('chats antiguos pasan solos al contexto recomendado', (tx) => {
+  const agent = join(hostDir, 'agent.ts')
+  const projection = join(hostDir, 'model-selection-projection.ts')
+  const defaultsDir = join(repo, 'packages', 'core', 'agent-default-model', 'src')
+  const defaults = join(defaultsDir, 'index.ts')
+  tx.copy(join(here, 'contexto', 'local-ollama.ts'), join(hostDir, 'local-ollama.ts'))
+  tx.copy(join(here, 'contexto', 'local-ollama.ts'), join(defaultsDir, 'local-ollama.ts'))
+  tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-ollama.ts')
+  tx.addToTsconfig(join(defaultsDir, '..', 'tsconfig.json'), 'src/local-ollama.ts')
+  const importLine = "import { localOllamaSelection } from './local-ollama.ts'\n"
+  for (const file of [agent, projection, defaults]) {
+    let text = tx.read(file)
+    if (text.includes(importLine)) continue
+    const lastImport = [...text.matchAll(/^import [^\n]*\n|^} from '[^']+'\n/gm)].pop()
+    if (lastImport === undefined) skip(`no se encuentran los imports de ${rel(file)}`)
+    const at = lastImport.index + lastImport[0].length
+    text = text.slice(0, at) + importLine + text.slice(at)
+    tx.write(file, text)
+  }
+  // Selección guardada en el chat (elegida o la de su última petición).
+  tx.replace(agent, 'function agentModelSelection(selection: ModelSelection): AgentModelSelection {\n',
+    'function agentModelSelection(stored: ModelSelection): AgentModelSelection {\n  // Local build: pre-context Ollama ids map to the recommended variant.\n  const selection = localOllamaSelection(stored)\n',
+    'localOllamaSelection(stored)')
+  tx.replace(agent, 'const logged = loggedHeader.config\n', 'const logged = localOllamaSelection(loggedHeader.config)\n')
+  // Modelo predeterminado guardado antes del cambio (el último elegido): los chats
+  // nuevos empiezan con él.
+  tx.replace(defaults, 'provider: this.config.provider.get(), model: this.config.model.get(),',
+    'provider: this.config.provider.get(),\n      // Local build: pre-context Ollama ids map to the recommended variant.\n'
+      + '      model: localOllamaSelection({ provider: this.config.provider.get(), model: this.config.model.get() }).model,',
+    'localOllamaSelection({ provider: this.config.provider.get()')
+  // Lo que ve el selector de modelo del chat.
+  tx.replace(projection, 'view: state => ({ lastUsed: state.lastUsed, next: state.pending ?? state.lastUsed }),',
+    'view: state => ({ lastUsed: localOllamaSelection(state.lastUsed), next: localOllamaSelection(state.pending ?? state.lastUsed) }),')
+})
 
 console.log('\nCambios aplicados:')
 for (const line of done) console.log(`  - ${line}`)
+if (omitted.length > 0) {
+  console.log('\nFunciones omitidas en esta versión:')
+  for (const line of omitted) console.log(`  - ${line}`)
+}
+// GitHub Actions las añade a las notas del Release.
+if (process.env.DSH_LOCAL_OMITIDOS) writeFileSync(process.env.DSH_LOCAL_OMITIDOS, omitted.map((line) => `- ${line}\n`).join(''))
 if (warnings.length > 0) {
   console.log(`\n${warnings.length} aviso(s); revisa los mensajes AVISO de arriba.`)
 }

@@ -58,7 +58,7 @@ export function DeleteSessionMenuItem({
         requestSessionDelete(sessionId)
       }}
     >
-      {t('menu.deleteSession')}
+      {t('local.deleteSession.menu')}
     </MenuItemButton>
   )
 }
@@ -113,18 +113,18 @@ function DeleteConfirmForm({ request, deleteSession, onSettle, t }: {
       open
       onClose={close}
       closeLabel={t('close')}
-      title={t('deleteSession.title')}
-      description={t('deleteSession.desc', { title: request.displayTitle })}
+      title={t('local.deleteSession.title')}
+      description={t('local.deleteSession.desc', { title: request.displayTitle })}
       footer={(
         <>
           <Button variant="outline" disabled={deleting} onClick={close}>{t('cancel')}</Button>
           <Button variant="outline" className={browserCss.deleteAction} disabled={deleting} onClick={confirm}>
-            {t('deleteSession.action')}
+            {t('local.deleteSession.action')}
           </Button>
         </>
       )}
     >
-      {deleting && <div className={browserCss.deleteStatus} role="status">{t('deleteSession.pending')}</div>}
+      {deleting && <div className={browserCss.deleteStatus} role="status">{t('local.deleteSession.pending')}</div>}
       {error !== null && <div className={browserCss.renameError} role="alert">{error}</div>}
     </Modal>
   )

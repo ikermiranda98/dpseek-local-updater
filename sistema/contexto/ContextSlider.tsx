@@ -129,15 +129,15 @@ export function ContextSlider({ models, current, disabled, onSelect, t }: {
   return (
     <div className={css.root}>
       <div className={css.head}>
-        <span>{t('context.label')}</span>
+        <span>{t('local.context.label')}</span>
         <span className={css.value}>
           {selected === undefined ? '' : kilo(selected.ctx)}
-          {selected?.recommended === true && <span className={css.valueNote}> · {t('context.recommended')}</span>}
+          {selected?.recommended === true && <span className={css.valueNote}> · {t('local.context.recommended')}</span>}
         </span>
       </div>
       <div className={css.ends}>
-        <span>{t('context.faster')}</span>
-        <span>{t('context.more')}</span>
+        <span>{t('local.context.faster')}</span>
+        <span>{t('local.context.more')}</span>
       </div>
       <div className={clsx(css.track, disabled && css.disabled)}>
         {recommended >= 0 && recommended !== index && (
@@ -149,7 +149,7 @@ export function ContextSlider({ models, current, disabled, onSelect, t }: {
             type="button"
             role="radio"
             aria-checked={i === index}
-            aria-label={`${t('context.label')} ${kilo(step.ctx)}${step.recommended ? ` (${t('context.recommended')})` : ''}`}
+            aria-label={`${t('local.context.label')} ${kilo(step.ctx)}${step.recommended ? ` (${t('local.context.recommended')})` : ''}`}
             tabIndex={i === index ? 0 : -1}
             className={css.step}
             style={{ left: at(i, steps.length) }}
@@ -164,7 +164,7 @@ export function ContextSlider({ models, current, disabled, onSelect, t }: {
       </div>
       <div className={css.labels}>
         {recommended >= 0 && (
-          <span className={css.recommended} style={edgeStyle(recommended, steps.length)}>{t('context.recommended')}</span>
+          <span className={css.recommended} style={edgeStyle(recommended, steps.length)}>{t('local.context.recommended')}</span>
         )}
       </div>
     </div>

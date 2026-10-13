@@ -6,11 +6,13 @@ que se mantiene al día sola:
 - usa tus modelos de **Ollama**, sin modelos online ni cuenta de DeepSeek (no gasta saldo),
 - **sin inicio de sesión**, sin telemetría ni analítica,
 - interfaz en **español** (Ajustes → General → Idioma → Español),
-- permite **eliminar chats** de verdad (la oficial solo los archiva),
+- permite **eliminar chats** de verdad, uno o varios a la vez (la oficial solo los
+  archiva),
 - el **contexto lo decide la app**: una barra en el selector de cada chat, con el
-  recomendado medido para tu equipo,
+  recomendado medido para tu equipo, y el modelo queda **listo mientras la app
+  está abierta**,
 - se **actualiza automáticamente** con cada versión nueva de DeepSeek, conservando
-  estos cambios.
+  estos cambios; si DeepSeek añade una función que ya teníamos, se queda la suya.
 
 > Proyecto personal no oficial; no está afiliado a DeepSeek.
 
@@ -41,6 +43,21 @@ No hay que hacer nada:
 Para forzar una compilación: pestaña **Actions** → *Compilar instalador* →
 *Run workflow* (marca «forzar» si ya existe un instalador para esa versión).
 
+### Si DeepSeek cambia algo que tocamos
+
+- **Lo imprescindible** (Ollama, sin cuenta ni inicio de sesión, el instalador y las
+  actualizaciones): si ya no encaja, la compilación se detiene con un `ERROR:` y la
+  app se queda en la versión anterior, que funciona, hasta que se adapte.
+- **Las funciones añadidas** (idioma español, eliminar chats, selección de varios,
+  barra de contexto, chats antiguos al contexto recomendado):
+  - si DeepSeek añade la misma función, **se queda la oficial** y la nuestra no se
+    aplica;
+  - si algo suyo ha cambiado y la nuestra no encaja, esa función **se omite entera**
+    (nunca a medias) y el resto se aplica igual.
+
+  Lo omitido aparece en las notas de cada Release («Funciones nuestras omitidas en
+  esta versión») y en el resumen de la compilación en *Actions*.
+
 ## Eliminar chats y proyectos
 
 - **Chat** (también los de «Sin agrupar»): menú `⋯` del chat en la barra lateral →
@@ -51,9 +68,14 @@ Para forzar una compilación: pestaña **Actions** → *Compilar instalador* →
 - Si el chat está abierto o se ha usado desde que abriste la app, sigue cargado en memoria: se
   detiene y desaparece de la lista al momento, pero sus ficheros se borran la
   próxima vez que abras la app (así no se corrompe nada si aún estaba escribiendo).
+- **Varios a la vez**: menú `⋯` de un chat → **Seleccionar varios**. Aparece una
+  casilla en cada chat y una barra abajo con el número de seleccionados,
+  **Todos** (marca o desmarca todos los visibles), **Eliminar** y **Cancelar**.
+  Eliminar pide confirmación con la lista de chats; si alguno no se puede borrar,
+  queda seleccionado y se dice cuál.
 - **Proyecto** (espacio de trabajo): menú del proyecto → *Eliminar espacio de
   trabajo* (ya existía en la oficial). Solo lo quita de la lista; sus chats pasan
-  a «Sin agrupar», desde donde se pueden eliminar uno a uno.
+  a «Sin agrupar», desde donde se pueden eliminar uno a uno o varios a la vez.
 
 ## Contexto de cada chat
 
@@ -86,8 +108,18 @@ Cómo funciona:
 - Cambiar de contexto en mitad de un chat hace que Ollama recargue el modelo
   (unos segundos).
 - Los chats creados antes de esta función tenían el modelo sin contexto
-  (`modelo:latest`): al escribir en ellos la app pide elegir un modelo; elige el
-  que quieras en el selector y sigue.
+  (`modelo:latest`): pasan solos al contexto recomendado de ese modelo, igual que
+  el modelo predeterminado si se guardó así. Sus registros no se modifican.
+- **Modelo listo mientras la app está abierta**: Ollama descarga un modelo a los
+  5 minutos sin uso y el siguiente mensaje tarda en recargarlo. Al abrir la app se
+  carga el modelo por defecto con el contexto recomendado (si Ollama no tiene otro
+  cargado) y, mientras la app sigue abierta, se mantiene cargado el que estés
+  usando; al cerrarla se descarga y se libera la memoria. Se aparta mientras se
+  mide el contexto.
+- **Limpieza**: si borras un modelo con `ollama rm`, la app borra sus variantes al
+  abrirse (si no, seguirían ocupando su espacio en disco). También las de tamaños
+  que quites de `contexto.tamanos`. Solo toca nombres `dsh-ctx-`, nunca un modelo
+  descargado.
 
 ## Modelos y configuración (`config.json`)
 
@@ -115,20 +147,22 @@ ser fija y deja de actualizarse sola.
 
 Todo lo hace [`sistema/aplicar-cambios.mjs`](sistema/aplicar-cambios.mjs) sobre el
 código oficial, buscando cada pieza por su nombre para sobrevivir a los cambios de
-versión. Si una versión nueva cambia algo imprescindible, la compilación falla con
-un `ERROR:` que explica qué falta (y la app sigue en la versión anterior).
+versión (ver *Si DeepSeek cambia algo que tocamos*).
 
 | Cambio | Dónde |
 |---|---|
 | Ollama como proveedor y modelo por defecto | `packages/bundle/base/cordis.patch.yml` |
-| Contexto elegible por chat (barra en el selector) y recomendado medido para el equipo | `packages/bundle/base/cordis.patch.yml` + `packages/client/ui-model-selection`; código en [`sistema/contexto/`](sistema/contexto) |
+| Contexto por variantes, recomendado medido, modelo listo y limpieza de variantes | `packages/bundle/base/cordis.patch.yml`; código en [`sistema/contexto/`](sistema/contexto) (`arranque.cjs`, `calibrar.cjs`, `precarga.cjs`) |
+| Barra de contexto en el selector (opcional) | `packages/client/ui-model-selection` (`ContextSlider.tsx`) |
+| Chats antiguos al contexto recomendado (opcional) | `packages/api/session-controller` y `packages/core/agent-default-model` (`local-ollama.ts`) |
 | Sin ventana de bienvenida ni inicio de sesión | `apps/desktop/src/welcome-api.ts` |
 | Sin menú ni ajustes de la cuenta de DeepSeek | `packages/bundle/web-app/cordis.patch.yml` |
 | Sin modelos online de DeepSeek (cuenta y API) | `packages/bundle/base/cordis.patch.yml` |
 | Sin telemetría ni analítica | `cordis.patch.yml` |
 | Sin búsqueda web (usa la API de DeepSeek); la lectura de páginas se mantiene | bundles y presets |
-| Idioma español | `packages/client/locale` + [`sistema/es-pack.json`](sistema/es-pack.json) |
-| «Eliminar sesión» en el menú de cada chat (borrado definitivo, con confirmación) | `packages/api/session-controller` (método `session.deletePermanently`) + `packages/client/ui-workspace`; código en [`sistema/borrar-chats/`](sistema/borrar-chats) |
+| Idioma español (opcional) | `packages/client/locale` + [`sistema/es-pack.json`](sistema/es-pack.json) |
+| «Eliminar sesión» en el menú de cada chat (opcional) | `packages/api/session-controller` (método `session.deletePermanently`) + `packages/client/ui-workspace`; código en [`sistema/borrar-chats/`](sistema/borrar-chats) |
+| Seleccionar varios chats y eliminarlos a la vez (opcional) | `packages/client/ui-workspace` (`BulkDelete.tsx`) |
 | Instalador sin firma, sin la «actualización obligatoria» de DeepSeek | `apps/desktop/scripts` |
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |
 

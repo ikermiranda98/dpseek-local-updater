@@ -754,11 +754,21 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "time.months": "{n} mes.",
     "time.years": "{n} a",
     "time.ago": "hace {t}",
-    "menu.deleteSession": "Eliminar sesión",
-    "deleteSession.title": "¿Eliminar esta sesión?",
-    "deleteSession.desc": "Se borrará «{title}» definitivamente: la conversación, sus subagentes y su historial. Los archivos de la carpeta de trabajo no se tocan. No se puede deshacer.",
-    "deleteSession.action": "Eliminar",
-    "deleteSession.pending": "Eliminando sesión…"
+    "local.deleteSession.menu": "Eliminar sesión",
+    "local.deleteSession.title": "¿Eliminar esta sesión?",
+    "local.deleteSession.desc": "Se borrará «{title}» definitivamente: la conversación, sus subagentes y su historial. Los archivos de la carpeta de trabajo no se tocan. No se puede deshacer.",
+    "local.deleteSession.action": "Eliminar",
+    "local.deleteSession.pending": "Eliminando sesión…",
+    "local.bulk.menu": "Seleccionar varios",
+    "local.bulk.select": "Seleccionar chat",
+    "local.bulk.count": "{n} seleccionados",
+    "local.bulk.all": "Todos",
+    "local.bulk.title": "¿Eliminar {n} sesiones?",
+    "local.bulk.desc": "Se borrarán definitivamente, con sus subagentes y su historial. Los archivos de las carpetas de trabajo no se tocan. No se puede deshacer.",
+    "local.bulk.confirm": "Eliminar {n}",
+    "local.bulk.more": "y {n} más",
+    "local.bulk.progress": "Eliminando {done} de {n}…",
+    "local.bulk.failed": "No se pudieron eliminar: {titles}"
   },
   "pluginManager": {
     "panel": "Plugins",
@@ -1658,10 +1668,10 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "search.empty": "No hay modelos que coincidan.",
     "empty.models": "No hay modelos disponibles.",
     "empty.efforts": "Este modelo no ofrece niveles de razonamiento.",
-    "context.label": "Contexto",
-    "context.faster": "Más rápido",
-    "context.more": "Más contexto",
-    "context.recommended": "Recomendado"
+    "local.context.label": "Contexto",
+    "local.context.faster": "Más rápido",
+    "local.context.more": "Más contexto",
+    "local.context.recommended": "Recomendado"
   },
   "permission.access": {
     "mode": "Modo de acceso, actual: {name}",

@@ -1,0 +1,60 @@
+/* Selección múltiple de chats (dpseek-local-updater). Tonos y radios del tema. */
+
+/* Casilla en la celda inicial de 16px de la fila. */
+.checkbox {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 1px solid var(--dsw-alias-label-tertiary);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary-inverted, #fff);
+  cursor: pointer;
+}
+
+.checkbox[data-checked] {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: var(--dsw-alias-state-business-primary);
+}
+
+.checkbox:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+}
+
+/* Barra flotante sobre la parte baja de la barra lateral. */
+.bar {
+  position: fixed;
+  left: 12px;
+  bottom: 64px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: calc(100vw - 24px);
+  padding: 6px 6px 6px 12px;
+  border-radius: var(--dsw-radius-md);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  box-shadow: var(--dsw-elevation-prominent);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.count {
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.titles {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
