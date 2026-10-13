@@ -72,6 +72,32 @@
   transition: stroke-dasharray 600ms ease;
 }
 
+.icon {
+  display: inline-flex;
+}
+
+/* Al pasar el ratón mientras mide, el porcentaje sustituye al anillo y al icono. */
+.percent {
+  display: none;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.optimize[data-running]:hover .ring,
+.optimize[data-running]:hover .icon,
+.optimize[data-running]:focus-visible .ring,
+.optimize[data-running]:focus-visible .icon {
+  display: none;
+}
+
+.optimize[data-running]:hover .percent,
+.optimize[data-running]:focus-visible .percent {
+  display: inline;
+}
+
 /* Marca de modelo sin usar y botón de borrar (dos clics). */
 .badge {
   flex: 0 0 auto;

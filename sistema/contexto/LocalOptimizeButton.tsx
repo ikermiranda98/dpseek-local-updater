@@ -2,7 +2,8 @@
  * Herramientas de cada modelo del selector (añadido por dpseek-local-updater):
  *   - «Optimizar»: vuelve a medir el modelo en este equipo (contexto recomendado
  *     y, en los modelos densos, capas en la gráfica). Mientras dura, un anillo
- *     alrededor del icono se completa con el progreso; al terminar, una marca.
+ *     alrededor del icono se completa con el progreso y, al pasar el ratón, el
+ *     anillo deja paso al porcentaje; al terminar, una marca.
  *   - Modelos sin usar en 30 días: se marcan con lo que ocupan y se pueden borrar
  *     del disco (dos clics: el primero pide confirmación).
  *   - Interruptor «Limpieza automática de variantes» (en el menú del selector).
@@ -152,10 +153,12 @@ function OptimizeButton({ base, t, local }: { base: string; local: Snapshot } & 
     <button
       type="button"
       className={css.optimize}
-      title={title}
+      // Midiendo, el porcentaje ya se ve al pasar el ratón: sin globo de texto.
+      title={mine ? undefined : title}
       aria-label={title}
       disabled={busy && !mine}
       data-error={error === null ? undefined : ''}
+      data-running={mine ? '' : undefined}
       onClick={(event) => {
         event.stopPropagation()
         if (busy || mine || optimizer === undefined) return
@@ -172,9 +175,12 @@ function OptimizeButton({ base, t, local }: { base: string; local: Snapshot } & 
       }}
     >
       {mine && <ProgressRing progress={running === null ? 0 : (progress ?? 0)} />}
-      {done && !mine
-        ? <IconCheckOutlineRegular size={14} />
-        : <IconGaugeOutlineRegular size={mine ? 12 : 14} />}
+      {mine && <span className={css.percent}>{percent === null ? '…' : `${String(percent)}%`}</span>}
+      <span className={css.icon}>
+        {done && !mine
+          ? <IconCheckOutlineRegular size={14} />
+          : <IconGaugeOutlineRegular size={mine ? 12 : 14} />}
+      </span>
     </button>
   )
 }

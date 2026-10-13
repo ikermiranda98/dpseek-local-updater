@@ -190,6 +190,20 @@ export function localSetCleanup(enabled: boolean): { readonly cleanup: boolean }
   return { cleanup: enabled }
 }
 
+/** Desde cuándo se anotan los usos (local-ajustes.json → usoDesde; se fija la primera vez). */
+function trackingSince(now: number): number {
+  const file = join(storages(), 'local-ajustes.json')
+  const settings = readJson<Record<string, unknown>>(file, {})
+  const since = typeof settings.usoDesde === 'string' ? Date.parse(settings.usoDesde) : Number.NaN
+  if (Number.isFinite(since)) return since
+  try {
+    writeFileSync(file, JSON.stringify({ ...settings, usoDesde: new Date(now).toISOString() }, null, 1))
+  } catch {
+    // Sin poder guardarlo, se cuenta desde ahora en cada consulta: nada sale como «sin usar».
+  }
+  return now
+}
+
 function recordUse(name: string): void {
   const file = join(storages(), 'local-variantes-uso.json')
   try {
@@ -236,6 +250,7 @@ export async function localModelsInfo(): Promise<{ readonly models: readonly Loc
   const tags = ((await response.json()) as { models?: { name: string, size: number, modified_at: string }[] }).models ?? []
   const usage = readJson<Record<string, string>>(join(storages(), 'local-variantes-uso.json'), {})
   const now = Date.now()
+  const tracking = trackingSince(now)
   return {
     models: tags.filter(tag => !VARIANT.test(tag.name)).map((tag) => {
       const uses = Object.entries(usage)
@@ -243,8 +258,9 @@ export async function localModelsInfo(): Promise<{ readonly models: readonly Loc
         .map(([, date]) => Date.parse(date))
         .filter(Number.isFinite)
       const lastUse = uses.length === 0 ? undefined : Math.max(...uses)
-      // Sin usos anotados, cuenta desde que se descargó.
-      const since = lastUse ?? Date.parse(tag.modified_at)
+      // Sin usos anotados, cuenta desde que se descargó o, si es anterior, desde
+      // que la app empezó a anotarlos: antes de eso no se sabe si se usaba.
+      const since = lastUse ?? Math.max(Date.parse(tag.modified_at) || 0, tracking)
       const idleDays = Number.isFinite(since) ? Math.floor((now - since) / DAY_MS) : 0
       return {
         id: tag.name,

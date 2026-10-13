@@ -134,7 +134,7 @@ Cómo funciona:
   del selector): vuelve a medir ese modelo ahora, en segundo plano (carga el
   modelo varias veces; unos minutos). Si había un modelo cargado, lo descarga
   primero. Mientras mide, un anillo alrededor del icono se va completando con el
-  progreso (pasa el ratón por encima para ver el porcentaje); al dar la vuelta
+  progreso; al pasar el ratón por encima, el anillo se cambia por el porcentaje. Al dar la vuelta
   entera aparece una marca ✓. Úsalo tras cambiar de gráfica, de versión de Ollama o de ajustes de
   Ollama; el nuevo recomendado se ve al volver a abrir la app (las capas se
   aplican al momento).
@@ -162,8 +162,9 @@ Cómo funciona:
   ese tamaño (unos segundos) y se borran al abrir la app si llevan **7 días** sin
   usarse. Así puedes mover la barra cuando quieras sin que `ollama list` se llene
   de variantes. Desactivado, se crean todas al abrir la app y no se borra ninguna.
-- **Modelos sin usar**: un modelo que no usas desde hace **30 días** (o desde que
-  lo descargaste, si nunca lo has usado) aparece en la lista del selector con la
+- **Modelos sin usar**: un modelo que no usas desde hace **30 días** (contando
+  desde que lo descargaste o desde que la app empezó a anotar los usos, lo más
+  reciente) aparece en la lista del selector con la
   marca «Sin usar · X GB» y una papelera. El primer clic pide confirmación
   («¿Borrar X GB?», 4 segundos); el segundo lo borra del disco con todas sus
   variantes. Es lo único de la app que borra un modelo descargado, y siempre a

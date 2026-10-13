@@ -180,7 +180,27 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "fontSize.description": "Solo afecta al contenido de la conversación",
     "fontSize.unit": "px",
     "fontSize.increase": "Aumentar tamaño de letra",
-    "fontSize.decrease": "Reducir tamaño de letra"
+    "fontSize.decrease": "Reducir tamaño de letra",
+    "fontSize.text.title": "Tamaño de letra",
+    "fontSize.text.description": "Solo afecta al contenido de la conversación",
+    "fontSize.text.increase": "Aumentar el tamaño de letra",
+    "fontSize.text.decrease": "Reducir el tamaño de letra",
+    "fontSize.code.title": "Tamaño de letra del código",
+    "fontSize.code.description": "Para bloques de código, código en línea y salida de herramientas",
+    "fontSize.code.increase": "Aumentar el tamaño de letra del código",
+    "fontSize.code.decrease": "Reducir el tamaño de letra del código",
+    "fontSize.terminal.title": "Tamaño de letra del terminal",
+    "fontSize.terminal.description": "Para el terminal de la barra lateral",
+    "fontSize.terminal.increase": "Aumentar el tamaño de letra del terminal",
+    "fontSize.terminal.decrease": "Reducir el tamaño de letra del terminal",
+    "fontFamily.text.title": "Fuente del texto",
+    "fontFamily.text.description": "Para la interfaz y el texto de la conversación. Separa las fuentes con comas; déjalo vacío para usar la predeterminada",
+    "fontFamily.code.title": "Fuente del código",
+    "fontFamily.code.description": "Para bloques de código, código en línea y salida de herramientas. Separa las fuentes con comas; déjalo vacío para usar la predeterminada",
+    "fontFamily.terminal.title": "Fuente del terminal",
+    "fontFamily.terminal.description": "Para el terminal de la barra lateral. Separa las fuentes con comas; déjalo vacío para usar la predeterminada",
+    "fontFamily.placeholder": "Predeterminada",
+    "fontSize.more": "Más ajustes de fuente"
   },
   "settings.sessionLog": {
     "title": "Subir el registro de sesión al usar la API oficial de modelos",
@@ -245,7 +265,8 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "terminal.collapse": "Contraer",
     "terminal.collapseAria": "Contraer salida",
     "terminal.expand": "Mostrar {n} líneas más",
-    "terminal.expandAria": "Expandir {n} líneas de salida ocultas"
+    "terminal.expandAria": "Expandir {n} líneas de salida ocultas",
+    "terminal.commandLine": "Línea de comandos {n}"
   },
   "settings.shell": {
     "title": "Shell",
@@ -768,7 +789,9 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "local.bulk.confirm": "Eliminar {n}",
     "local.bulk.more": "y {n} más",
     "local.bulk.progress": "Eliminando {done} de {n}…",
-    "local.bulk.failed": "No se pudieron eliminar: {titles}"
+    "local.bulk.failed": "No se pudieron eliminar: {titles}",
+    "toast.forkRequiresOpen": "Abre la sesión original para completar la migración antes de crear una rama.",
+    "toast.openForkSource": "Abrir la sesión original"
   },
   "pluginManager": {
     "panel": "Plugins",
@@ -967,7 +990,20 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "reasonIncompatibleVersionUnnamed": "Este plugin no es compatible con la versión de DSH en ejecución; ejecutarlo puede provocar bloqueos o pérdida de datos.",
     "reasonIncompatibleInstall": "Instala una versión del plugin compatible con este DSH.",
     "reasonIncompatibleInstalled": "Desinstálalo e instala una versión compatible con este DSH.",
-    "reasonOperationError": "El host ha informado de un error."
+    "reasonOperationError": "El host ha informado de un error.",
+    "basicTitle": "Ajustes de los plugins integrados",
+    "extensionsTitle": "Plugins experimentales",
+    "moreTitle": "Plugins experimentales",
+    "moreAction": "Más",
+    "statusNotInstalled": "No instalado",
+    "statusMissingFiles": "Paquete no disponible",
+    "statusUpdateAvailable": "Actualización disponible",
+    "sourceNotInstalled": "No instalado",
+    "sourceTargetSpec": "Origen para este DSH",
+    "sourceTargetVersion": "Versión para este DSH",
+    "update": "Actualizar",
+    "updateLabel": "Actualizar {name}",
+    "terminalCommandLine": "Línea de comandos {n}"
   },
   "sidebarRight": {
     "command.close": "Cerrar la página o ventana actual",
@@ -1019,7 +1055,38 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "path.revealError": "No se pudo mostrar la ubicación del archivo. Vuelve a intentarlo.",
     "app.explorer": "Explorador de archivos",
     "app.filemanager": "Archivos",
-    "app.terminal": "Terminal"
+    "app.terminal": "Terminal",
+    "app.cursor": "Cursor",
+    "app.vscode": "VS Code",
+    "app.vscodeinsiders": "VS Code Insiders",
+    "app.windsurf": "Windsurf",
+    "app.zed": "Zed",
+    "app.sublimetext": "Sublime Text",
+    "app.xcode": "Xcode",
+    "app.androidstudio": "Android Studio",
+    "app.intellij": "IntelliJ IDEA",
+    "app.pycharm": "PyCharm",
+    "app.webstorm": "WebStorm",
+    "app.phpstorm": "PhpStorm",
+    "app.goland": "GoLand",
+    "app.rider": "Rider",
+    "app.rustrover": "RustRover",
+    "app.fork": "Fork",
+    "app.sourcetree": "Sourcetree",
+    "app.github": "GitHub Desktop",
+    "app.tower": "Tower",
+    "app.gitkraken": "GitKraken",
+    "app.smartgit": "SmartGit",
+    "app.sublimemerge": "Sublime Merge",
+    "app.ghostty": "Ghostty",
+    "app.warp": "Warp",
+    "app.iterm": "iTerm2",
+    "app.kitty": "kitty",
+    "app.windowsterminal": "Windows Terminal",
+    "app.gitbash": "Git Bash",
+    "app.gnometerminal": "GNOME Terminal",
+    "app.konsole": "Konsole",
+    "app.finder": "Finder"
   },
   "sidebar": {
     "session.new": "Nueva sesión",
@@ -1397,7 +1464,9 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "terminal.expandAria": "Expandir las {n} líneas de salida restantes",
     "terminal.expandRest": "… {n} líneas más",
     "terminal.sendInput": "(enviar entrada)",
-    "terminal.session": "Terminal {sessionId}"
+    "terminal.session": "Terminal {sessionId}",
+    "row.commandArguments": "Argumentos del comando",
+    "terminal.commandLine": "Línea de comandos {n}"
   },
   "sidebarDocumentPreview": {
     "loading": "Renderizando documento…",
@@ -1496,7 +1565,8 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "shapes": "formas",
     "conditionalFormatting": "formato condicional",
     "featureSeparator": ", ",
-    "retry": "Reintentar"
+    "retry": "Reintentar",
+    "language": "es"
   },
   "sidebarCodePreview": {
     "title": "Código",
@@ -1642,7 +1712,9 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "readonly.oneShot.title": "Registro de subagente de un solo uso",
     "readonly.title": "Este subagente es de solo lectura por ahora",
     "readonly.oneShot.body": "Las tareas de un solo uso no admiten mensajes de seguimiento; aquí puedes revisar el registro completo de la ejecución.",
-    "readonly.body": "La sesión padre está desconectada; vuelve a abrirla para seguir enviando mensajes."
+    "readonly.body": "La sesión padre está desconectada; vuelve a abrirla para seguir enviando mensajes.",
+    "catalog.migrationRequired": "Hay que migrarlo",
+    "mode.external": "Tarea externa"
   },
   "model": {
     "provider.account": "Cuenta de DeepSeek",
@@ -1909,7 +1981,8 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "layout.toolsRemoved": "Quitadas: {names}",
     "layout.toolsRemovedCount": "{count} quitadas",
     "layout.systemPromptAndToolsUpdated": "Prompt de sistema y herramientas actualizados",
-    "layout.compactionInterrupted": "La compactación se interrumpió antes de terminar."
+    "layout.compactionInterrupted": "La compactación se interrumpió antes de terminar.",
+    "details.lastAttemptError": "Error del último intento"
   },
   "chat": {
     "message.stepProcess.thinking": "Analizando la petición",
@@ -2097,7 +2170,11 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "row.failed": "Fallido",
     "json.truncated": "… truncado, {total} caracteres en total",
     "clock.md": "{d}/{m}",
-    "clock.ymd": "{d}/{m}/{y}"
+    "clock.ymd": "{d}/{m}/{y}",
+    "settings.collapse.title": "Cuándo contraer los detalles del trabajo",
+    "settings.collapse.description": "Elige cuándo se contraen solos los detalles del trabajo",
+    "settings.collapse.completion": "Al terminar",
+    "settings.collapse.nextInput": "Al enviar el siguiente mensaje"
   },
   "goal": {
     "phase.active": "Objetivo en curso",
@@ -2163,7 +2240,8 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "status.completed": "Completado",
     "status.failed": "Fallido",
     "status.cancelled": "Cancelado",
-    "status.interrupted": "Interrumpido"
+    "status.interrupted": "Interrumpido",
+    "run.title": "{name}"
   },
   "deliverables": {
     "presented.nativeUnavailable": "Este archivo no tiene una ruta disponible en el host. Previsualízalo en la barra lateral.",
@@ -2223,7 +2301,9 @@ export const esPack: Readonly<Record<string, Readonly<Record<string, string>>>> 
     "diff.deleted": "Eliminado en este turno",
     "diff.unchanged": "Ambos lados tienen las mismas líneas",
     "diff.coarse": "La comparación línea a línea tardó demasiado; se muestra como sustitución del archivo completo",
-    "diff.truncated": "Se muestran las primeras {count} líneas"
+    "diff.truncated": "Se muestran las primeras {count} líneas",
+    "changes.added": "+{count}",
+    "changes.deleted": "-{count}"
   },
   "plan": {
     "chip.label": "Plan",
