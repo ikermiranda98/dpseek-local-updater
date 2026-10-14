@@ -1,5 +1,5 @@
 // Aplica las modificaciones locales (Ollama, sin inicio de sesión, sin telemetría,
-// idioma español, eliminar chats, contexto por chat) sobre una copia del repositorio de DeepSeek Harness.
+// eliminar chats, contexto por chat) sobre una copia del repositorio de DeepSeek Harness.
 //
 // Uso: node sistema/aplicar-cambios.mjs <ruta-del-repositorio>
 //
@@ -285,7 +285,7 @@ const toPiAi = (m) => {
   return {
     id: variantName(m.id, 'auto'),
     // Solo se usa si Ollama no responde al abrir la app: el nombre lo dice.
-    name: `${m.nombre ?? config.nombres?.[m.id] ?? fallbackName(m.id)} · Ollama no responde`,
+    name: `${m.nombre ?? config.nombres?.[m.id] ?? fallbackName(m.id)} · Ollama not responding`,
     contextWindow: ctx,
     maxTokens: Math.min(config.maxTokensSalida, Math.floor(ctx / 2)),
     input: m.imagenes ? ['text', 'image'] : ['text'],
@@ -413,38 +413,6 @@ else done.push(`búsqueda web desactivada (${toolWeb} fila/s)`)
     if (after !== before) write(spec, after)
   }
 }
-
-// ── 4. Idioma español ─────────────────────────────────────────────────────────
-
-optional('idioma español (Ajustes → General → Idioma)', (tx) => {
-  const localeDir = join(repo, 'packages', 'client', 'locale', 'src')
-  const index = join(localeDir, 'client', 'index.ts')
-  // Si DeepSeek añade el español, se usa su traducción.
-  const ownLine = (line) => line.includes('esPack') || line.includes("label: 'Español', fallback: 'en'") || line.includes('Local build: Spanish')
-  const officialEs = existsSync(join(localeDir, 'locales', 'es.ts'))
-    || existsSync(index) && tx.read(index).split('\n').filter((line) => !ownLine(line)).some((line) => /id:\s*['"]es['"]/.test(line))
-  if (officialEs) official('el idioma español')
-
-  tx.copy(join(here, 'es-pack.ts'), join(localeDir, 'locales', 'es-pack.ts'))
-  let text = tx.read(index)
-  if (!text.includes("from '../locales/es-pack.ts'")) {
-    const anchor = text.match(/^import .*from '\.\.\/locales\/index\.ts'\r?\n/m)
-    if (!anchor) skip(`no se encuentra el import de '../locales/index.ts' en ${rel(index)}`)
-    text = text.replace(anchor[0], anchor[0] + "import { esPack } from '../locales/es-pack.ts'\n")
-  }
-  if (!text.includes('esPack)')) {
-    const provide = text.match(/^(\s*)ctx\.provide\('locale', locale\)\r?\n/m)
-    if (!provide) skip(`no se encuentra ctx.provide('locale', locale) en ${rel(index)}`)
-    const pad = provide[1]
-    text = text.replace(provide[0], [
-      `${pad}// Local build: Spanish language pack; missing keys fall back to English.`,
-      `${pad}locale.addLanguage({ id: 'es', label: 'Español', fallback: 'en' })`,
-      `${pad}for (const [ns, dict] of Object.entries(esPack)) locale.register(ns, 'es', dict)`,
-      '',
-    ].join('\n') + provide[0])
-  }
-  tx.write(index, text)
-})
 
 // ── 5. Instalador sin firmar: sin servidor de actualización obligatoria ───────
 // El empaquetado exige un servidor de "actualización obligatoria" de DeepSeek que
@@ -886,43 +854,6 @@ optional('chats antiguos pasan solos al contexto recomendado', (tx) => {
   // Lo que ve el selector de modelo del chat.
   tx.replace(projection, 'view: state => ({ lastUsed: state.lastUsed, next: state.pending ?? state.lastUsed }),',
     'view: state => ({ lastUsed: localOllamaSelection(state.lastUsed), next: localOllamaSelection(state.pending ?? state.lastUsed) }),')
-})
-
-// ── 11. Menús y diálogos de la ventana en español ─────────────────────────────
-// La ventana (menús Aplicación/Edición, salir, actualizaciones…) solo trae inglés
-// y chino. Se añade el español (sistema/escritorio/locale-es.ts) cuando la app
-// está en español; las claves que falten salen en inglés.
-
-optional('menús y diálogos de la ventana en español', (tx) => {
-  const src = join(repo, 'apps', 'desktop', 'src')
-  const locale = join(src, 'locale.ts')
-  const text = tx.read(locale)
-  // Si DeepSeek añade el español al escritorio, se usa el suyo (sin contar nuestras líneas).
-  const theirs = text.split('\n').filter((line) => !line.includes('esDesktop') && !line.includes('local-build')).join('\n')
-  if (/export const es\b/.test(theirs)) official('el español en los menús de la ventana')
-  tx.copy(join(here, 'escritorio', 'locale-es.ts'), join(src, 'locale-es.ts'))
-  const clientTsconfig = join(src, '..', 'tsconfig.client.json')
-  const client = JSON.parse(tx.read(clientTsconfig))
-  if (Array.isArray(client.include) && client.include.includes('src/locale.ts') && !client.include.includes('src/locale-es.ts')) {
-    client.include.push('src/locale-es.ts')
-    tx.write(clientTsconfig, JSON.stringify(client, null, 2))
-  }
-  tx.replace(locale, '/** Typed English and Chinese copy owned by the Electron shell. */\n',
-    "/** Typed English and Chinese copy owned by the Electron shell. */\nimport { esDesktop } from './locale-es.ts'\n",
-    "from './locale-es.ts'")
-  tx.replace(locale, '} as const satisfies DesktopMessages\n',
-    '} as const satisfies DesktopMessages\n\n/** Local build: Spanish copy; keys it lacks fall back to English. */\n'
-      + 'export const es: DesktopMessages = { ...en, ...esDesktop }\n',
-    '...esDesktop')
-  tx.replace(locale, "readonly id: 'en' | 'zh-CN'\n", "readonly id: 'en' | 'zh-CN' | 'es'\n")
-  tx.replace(locale, 'export function resolveDesktopLocale(locale: string): DesktopLocale {\n',
-    'export function resolveDesktopLocale(locale: string): DesktopLocale {\n'
-      + "  if (locale.toLowerCase().startsWith('es')) return { id: 'es', messages: es } // local-build\n",
-    "return { id: 'es', messages: es }")
-  tx.replace(locale, "if (selected === 'zh' || selected === 'en') return resolveDesktopLocale(selected)",
-    "if (selected === 'zh' || selected === 'en' || selected === 'es') return resolveDesktopLocale(selected)")
-  tx.replace(locale, "if (primary === 'zh' || primary === 'en') return resolveDesktopLocale(primary)",
-    "if (primary === 'zh' || primary === 'en' || primary === 'es') return resolveDesktopLocale(primary)")
 })
 
 // ── 12. Aviso de Windows al terminar una respuesta ────────────────────────────

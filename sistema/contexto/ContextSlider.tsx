@@ -14,8 +14,8 @@ import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import css from './ContextSlider.module.css'
 
 const VARIANT = /(:|-)dsh-ctx-(auto|\d+)$/
-/** Nombre de la variante automática: «<modelo> · Auto 128K» (+ « (sin medir)»). */
-const AUTO_NAME = / · Auto (\d+K?)( \(sin medir\))?$/
+/** Nombre de la variante automática: «<modelo> · Auto 128K» (+ « (not measured)»). */
+const AUTO_NAME = / · Auto (\d+K?)( \(not measured\))?$/
 
 interface NamedModel {
   readonly id: string

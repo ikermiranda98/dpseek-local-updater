@@ -119,12 +119,12 @@ export function localOptimizeModel(modelId: string): LocalOptimizeResult {
   try {
     spec = JSON.parse(readFileSync(join(storages(), 'local-optimizar.json'), 'utf8')) as OptimizeSpec
   } catch {
-    throw new RemoteError('gateway/internal', 'No hay datos para medir: abre la app con Ollama en marcha y vuelve a intentarlo.', {})
+    throw new RemoteError('gateway/internal', 'Nothing to measure yet: open the app with Ollama running and try again.', {})
   }
   const model = baseModel(modelId)
   const item = spec.models[model]
   if (item === undefined) {
-    throw new RemoteError('gateway/internal', `Ollama no tenía el modelo ${model} al abrir la app; reiníciala y vuelve a intentarlo.`, {})
+    throw new RemoteError('gateway/internal', `Ollama did not have ${model} when the app opened; restart the app and try again.`, {})
   }
   try {
     const cache = JSON.parse(readFileSync(spec.job.cacheFile, 'utf8')) as Record<string, unknown>
@@ -278,17 +278,17 @@ export async function localModelsInfo(): Promise<{ readonly models: readonly Loc
 export async function localDeleteModel(modelId: string): Promise<{ readonly deleted: readonly string[] }> {
   const base = baseModel(modelId)
   const response = await ollama('/api/tags')
-  if (!response.ok) throw new RemoteError('gateway/internal', 'Ollama no responde; no se ha borrado nada.', {})
+  if (!response.ok) throw new RemoteError('gateway/internal', 'Ollama is not responding; nothing was deleted.', {})
   const tags = ((await response.json()) as { models?: { name: string }[] }).models ?? []
   const names = tags.map(tag => tag.name).filter(name => name === base || (VARIANT.test(name) && baseModel(name) === base))
-  if (!names.includes(base)) throw new RemoteError('gateway/internal', `Ollama no tiene el modelo ${base}.`, {})
+  if (!names.includes(base)) throw new RemoteError('gateway/internal', `Ollama does not have ${base}.`, {})
   const deleted: string[] = []
   // Primero las variantes y al final el modelo, que es el que libera el disco.
   for (const name of [...names.filter(name => name !== base), base]) {
     const result = await ollama('/api/delete', { model: name }, 'DELETE')
     if (result.ok) deleted.push(name)
   }
-  if (!deleted.includes(base)) throw new RemoteError('gateway/internal', `Ollama no ha podido borrar ${base}.`, {})
+  if (!deleted.includes(base)) throw new RemoteError('gateway/internal', `Ollama could not delete ${base}.`, {})
   const spec = readSpec()
   if (spec !== undefined) {
     const cache = readJson<Record<string, unknown>>(spec.job.cacheFile, {})

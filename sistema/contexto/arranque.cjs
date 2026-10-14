@@ -315,7 +315,7 @@ async function main() {
     })
     result.push({
       id: variantName(m.name, 'auto'),
-      name: `${display(m.name)} · Auto ${kilo(auto)}${fresh ? '' : ' (sin medir)'}`,
+      name: `${display(m.name)} · Auto ${kilo(auto)}${fresh ? '' : ' (not measured)'}`,
       ...common(auto),
     })
     for (const s of sizes) result.push({ id: variantName(m.name, String(s)), name: `${display(m.name)} · ${kilo(s)}`, ...common(s) })

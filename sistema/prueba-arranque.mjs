@@ -2,24 +2,21 @@
 //
 // Abre la app compilada (carpeta win-unpacked) con datos temporales, espera a que
 // cargue la interfaz y falla si no lo hace: así una versión que compila pero no
-// arranca no llega a publicarse ni a instalarse sola. De paso cuenta los textos
-// de la app que aún no tienen traducción en sistema/es-pack.json.
+// arranca no llega a publicarse ni a instalarse sola.
 //
-// Uso: node sistema/prueba-arranque.mjs <ruta del .exe> [informe.md]
+// Uso: node sistema/prueba-arranque.mjs <ruta del .exe>
 // Sale con código 1 si la app no arranca en 4 minutos.
 
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 
-const [exe, report] = process.argv.slice(2)
+const [exe] = process.argv.slice(2)
 if (!exe) {
-  console.error('Uso: node sistema/prueba-arranque.mjs <ruta del .exe> [informe.md]')
+  console.error('Uso: node sistema/prueba-arranque.mjs <ruta del .exe>')
   process.exit(2)
 }
-const here = dirname(fileURLToPath(import.meta.url))
 const PORT = 9393
 const LIMIT_MS = 4 * 60_000
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms) })
@@ -80,31 +77,6 @@ async function waitReady(cdp, deadline) {
   throw new Error('la interfaz no ha terminado de cargar a tiempo')
 }
 
-/** Engancha el registro de idiomas para capturar los diccionarios en inglés al recargar. */
-const HOOK = `(() => {
-  const tag = new WeakMap(); const dump = {}; window.__enDump = dump
-  const orig = Map.prototype.set
-  Map.prototype.set = function (k, v) {
-    if (typeof k === 'string' && v instanceof Map) tag.set(v, k)
-    else if (k === 'en' && v && typeof v === 'object' && tag.has(this)) {
-      const vals = Object.values(v)
-      if (vals.length && vals.every(x => typeof x === 'string')) dump[tag.get(this)] = { ...v }
-    }
-    return orig.call(this, k, v)
-  }
-})()`
-
-function missingTranslations(english) {
-  const es = JSON.parse(readFileSync(join(here, 'es-pack.json'), 'utf8'))
-  const missing = []
-  for (const [ns, dict] of Object.entries(english)) {
-    for (const [key, text] of Object.entries(dict)) {
-      if (es[ns]?.[key] === undefined) missing.push({ ns, key, text })
-    }
-  }
-  return missing
-}
-
 let failure
 try {
   const deadline = Date.now() + LIMIT_MS
@@ -119,29 +91,6 @@ try {
   await waitReady(cdp, deadline)
   console.log('La app arranca y carga la interfaz.')
 
-  // Textos sin traducir: se recarga la página con el gancho puesto.
-  await cdp.send('Page.enable')
-  await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: HOOK })
-  await cdp.send('Page.reload', { ignoreCache: true })
-  await sleep(3000)
-  await waitReady(cdp, Date.now() + LIMIT_MS)
-  await sleep(5000)
-  const english = JSON.parse(await cdp.evaluate('JSON.stringify(window.__enDump ?? {})') ?? '{}')
-  const missing = missingTranslations(english)
-  const total = Object.values(english).reduce((n, dict) => n + Object.keys(dict).length, 0)
-  console.log(`Textos de la app: ${total}; sin traducir al español: ${missing.length}`)
-  if (report) {
-    const lines = missing.length === 0
-      ? ['Todos los textos de la app tienen traducción al español.']
-      : [
-        `**${missing.length} textos nuevos sin traducir** (salen en inglés hasta añadirlos a \`sistema/es-pack.json\`):`,
-        '',
-        ...missing.slice(0, 40).map((m) => `- \`${m.ns}\` · \`${m.key}\`: ${m.text.replace(/\s+/g, ' ').slice(0, 90)}`),
-        ...(missing.length > 40 ? [`- … y ${missing.length - 40} más`] : []),
-      ]
-    writeFileSync(report, lines.join('\n') + '\n')
-    writeFileSync(report.replace(/\.md$/, '') + '.json', JSON.stringify(missing, null, 1))
-  }
   cdp.ws.close()
 } catch (error) {
   failure = error

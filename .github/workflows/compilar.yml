@@ -1,4 +1,4 @@
-# Compila DeepSeek Harness con los cambios locales (Ollama, español, sin inicio de
+# Compila DeepSeek Harness con los cambios locales (Ollama, sin inicio de
 # sesión ni telemetría) y lo publica como Release. La app instalada busca sus
 # actualizaciones en el último Release (ver "actualizaciones" en config.json).
 #
@@ -25,8 +25,6 @@ on:
 permissions:
   contents: write
   actions: write
-  # Traducción automática de los textos nuevos (GitHub Models, sin claves aparte).
-  models: read
 
 concurrency:
   group: compilar
@@ -159,60 +157,12 @@ jobs:
       - name: Probar que la app arranca
         # Abre la app recién compilada con datos temporales y espera a que cargue la
         # interfaz: si no arranca, no se publica (y nadie la recibe como
-        # actualización). De paso cuenta los textos que faltan por traducir.
+        # actualización).
         run: |
           $unpacked = "$env:CODIGO/apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts/win-unpacked"
           $app = Get-ChildItem $unpacked -Filter '*.exe' | Where-Object { $_.Name -notmatch 'uninstall|elevate' } | Select-Object -First 1
           if (-not $app) { Get-ChildItem $unpacked; throw 'No se encuentra el ejecutable de la app' }
-          node sistema/prueba-arranque.mjs $app.FullName "$env:RUNNER_TEMP/traducciones.md"
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          if (Test-Path "$env:RUNNER_TEMP/traducciones.md") {
-            Get-Content "$env:RUNNER_TEMP/traducciones.md" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
-          }
-
-      - name: Traducir los textos nuevos
-        # Si la versión oficial trae textos sin traducir, los traduce GitHub Models y
-        # se recompila con ellos. Si no responde o una traducción no pasa las
-        # comprobaciones (variables {…} intactas…), ese texto sale en inglés.
-        id: traducir
-        continue-on-error: true
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: |
-          $faltan = "$env:RUNNER_TEMP/traducciones.json"
-          if (-not (Test-Path $faltan)) { "traducidos=0" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT; exit 0 }
-          $salida = node sistema/traduccion/traducir-automatico.mjs $faltan "$env:RUNNER_TEMP/traducciones-auto.md"
-          $salida
-          $n = ($salida | Select-String '^traducidos=(\d+)$' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -Last 1)
-          if (-not $n) { $n = '0' }
-          "traducidos=$n" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
-          if ($n -ne '0') {
-            Copy-Item sistema/es-pack.ts "$env:CODIGO/packages/client/locale/src/locales/es-pack.ts"
-            Get-Content "$env:RUNNER_TEMP/traducciones-auto.md" | Out-File -Append -Encoding utf8 $env:GITHUB_STEP_SUMMARY
-          }
-          exit 0
-
-      - name: Recompilar con las traducciones
-        if: fromJSON(steps.traducir.outputs.traducidos || '0') > 0
-        working-directory: D:\dsh
-        env:
-          DSH_LOCAL_SIN_AYUDANTES: '1'
-        run: |
-          foreach ($intento in 1, 2) {
-            corepack pnpm run package:desktop:win:x64:unsigned -- --build-version $env:BUILD
-            if ($LASTEXITCODE -eq 0) { break }
-            if ($intento -eq 2) { exit $LASTEXITCODE }
-            Write-Host "::warning::El empaquetado ha fallado; se reintenta una vez."
-            Start-Sleep -Seconds 20
-          }
-
-      - name: Probar otra vez que la app arranca
-        if: fromJSON(steps.traducir.outputs.traducidos || '0') > 0
-        run: |
-          $unpacked = "$env:CODIGO/apps/desktop/.desktop-build/targets/win-x64/unsigned-artifacts/win-unpacked"
-          $app = Get-ChildItem $unpacked -Filter '*.exe' | Where-Object { $_.Name -notmatch 'uninstall|elevate' } | Select-Object -First 1
-          if (-not $app) { Get-ChildItem $unpacked; throw 'No se encuentra el ejecutable de la app' }
-          node sistema/prueba-arranque.mjs $app.FullName "$env:RUNNER_TEMP/traducciones.md"
+          node sistema/prueba-arranque.mjs $app.FullName
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Publicar el Release
@@ -243,7 +193,7 @@ jobs:
           $files = @($nuevoExe, "$nuevoExe.blockmap", $feed, $volver) | Where-Object { Test-Path $_ }
           $notes = @"
           Instalador de DeepSeek Harness **$env:VERSION** con los cambios locales:
-          Ollama como proveedor, sin modelos online ni inicio de sesión de DeepSeek, sin telemetría, interfaz en español, eliminar chats (uno o varios a la vez), barra de contexto en el selector de cada chat (con el recomendado medido para tu equipo), el modelo listo mientras la app está abierta, nombres cortos de los modelos y aviso de Windows al terminar una respuesta.
+          Ollama como proveedor, sin modelos online ni inicio de sesión de DeepSeek, sin telemetría, eliminar chats (uno o varios a la vez), barra de contexto en el selector de cada chat (con el recomendado medido para tu equipo), el modelo listo mientras la app está abierta, nombres cortos de los modelos y aviso de Windows al terminar una respuesta.
 
           - Versión oficial: [$env:ETIQUETA](https://github.com/deepseek-ai/deepseek-harness/releases/tag/$env:ETIQUETA)
           - Versión interna de la app: ``$env:BUILD``
@@ -251,30 +201,9 @@ jobs:
           - Instalación nueva: descarga ``$nombre.exe`` y ejecútalo.
           - Si esta versión te da problemas: descarga ``volver-a-version-anterior.ps1`` y ejecútalo (clic derecho → Ejecutar con PowerShell).
           "@
-          $auto = Join-Path $env:RUNNER_TEMP 'traducciones-auto.md'
-          if ((Test-Path $auto) -and (Get-Item $auto).Length -gt 0) { $notes += "`n`n" + (Get-Content $auto -Raw) }
-          $traducciones = Join-Path $env:RUNNER_TEMP 'traducciones.md'
-          if (Test-Path $traducciones) { $notes += "`n`n" + (Get-Content $traducciones -Raw) }
           $omitidos = Join-Path $env:RUNNER_TEMP 'omitidos.md'
           if ((Test-Path $omitidos) -and (Get-Item $omitidos).Length -gt 0) {
             $notes += "`n`n**Funciones nuestras omitidas en esta versión** (la oficial ya las trae o no encajan con su código):`n" + (Get-Content $omitidos -Raw)
           }
           gh release create $nombre $files --title $nombre --notes $notes --latest
 
-      - name: Guardar las traducciones automáticas en el repositorio
-        # Para que las siguientes compilaciones ya las traigan y se puedan revisar o
-        # corregir en sistema/es-pack.json. Un push con este token no lanza otra
-        # compilación. Si no se puede subir, solo se avisa: la próxima compilación
-        # las volverá a traducir.
-        if: fromJSON(steps.traducir.outputs.traducidos || '0') > 0
-        continue-on-error: true
-        run: |
-          git config user.name 'dpseek-local-updater'
-          git config user.email 'dpseek-local-updater@users.noreply.invalid'
-          git add sistema/es-pack.json sistema/es-pack.ts
-          git commit -m "Traducciones automáticas de $env:VERSION (${{ steps.traducir.outputs.traducidos }} textos)"
-          git pull --rebase origin main
-          if ($LASTEXITCODE) { Write-Host "::warning::No se han podido guardar las traducciones en main."; exit 0 }
-          git push origin HEAD:main
-          if ($LASTEXITCODE) { Write-Host "::warning::No se han podido guardar las traducciones en main." }
-          exit 0

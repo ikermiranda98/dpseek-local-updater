@@ -56,11 +56,11 @@ export class LocalSessionDeleter {
       await this.purgeOnce()
       const root = this.root()
       if (!SAFE_ID.test(sessionId)) {
-        throw new RemoteError('session/not-found', `id de sesión no válido: ${sessionId}`, { sessionId })
+        throw new RemoteError('session/not-found', `invalid session id: ${sessionId}`, { sessionId })
       }
       const records = await this.ctx.sessionQuery.listSessions()
       const known = records.some(record => record.header.id === sessionId) || this.ctx.sessions.get(sessionId) !== undefined
-      if (!known) throw new RemoteError('session/not-found', `la sesión ${sessionId} no existe`, { sessionId })
+      if (!known) throw new RemoteError('session/not-found', `session ${sessionId} does not exist`, { sessionId })
 
       // Archivar detiene el trabajo en curso (turnos, subagentes, tareas) y
       // bloquea nuevos pasos del modelo; si ya estaba archivada no hace nada.
@@ -114,7 +114,7 @@ export class LocalSessionDeleter {
     const persistence = this.ctx.get('sessionPersistence') as { config?: { root?: unknown } } | undefined
     const root = persistence?.config?.root
     if (typeof root !== 'string' || root.length === 0) {
-      throw new RemoteError('gateway/internal', 'el borrado de sesiones necesita el almacenamiento JSONL', {})
+      throw new RemoteError('gateway/internal', 'deleting sessions requires the JSONL storage', {})
     }
     return root
   }
