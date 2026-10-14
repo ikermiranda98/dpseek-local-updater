@@ -42,8 +42,9 @@ No hay que hacer nada:
    nueva. Si la hay, descarga su código, aplica los cambios de este repositorio,
    crea el instalador y lo publica como Release.
 2. Antes de publicarlo, **abre la app compilada y comprueba que arranca**; si no
-   carga, no se publica y nadie la recibe. De paso cuenta los textos nuevos que
-   faltan por traducir y los pone en las notas del Release.
+   carga, no se publica y nadie la recibe. De paso busca los textos nuevos que
+   faltan por traducir: los traduce solo (ver «Qué cambia respecto a la versión oficial»), recompila y
+   vuelve a probar la app.
 3. La app instalada lo detecta (Aplicación → Buscar actualizaciones, o sola cada
    pocos minutos), lo descarga y se instala con «Instalar y reiniciar».
 
@@ -236,10 +237,17 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |
 | Prueba de arranque y textos sin traducir antes de publicar | [`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs) en el workflow |
 
-Los textos que añadan versiones nuevas aparecen en inglés hasta que se traduzcan en
-`sistema/es-pack.json`; cada Release dice cuántos faltan y cuáles. En
-`sistema/traduccion/` están los scripts para extraer los textos de la app y validar
-la traducción. Los menús y diálogos de la ventana tienen su propia traducción
+**Textos nuevos de cada versión oficial: se traducen solos.** Si la prueba de
+arranque encuentra textos sin traducir, la compilación los traduce con GitHub Models
+(un modelo de IA de GitHub, gratis y sin claves: usa el permiso de la propia
+compilación), comprueba que cada traducción conserva sus variables (`{name}`,
+`$DSH_HOME`…), recompila y vuelve a probar la app. Las notas del Release listan lo
+traducido y las traducciones se guardan en `sistema/es-pack.json` (commit
+«Traducciones automáticas de…»), donde se pueden corregir a mano. Si GitHub Models
+no responde, se publica igual y esos textos salen en inglés, con la lista en las
+notas. Para comprobar que responde: Actions → *Probar la traducción automática* →
+*Run workflow*. En `sistema/traduccion/` están los scripts para traducir
+(`traducir-automatico.mjs`), extraer los textos de la app y validar la traducción. Los menús y diálogos de la ventana tienen su propia traducción
 (`sistema/escritorio/locale-es.ts`); lo que falte ahí sale en inglés.
 
 ## Aviso al terminar una respuesta
