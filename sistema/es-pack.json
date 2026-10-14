@@ -165,7 +165,21 @@
   "onboardingLater": "Configurar más tarde",
   "onboardingSave": "Guardar y continuar",
   "onboardingSaving": "Guardando…",
-  "keyRequired": "Introduce una clave de API para continuar."
+  "keyRequired": "Introduce una clave de API para continuar.",
+  "accountSignedIn": "Sesión iniciada",
+  "keyReveal": "Mostrar secreto",
+  "keyHide": "Ocultar secreto",
+  "keyPlaceholderFallback": "Déjalo vacío para autenticarte con la variable de entorno ({hint})",
+  "keyPlaceholderSaved": "Déjalo vacío para usar las credenciales guardadas",
+  "keyFallbackMissing": "No se detecta la variable de entorno. Introduce una clave de API o configura {hint} en tu entorno.",
+  "keyFallbackDetected": "Variable de entorno detectada. ({hint})",
+  "keyFallbackDetectedHidden": "Variable de entorno detectada.",
+  "keyFallbackUnchecked": "Aún no se ha comprobado si hay credenciales en el entorno.",
+  "keyHelp": "Primero se usan las credenciales guardadas. Alternativas del entorno, en este orden: {env}. Se buscan en el entorno de arranque, en $cwd/.env y después en $DSH_HOME/.env.",
+  "authHelp": "Detalles de autenticación",
+  "baseUrlEnvironment": "Configuración del endpoint del proveedor: {env}",
+  "baseUrlConfigured": "Endpoint configurado por el proveedor",
+  "baseUrlPlaceholder": "{url}"
  },
  "settings.theme": {
   "appearance.title": "Apariencia",
@@ -787,7 +801,10 @@
   "local.bulk.progress": "Eliminando {done} de {n}…",
   "local.bulk.failed": "No se pudieron eliminar: {titles}",
   "toast.forkRequiresOpen": "Abre la sesión original para completar la migración antes de crear una rama.",
-  "toast.openForkSource": "Abrir la sesión original"
+  "toast.openForkSource": "Abrir la sesión original",
+  "menu.sessionId": "Copiar ID de sesión",
+  "toast.sessionIdCopied": "ID de sesión copiado",
+  "toast.sessionIdCopyFailed": "No se pudo copiar. Inténtalo de nuevo."
  },
  "pluginManager": {
   "panel": "Plugins",
@@ -999,7 +1016,15 @@
   "sourceTargetVersion": "Versión para este DSH",
   "update": "Actualizar",
   "updateLabel": "Actualizar {name}",
-  "terminalCommandLine": "Línea de comandos {n}"
+  "terminalCommandLine": "Línea de comandos {n}",
+  "restartReasonNoHmr": "Este perfil solo aplica los cambios al arrancar.",
+  "restartReasonPackageMoved": "Un paquete instalado ahora apunta a otra carpeta, o el cambio sustituye un paquete que trae la instalación de DSH. Desinstala el paquete antes de instalarlo desde otra ubicación.",
+  "restartReasonHostModule": "El cambio afecta a módulos que ha cargado el propio DSH.",
+  "restartReasonUnmanagedPlugin": "El cambio afecta a un plugin que funciona fuera de la lista de plugins.",
+  "restartReasonModuleComparison": "DSH no ha podido comparar los plugins cargados con sus archivos.",
+  "previewAlt": "Vista previa de la función {name}",
+  "previewUnavailable": "La vista previa de la función no está disponible",
+  "reasonAlreadyInstalled": "Este paquete ya está instalado; desinstálalo antes de instalar otra versión."
  },
  "sidebarRight": {
   "command.close": "Cerrar la página o ventana actual",
@@ -1462,7 +1487,9 @@
   "terminal.sendInput": "(enviar entrada)",
   "terminal.session": "Terminal {sessionId}",
   "row.commandArguments": "Argumentos del comando",
-  "terminal.commandLine": "Línea de comandos {n}"
+  "terminal.commandLine": "Línea de comandos {n}",
+  "row.imageSize": "{width}x{height} px, {bytes} bytes",
+  "row.imageSizeDownscaled": "{width}x{height} px (reducida desde {originalWidth}x{originalHeight} px), {bytes} bytes"
  },
  "sidebarDocumentPreview": {
   "loading": "Renderizando documento…",
@@ -1657,7 +1684,11 @@
   "time.hours": "{n} h",
   "time.days": "{n} d",
   "time.months": "{n} mes.",
-  "time.years": "{n} a"
+  "time.years": "{n} a",
+  "fileOpen.title": "No se pudo abrir el archivo",
+  "fileOpen.failed": "No se pudo abrir «{path}». Inténtalo de nuevo o cierra este mensaje.",
+  "fileOpen.close": "Cerrar",
+  "fileOpen.retry": "Reintentar"
  },
  "skill": {
   "row.title": "Skill",
@@ -2170,7 +2201,9 @@
   "settings.collapse.title": "Cuándo contraer los detalles del trabajo",
   "settings.collapse.description": "Elige cuándo se contraen solos los detalles del trabajo",
   "settings.collapse.completion": "Al terminar",
-  "settings.collapse.nextInput": "Al enviar el siguiente mensaje"
+  "settings.collapse.nextInput": "Al enviar el siguiente mensaje",
+  "message.taskStopped": "Tarea detenida",
+  "message.failure.interrupted": "El proceso de DSH terminó antes de acabar este turno (por ejemplo, se cerró a la fuerza, falló o se agotó el tiempo al apagarse), así que el turno se cerró al reiniciarse DSH. No se sabe el resultado de las llamadas a herramientas que quedaron sin terminar."
  },
  "goal": {
   "phase.active": "Objetivo en curso",
@@ -2581,5 +2614,9 @@
   "card.openLabel": "Abrir los detalles de la tarea: {title}",
   "card.deleted": "Eliminada",
   "tool.invoked": "Se ha invocado {name}"
+ },
+ "secretMask": {
+  "secret.reveal": "Mostrar secreto",
+  "secret.hide": "Ocultar secreto"
  }
 }
