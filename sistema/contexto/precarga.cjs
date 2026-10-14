@@ -6,7 +6,7 @@
 //     Ollama no tiene nada cargado;
 //   - mientras la app sigue abierta, renueva la permanencia de los modelos de la
 //     app (variantes dsh-ctx-) que estén cargados, sin cargar otros;
-//   - al cerrarse la app, los descarga y libera la memoria.
+//   - al cerrarse la app, los descarga y libera la memoria, y termina enseguida.
 // Se aparta mientras se mide el contexto (calibrar.cjs) y si se abre otra copia
 // de la app, la nueva toma el relevo.
 'use strict'
@@ -16,11 +16,13 @@ const job = JSON.parse(process.env.DSH_CTX_KEEP)
 const TICK_MS = 60_000
 const KEEP = '10m'
 const RENEW_BEFORE_MS = 6 * 60_000
+const HOST_CHECK_MS = 1000
+const QUICK_MS = 3000
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms) })
 
-async function api(path, body, timeoutMs = 15 * 60_000) {
+async function api(path, body, timeoutMs = body === undefined ? 10_000 : 15 * 60_000) {
   const init = body === undefined
-    ? { signal: AbortSignal.timeout(10_000) }
+    ? { signal: AbortSignal.timeout(timeoutMs) }
     : { method: 'POST', body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) }
   const response = await fetch(job.ollama + path, init)
   if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`)
@@ -69,21 +71,37 @@ function recordUse(models) {
   }
 }
 
+/**
+ * Al cerrarse la app: descarga sus modelos y termina en unos segundos. Este proceso
+ * es el ejecutable de la app (sin ventana) y el instalador de actualizaciones solo
+ * espera unos segundos a que no quede ninguno: si sigue vivo, no actualiza.
+ */
+let leaving = false
+async function leave() {
+  if (leaving) return
+  leaving = true
+  if (mine()) {
+    try {
+      const models = ((await api('/api/ps', undefined, QUICK_MS)).models || []).filter((m) => ours(m.name))
+      await Promise.all(models.map((m) => api('/api/generate', { model: m.name, keep_alive: 0 }, QUICK_MS).catch(() => undefined)))
+    } catch {
+      // Ollama no responde: no hay nada que descargar a tiempo.
+    }
+    rmSync(job.lockFile, { force: true })
+  }
+  process.exit(0)
+}
+
 async function main() {
   // La copia más reciente de la app manda: la anterior lo verá y se retirará
   // sin descargar nada.
   writeFileSync(job.lockFile, `${process.pid}:${job.hostPid}`)
+  // Vigila la app aparte: las llamadas a Ollama de la vuelta pueden tardar minutos.
+  setInterval(() => { if (!alive(job.hostPid)) void leave() }, HOST_CHECK_MS)
   // Deja arrancar antes al medidor, que tiene prioridad.
   await sleep(20_000)
   for (;;) {
-    if (!mine()) return
-    if (!alive(job.hostPid)) {
-      for (const m of await loaded().catch(() => [])) {
-        if (ours(m.name)) await api('/api/generate', { model: m.name, keep_alive: 0 }).catch(() => undefined)
-      }
-      rmSync(job.lockFile, { force: true })
-      return
-    }
+    if (!mine()) process.exit(0)
     if (!existsSync(job.calibrationLock)) {
       try {
         const models = await loaded()

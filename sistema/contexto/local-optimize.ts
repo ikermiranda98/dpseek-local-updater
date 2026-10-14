@@ -135,7 +135,8 @@ export function localOptimizeModel(modelId: string): LocalOptimizeResult {
   } catch {
     // Sin mediciones previas.
   }
-  const job = { ...spec.job, force: true, models: [item] }
+  // Este proceso es el Host: si se cierra la app, el medidor lo deja (ver calibrar.cjs).
+  const job = { ...spec.job, force: true, hostPid: process.pid, models: [item] }
   launch(process.execPath, [spec.calibrator], {
     ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_CTX_JOB: JSON.stringify(job),
   })

@@ -136,7 +136,8 @@ Cómo funciona:
   primero. Mientras mide, un anillo alrededor del icono se va completando con el
   progreso; al pasar el ratón por encima, el anillo se cambia por el porcentaje. Al dar la vuelta
   entera aparece una marca ✓. Úsalo tras cambiar de gráfica, de versión de Ollama o de ajustes de
-  Ollama; el nuevo recomendado se ve al volver a abrir la app (las capas se
+  Ollama. Si cierras la app mientras mide, la medición se deja y se repite
+  al volver a abrirla; el nuevo recomendado se ve al volver a abrir la app (las capas se
   aplican al momento).
 - **Compresión del contexto de Ollama** (`OLLAMA_FLASH_ATTENTION=1` y
   `OLLAMA_KV_CACHE_TYPE=q8_0`, variables de usuario de Windows; hay que reiniciar

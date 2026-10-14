@@ -331,7 +331,8 @@ async function main() {
   // capas que la superen irían a la memoria compartida, mucho más lenta.
   const totalMiB = Number((/,\s*(\d+)\s*MiB/.exec(gpu) || [])[1])
   const vramLimit = totalMiB > 0 ? (totalMiB - 400) * 1024 * 1024 : undefined
-  const jobBase = { ollama: cfg.ollama, cacheFile, gpu, version, vramLimit }
+  // hostPid: el medidor lo deja si se cierra la app (ver calibrar.cjs).
+  const jobBase = { ollama: cfg.ollama, cacheFile, gpu, version, vramLimit, hostPid: process.ppid }
   if (helpers && process.env.DSH_CTX_CALIBRAR) {
     // Lo que necesita el botón «Optimizar» (local-optimize.ts) para medir cualquier modelo.
     const calibrator = join(home, 'storages', 'local-calibrar.cjs')

@@ -13,7 +13,8 @@
 //   - En todos se mide la velocidad de generación real. El recomendado es el mayor
 //     tamaño que mantiene al menos el 85 % de la velocidad del más rápido.
 // Solo mide con Ollama libre (ningún modelo cargado) y se aparta si alguien lo
-// usa mientras mide. El resultado va a <DSH_HOME>/storages/local-contexto.json.
+// usa mientras mide. Si se cierra la app, lo deja (se repite al volver a abrirla).
+// El resultado va a <DSH_HOME>/storages/local-contexto.json.
 'use strict'
 const { readFileSync, writeFileSync, mkdirSync, rmSync, renameSync } = require('node:fs')
 const { dirname } = require('node:path')
@@ -24,6 +25,8 @@ const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms) })
 const TOLERANCE = 0.99
 const KEEP_SPEED = 0.85
 const MAX_WAIT_MS = 3 * 60 * 60 * 1000
+const HOST_CHECK_MS = 1000
+const QUICK_MS = 3000
 
 async function api(path, body, timeoutMs = 10000) {
   const init = body === undefined
@@ -243,8 +246,31 @@ async function unloadAll() {
 }
 
 
+/**
+ * Al cerrarse la app se deja la medición: este proceso es el ejecutable de la app
+ * (sin ventana) y el instalador de actualizaciones solo espera unos segundos a que
+ * no quede ninguno. Lo cargado para medir es solo suyo (mide con Ollama libre).
+ */
+let leaving = false
+async function leave() {
+  if (leaving) return
+  leaving = true
+  try {
+    const models = (await api('/api/ps', undefined, QUICK_MS)).models || []
+    await Promise.all(models.map((m) => api('/api/generate', { model: m.name, keep_alive: 0 }, QUICK_MS).catch(() => undefined)))
+  } catch {
+    // Ollama no responde: no hay nada que descargar a tiempo.
+  }
+  rmSync(stateFile, { force: true })
+  rmSync(lockFile, { force: true })
+  process.exit(0)
+}
+
 async function main() {
   if (!takeLock()) return
+  const watch = Number.isInteger(job.hostPid) && job.hostPid > 0
+    ? setInterval(() => { if (!alive(job.hostPid)) void leave() }, HOST_CHECK_MS)
+    : undefined
   try {
     const deadline = Date.now() + MAX_WAIT_MS
     for (const item of job.models) {
@@ -285,6 +311,7 @@ async function main() {
       }
     }
   } finally {
+    if (watch !== undefined) clearInterval(watch)
     rmSync(stateFile, { force: true })
     rmSync(lockFile, { force: true })
   }
