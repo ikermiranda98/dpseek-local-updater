@@ -549,6 +549,17 @@ const deleteApplied = optional('opción «Eliminar sesión» en el menú de cada
       '  }',
       '',
       '  /**',
+      '   * Local build: Session rows without the deleted ones. First removes what the',
+      '   * previous run left pending, then hides Sessions whose deletion waits for the',
+      '   * next start.',
+      '   */',
+      '  private async localListed(signal: AbortSignal) {',
+      '    const hidden = await this.localDeleter().hidden()',
+      '    const items = await this.listState.list(signal)',
+      '    return items.filter(item => !hidden.has(item.sessionId))',
+      '  }',
+      '',
+      '  /**',
       '   * Local build: archive (stopping its work) and permanently delete one',
       '   * Session with its subagents. Sessions still attached in this process are',
       '   * hidden and removed at the next start.',
@@ -565,13 +576,17 @@ const deleteApplied = optional('opción «Eliminar sesión» en el menú de cada
     tx.write(hostIndex, host)
   }
   // Sin este filtro, un chat borrado con la sesión abierta se vería hasta reiniciar.
-  tx.replace(hostIndex, 'return { items: await this.listState.list(signal) }', [
-    '// Local build: first remove what the previous run left pending, then',
-    '    // hide Sessions whose deletion waits for the next start.',
-    '    const hidden = await this.localDeleter().hidden()',
-    '    const items = await this.listState.list(signal)',
-    '    return { items: hidden.size === 0 ? items : items.filter(item => !hidden.has(item.sessionId)) }',
-  ].join('\n'), 'this.localDeleter().hidden()')
+  // Solo se cambia la llamada a la lista dentro del método list, así da igual qué
+  // haga después la oficial con las filas (0.2.1-alpha.3 filtra por permisos).
+  host = tx.read(hostIndex)
+  if (!host.includes('this.localListed(signal)')) {
+    const method = host.search(/^\s*async list\([^)]*signal[^)]*\)/m)
+    const call = method < 0 ? -1 : host.indexOf('this.listState.list(signal)', method)
+    const end = method < 0 ? -1 : host.indexOf('\n  }', method)
+    if (call < 0 || call > end) skip(`no se encuentra this.listState.list(signal) en el método list de ${rel(hostIndex)}`)
+    host = host.slice(0, call) + 'this.localListed(signal)' + host.slice(call + 'this.listState.list(signal)'.length)
+    tx.write(hostIndex, host)
+  }
 
   // Interfaz: fila «Eliminar sesión» en el menú del chat y diálogo de confirmación.
   tx.copy(join(here, 'borrar-chats', 'DeleteSession.tsx'), join(uiDir, 'session-actions', 'DeleteSession.tsx'))
