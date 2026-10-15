@@ -92,6 +92,22 @@ Para forzar una compilación: pestaña **Actions** → *Compilar instalador* →
   workspace* (ya existía en la oficial). Solo lo quita de la lista; sus chats pasan
   a «Ungrouped», desde donde se pueden eliminar uno a uno o varios a la vez.
 
+## Editar mensajes y regenerar respuestas
+
+Como en Hermes Agent Desktop:
+
+- **Editar:** haz clic en tu mensaje y se edita en el sitio. Enter envía, Mayús+Enter
+  salta de línea y Esc cancela; un clic fuera solo cancela si no has cambiado nada.
+  Si seleccionas texto del mensaje (para copiarlo) o pulsas un enlace o una imagen,
+  no se abre el editor. Las imágenes adjuntas se reenvían; los archivos, no.
+- **Regenerar:** icono «Regenerate response» (↻) bajo cada respuesta de la IA,
+  también en las antiguas. Usa el modelo que tengas elegido en ese momento.
+- **Versiones:** el historial de un chat no se puede recortar, así que editar o
+  regenerar copia el chat hasta justo antes de ese mensaje, lo envía allí y archiva
+  el original. Bajo tu mensaje aparece «‹ 2/2 ›» para pasar de una versión a otra.
+  Cuando escribes un mensaje nuevo en una versión, esa queda como la buena y **las
+  demás se borran del todo** (la barra avisa si alguna tenía mensajes posteriores).
+
 ## Contexto de cada chat
 
 En el selector de modelo de cada chat, debajo de «Model», hay una **barra de
@@ -226,6 +242,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Sin búsqueda web (usa la API de DeepSeek); la lectura de páginas se mantiene | bundles y presets |
 | «Delete session» en el menú de cada chat (opcional) | `packages/api/session-controller` (método `session.deletePermanently`) + `packages/client/ui-workspace`; código en [`sistema/borrar-chats/`](sistema/borrar-chats) |
 | Seleccionar varios chats («Select several») y eliminarlos a la vez (opcional) | `packages/client/ui-workspace` (`BulkDelete.tsx`) |
+| Editar mensajes y regenerar respuestas, con versiones (opcional) | `packages/client/ui-chat`; código en [`sistema/regenerar/`](sistema/regenerar) |
 | Aviso de Windows al terminar una respuesta (opcional) | `packages/client/ui-workspace`; código en [`sistema/avisos/`](sistema/avisos) |
 | No volver a ofrecer una versión retirada (opcional) | `apps/desktop/src/update-coordinator.ts` (`local-skip-version.ts`) |
 | Instalador sin firma, sin la «actualización obligatoria» de DeepSeek | `apps/desktop/scripts` |

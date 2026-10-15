@@ -1219,6 +1219,94 @@ optional('lista de Ollama al día al abrir el selector de modelos', (tx) => {
     'onLiveOllama(')
 })
 
+// ── 16. Editar tus mensajes y regenerar respuestas, con versiones ──────────────
+// Como en Hermes Agent Desktop: clic en tu mensaje para editarlo en el sitio
+// (Enter envía, Esc cancela) e icono «Regenerate» bajo cada respuesta. El registro
+// de un chat no se puede recortar, así que se copia el chat hasta antes de ese
+// turno, se envía el mensaje y se archiva el original; «‹ 1/2 ›» bajo tu mensaje
+// cambia de versión y, al seguir escribiendo en una, las demás se borran
+// (deletePermanently de la sección 7). Código: sistema/regenerar/.
+
+optional('editar tus mensajes y regenerar respuestas (con versiones)', (tx) => {
+  if (!deleteApplied) skip('necesita «Eliminar sesión», que no se ha aplicado')
+  const chatDir = join(repo, 'packages', 'client', 'ui-chat', 'src', 'client')
+  const chatLocale = join(chatDir, 'locale.ts')
+  // Si DeepSeek añade la edición de mensajes o regenerar, se usan los suyos.
+  if (officialKeys(chatLocale).some((key) => /regenerat|editMessage|message\.edit|rerun/i.test(key))) {
+    official('editar mensajes y regenerar respuestas')
+  }
+  tx.copy(join(here, 'regenerar', 'local-regenerate.tsx'), join(chatDir, 'chat', 'local-regenerate.tsx'))
+  tx.copy(join(here, 'regenerar', 'local-regenerate.module.css'), join(chatDir, 'chat', 'local-regenerate.module.css'))
+
+  // El módulo necesita el contexto del chat (sesiones, espacios de trabajo, Host).
+  const apply = join(chatDir, 'apply.ts')
+  tx.replace(apply, "import { ChatView } from './chat/ChatView.tsx'\n",
+    "import { ChatView } from './chat/ChatView.tsx'\nimport { setLocalChat } from './chat/local-regenerate.tsx'\n",
+    "import { setLocalChat }")
+  tx.replace(apply, 'export function apply(ctx: Context): void {\n',
+    'export function apply(ctx: Context): void {\n'
+      + '  // Local build: edit and regenerate (local-regenerate.tsx).\n'
+      + '  setLocalChat(ctx)\n'
+      + "  ctx.effect(() => () => { setLocalChat(undefined) }, 'ui-chat: local edit and regenerate')\n",
+    'setLocalChat(ctx)')
+
+  // El chat da su sesión y su lector a los mensajes.
+  const view = join(chatDir, 'chat', 'ChatView.tsx')
+  tx.replace(view, "import css from './ChatView.module.css'\n",
+    "import css from './ChatView.module.css'\nimport { LocalChatProvider } from './local-regenerate.tsx'\n",
+    'import { LocalChatProvider }')
+  tx.replace(view, '            <MarkdownDelegateProvider openFile={requestOpenFile} openExternalLink={openExternalLink} fileImages={fileImages}>\n',
+    '            <LocalChatProvider sessionId={sessionId} useChat={useChat}>\n'
+      + '            <MarkdownDelegateProvider openFile={requestOpenFile} openExternalLink={openExternalLink} fileImages={fileImages}>\n',
+    '<LocalChatProvider sessionId={sessionId}')
+  tx.replace(view, '            </MarkdownDelegateProvider>\n',
+    '            </MarkdownDelegateProvider>\n            </LocalChatProvider>\n',
+    '</LocalChatProvider>')
+
+  // Tu mensaje: clic para editar y barra de versiones.
+  const message = join(chatDir, 'chat', 'MessageItem.tsx')
+  tx.replace(message, "import { MessageIconActions } from './MessageIconActions.tsx'\n",
+    "import { MessageIconActions } from './MessageIconActions.tsx'\nimport { LocalUserMessage } from './local-regenerate.tsx'\n",
+    'import { LocalUserMessage }')
+  tx.replace(message, '  const data = node.data\n  return (\n    <UserStyleBubble\n      content={data.content}\n      interactive\n',
+    '  const data = node.data\n  return (\n    <LocalUserMessage node={node} t={t}>\n    <UserStyleBubble\n      content={data.content}\n      interactive\n',
+    '<LocalUserMessage node={node}')
+  tx.replace(message, '      )}\n    />\n  )\n})\n\n/** Injected-context keyed Chat renderer. */',
+    '      )}\n    />\n    </LocalUserMessage>\n  )\n})\n\n/** Injected-context keyed Chat renderer. */',
+    '</LocalUserMessage>')
+
+  // Pie de cada respuesta: icono «Regenerate» junto a copiar y bifurcar.
+  const tail = join(chatDir, 'chat', 'TurnTailNodeView.tsx')
+  tx.replace(tail, "import { MessageIconActions } from './MessageIconActions.tsx'\n",
+    "import { MessageIconActions } from './MessageIconActions.tsx'\nimport { LocalRegenerateButton } from './local-regenerate.tsx'\n",
+    'import { LocalRegenerateButton }')
+  tx.replace(tail, '        extraActions={assistantActions}\n',
+    '        extraActions={<>{assistantActions}<LocalRegenerateButton turn={turn} useChat={useChat} t={t} /></>}\n',
+    '<LocalRegenerateButton')
+
+  addLocaleKeys(tx, chatLocale, 'ChatKey', {
+    'local.regen.button': '重新生成回复',
+    'local.edit.hint': '点击编辑消息',
+    'local.edit.send': '发送修改后的消息',
+    'local.edit.files': '附加的文件不会重新发送',
+    'local.versions.previous': '上一个版本',
+    'local.versions.next': '下一个版本',
+    'local.versions.count': '{n}/{total}',
+    'local.versions.warn': '在此继续将删除其他版本',
+    'local.versions.warnLater': '在此继续将删除其他版本（其中一个还有 {n} 轮对话）',
+  }, {
+    'local.regen.button': 'Regenerate response',
+    'local.edit.hint': 'Click to edit message',
+    'local.edit.send': 'Send edited message',
+    'local.edit.files': 'Attached files are not resent',
+    'local.versions.previous': 'Previous version',
+    'local.versions.next': 'Next version',
+    'local.versions.count': '{n}/{total}',
+    'local.versions.warn': 'Continuing here deletes the other versions',
+    'local.versions.warnLater': 'Continuing here deletes the other versions (one has {n} more turns)',
+  })
+})
+
 console.log('\nCambios aplicados:')
 for (const line of done) console.log(`  - ${line}`)
 if (omitted.length > 0) {

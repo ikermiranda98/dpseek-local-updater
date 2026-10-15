@@ -1,0 +1,161 @@
+/* Editar tus mensajes, regenerar respuestas y versiones (dpseek-local-updater). */
+
+/* Icono «Regenerate»: igual que copiar y bifurcar (MessageIconActions.module.css). */
+.action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(28px + var(--dsh-content-font-delta, 0px));
+  height: calc(28px + var(--dsh-content-font-delta, 0px));
+  padding: 6px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+}
+
+.action svg {
+  width: calc(15px + var(--dsh-content-font-delta, 0px));
+  height: calc(15px + var(--dsh-content-font-delta, 0px));
+}
+
+.action:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.action:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* Tu mensaje: la burbuja y, debajo, la barra de versiones. */
+.userMessage {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  width: 100%;
+}
+
+.editable {
+  display: contents;
+  cursor: pointer;
+}
+
+/* Editor en el sitio: mismo aspecto que la burbuja (MessageItem.module.css .bubble). */
+.editBox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(calc(var(--dsh-chat-content-width, 748px) * 0.702), 82%);
+  padding: 10px 12px 8px 16px;
+  border-radius: var(--dsw-radius-xl);
+  background: var(--dsw-specific-bubble);
+  box-shadow: 0 0 0 1px var(--dsw-alias-border-subtle, rgba(127, 127, 127, 0.25));
+}
+
+.editArea {
+  width: 100%;
+  min-height: calc(22px + var(--dsh-content-font-delta, 0px));
+  max-height: 50vh;
+  padding: 0;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: var(--dsh-content-font-size, 14px);
+  line-height: calc(22px + var(--dsh-content-font-delta, 0px));
+}
+
+.editFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.editNote,
+.editError {
+  margin-right: auto;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.editError {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+}
+
+.send:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.send:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+/* Barra de versiones bajo tu mensaje (como el «1/2» de Hermes). */
+.versions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding-top: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.versionArrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.versionArrow:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.versionArrow:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.versionCount {
+  min-width: 28px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.versionNote {
+  margin-left: 6px;
+  opacity: 0.8;
+}
