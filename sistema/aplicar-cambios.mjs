@@ -296,7 +296,9 @@ const toPiAi = (m) => {
 /**
  * Expresión que la app evalúa al arrancar: ejecuta arranque.cjs en un proceso
  * Node síncrono (la configuración no admite esperas) y usa su salida como lista
- * de modelos. Cualquier fallo devuelve los modelos fijos.
+ * de modelos. Cualquier fallo devuelve los modelos fijos. Deja arranque.cjs y su
+ * configuración en <DSH_HOME>/storages (local-arranque.*) para que el Host vuelva
+ * a listar Ollama al abrir el selector (local-optimize.ts → localRefreshModels).
  */
 function runtimeModelsExpression(fixed) {
   const startup = readFileSync(join(here, 'contexto', 'arranque.cjs'), 'utf8')
@@ -312,13 +314,17 @@ function runtimeModelsExpression(fixed) {
     efforts: EFFORTS,
   }
   return [
-    '((fixed) => { try {',
-    `const out = process.getBuiltinModule('node:child_process').execFileSync(process.execPath, ['-e', ${JSON.stringify(startup)}],`,
-    `{ env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_CTX: ${JSON.stringify(JSON.stringify(settings))}, DSH_CTX_CALIBRAR: ${JSON.stringify(calibrator)}, DSH_CTX_PRECARGA: ${JSON.stringify(keeper)} },`,
+    `((fixed, code, settings) => { try {`,
+    "const fs = process.getBuiltinModule('node:fs'); const path = process.getBuiltinModule('node:path');",
+    "const home = (process.env.DSH_HOME || '').trim() || path.join(process.getBuiltinModule('node:os').homedir(), '.dsh');",
+    "try { const dir = path.join(home, 'storages'); fs.mkdirSync(dir, { recursive: true });",
+    "fs.writeFileSync(path.join(dir, 'local-arranque.cjs'), code); fs.writeFileSync(path.join(dir, 'local-arranque.json'), settings); } catch (error) {}",
+    "const out = process.getBuiltinModule('node:child_process').execFileSync(process.execPath, ['-e', code],",
+    `{ env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_CTX: settings, DSH_CTX_CALIBRAR: ${JSON.stringify(calibrator)}, DSH_CTX_PRECARGA: ${JSON.stringify(keeper)} },`,
     "timeout: 30000, windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });",
     'const models = JSON.parse(out);',
     'return Array.isArray(models) && models.length > 0 ? models : fixed;',
-    `} catch (error) { return fixed; } })(${JSON.stringify(fixed)})`,
+    `} catch (error) { return fixed; } })(${JSON.stringify(fixed)}, ${JSON.stringify(startup)}, ${JSON.stringify(JSON.stringify(settings))})`,
   ].join(' ')
 }
 
@@ -929,7 +935,7 @@ optional('no volver a ofrecer una versión retirada', (tx) => {
 // tras 7 días sin uso. Host: sistema/contexto/local-optimize.ts. Interfaz:
 // LocalOptimizeButton.tsx.
 
-optional('herramientas de modelos en el selector (optimizar, limpieza y modelos sin usar)', (tx) => {
+const toolsApplied = optional('herramientas de modelos en el selector (optimizar, limpieza y modelos sin usar)', (tx) => {
   const selectionDir = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client')
   const select = join(selectionDir, 'ModelSelect.tsx')
   const selectionIndex = join(selectionDir, 'index.ts')
@@ -945,6 +951,9 @@ optional('herramientas de modelos en el selector (optimizar, limpieza y modelos 
   // Host: llamadas remotas.
   tx.copy(join(here, 'contexto', 'local-optimize.ts'), join(hostDir, 'local-optimize.ts'))
   tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-optimize.ts')
+  // Lista de Ollama al día: la publica localRefreshModels; la usa llm-pi-ai (sección 15).
+  tx.copy(join(here, 'contexto', 'local-ollama-live.ts'), join(hostDir, 'local-ollama-live.ts'))
+  tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-ollama-live.ts')
   let types = tx.read(hostTypes)
   if (!types.includes('interface SessionOptimizeModelRequest')) {
     types = types.trimEnd() + '\n\n' + [
@@ -1004,6 +1013,11 @@ optional('herramientas de modelos en el selector (optimizar, limpieza y modelos 
       'export interface SessionLocalDeleteModelValue {',
       '  readonly deleted: readonly string[]',
       '}',
+      '',
+      '/** Local build: how many models the selector offers after listing Ollama again (0 if it could not). */',
+      'export interface SessionLocalRefreshValue {',
+      '  readonly models: number',
+      '}',
     ].join('\n')
     tx.write(hostTypes, types)
   }
@@ -1011,11 +1025,11 @@ optional('herramientas de modelos en el selector (optimizar, limpieza y modelos 
     "import { ApiSessionList } from './list.ts'",
     'import {',
     '  localDeleteModel, localModelsInfo, localOptimizeModel as runLocalOptimize,',
-    '  localOptimizeStatus as readLocalOptimizeStatus, localSetCleanup,',
+    '  localOptimizeStatus as readLocalOptimizeStatus, localRefreshModels, localSetCleanup,',
     "} from './local-optimize.ts'",
     'import type {',
     '  SessionLocalCleanupRequest, SessionLocalCleanupValue, SessionLocalDeleteModelRequest,',
-    '  SessionLocalDeleteModelValue, SessionLocalEmptyRequest, SessionLocalModelsValue,',
+    '  SessionLocalDeleteModelValue, SessionLocalEmptyRequest, SessionLocalModelsValue, SessionLocalRefreshValue,',
     '  SessionOptimizeModelRequest, SessionOptimizeModelValue, SessionOptimizeStatusValue,',
     "} from './types.ts'",
     '',
@@ -1077,6 +1091,17 @@ optional('herramientas de modelos en el selector (optimizar, limpieza y modelos 
       '    return localDeleteModel(request.model)',
       '  }',
       '',
+      '  /**',
+      '   * Local build: list the Ollama models again (after deleting or pulling one)',
+      '   * without restarting; the model selector calls it when it opens.',
+      '   * @param _request - no fields are required.',
+      '   * @returns how many models the selector offers now.',
+      '   */',
+      "  @Remote('localRefreshModels')",
+      '  async localRefreshModels(_request: SessionLocalEmptyRequest): Promise<SessionLocalRefreshValue> {',
+      '    return localRefreshModels()',
+      '  }',
+      '',
       '',
     ].join('\n') + host.slice(doc)
     tx.write(hostIndex, host)
@@ -1128,6 +1153,7 @@ optional('herramientas de modelos en el selector (optimizar, limpieza y modelos 
     '      setCleanup: async enabled => unwrap(await ctx.remote.session.localSetCleanup({ enabled })),',
     '      models: async () => unwrap(await ctx.remote.session.localModelsInfo({})),',
     '      deleteModel: async model => unwrap(await ctx.remote.session.localDeleteModel({ model })),',
+    '      refresh: async () => unwrap(await ctx.remote.session.localRefreshModels({})),',
     '    })',
     '    return () => { setLocalOptimizer(undefined) }',
     "  }, 'ui-model-selection: local model tools')",
@@ -1161,6 +1187,36 @@ optional('herramientas de modelos en el selector (optimizar, limpieza y modelos 
     'local.delete.confirm': 'Delete {size}?',
     'local.delete.done': 'Deleted',
   })
+})
+
+// ── 15. Lista de Ollama al día al abrir el selector ───────────────────────────
+// La lista de modelos se fija al arrancar (arranque.cjs desde la configuración).
+// Al abrir el selector, el Host la vuelve a pedir (sección 14: localRefreshModels)
+// y la publica en local-ollama-live.ts; aquí el adaptador llm-pi-ai la usa en vez
+// de la de arranque y vuelve a registrar sus rutas, lo que avisa a la interfaz
+// (`llm/adapters-updated`) para que recargue la lista: los modelos borrados o
+// descargados se ven sin reiniciar la app.
+
+optional('lista de Ollama al día al abrir el selector de modelos', (tx) => {
+  if (!toolsApplied) skip('necesita las herramientas de modelos del selector, que no se han aplicado')
+  const piAiDir = join(repo, 'packages', 'llm', 'llm-pi-ai', 'src')
+  const piAiIndex = join(piAiDir, 'index.ts')
+  tx.copy(join(here, 'contexto', 'local-ollama-live.ts'), join(piAiDir, 'local-ollama-live.ts'))
+  tx.replace(piAiIndex, "import { PiAiAdapter } from './adapter.ts'\n",
+    "import { PiAiAdapter } from './adapter.ts'\nimport { onLiveOllama, withLiveOllama } from './local-ollama-live.ts'\n",
+    "from './local-ollama-live.ts'")
+  // Los perfiles se memorizan por identidad de la configuración: withLiveOllama
+  // devuelve el mismo objeto mientras no cambie la lista.
+  tx.replace(piAiIndex, '    const raw = config.providers.get()\n',
+    '    // Local build: the Ollama list refreshed when the model selector opens.\n'
+      + '    const raw = withLiveOllama(config.providers.get())\n',
+    'withLiveOllama(config.providers.get())')
+  // Volver a registrar las mismas rutas publica llm/adapters-updated.
+  tx.replace(piAiIndex, '  ensureRegistrationFacts()\n\n',
+    '  ensureRegistrationFacts()\n'
+      + '  // Local build: a refreshed Ollama list re-announces the routes so the selector reloads.\n'
+      + '  ctx.effect(() => onLiveOllama(() => { registration?.replace([...profiles().keys()]) }))\n\n',
+    'onLiveOllama(')
 })
 
 console.log('\nCambios aplicados:')

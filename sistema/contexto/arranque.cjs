@@ -29,6 +29,9 @@ const cacheFile = join(home, 'storages', 'local-contexto.json')
 // Prueba de arranque y compilación (DSH_LOCAL_SIN_AYUDANTES=1): solo lectura. Con datos
 // temporales, sin mediciones, reescribiría las variantes que ha ajustado la app de verdad.
 const readOnly = process.env.DSH_LOCAL_SIN_AYUDANTES === '1'
+// Refresco al abrir el selector de modelos (local-optimize.ts → localRefreshModels):
+// misma lista y limpieza que al arrancar, sin volver a lanzar la precarga.
+const refreshing = process.env.DSH_CTX_REFRESCO === '1'
 
 async function api(path, body) {
   const init = body === undefined
@@ -333,15 +336,21 @@ async function main() {
   const vramLimit = totalMiB > 0 ? (totalMiB - 400) * 1024 * 1024 : undefined
   // hostPid: el medidor lo deja si se cierra la app (ver calibrar.cjs).
   const jobBase = { ollama: cfg.ollama, cacheFile, gpu, version, vramLimit, hostPid: process.ppid }
-  if (helpers && process.env.DSH_CTX_CALIBRAR) {
+  const calibrator = join(home, 'storages', 'local-calibrar.cjs')
+  // Al refrescar desde el selector (local-optimize.ts) no llega el código del
+  // medidor: se usa el que se guardó al abrir la app.
+  let calibratorCode = process.env.DSH_CTX_CALIBRAR || ''
+  if (!calibratorCode && refreshing) {
+    try { calibratorCode = readFileSync(calibrator, 'utf8') } catch { calibratorCode = '' }
+  }
+  if (helpers && calibratorCode) {
     // Lo que necesita el botón «Optimizar» (local-optimize.ts) para medir cualquier modelo.
-    const calibrator = join(home, 'storages', 'local-calibrar.cjs')
-    require('node:fs').writeFileSync(calibrator, process.env.DSH_CTX_CALIBRAR)
+    if (process.env.DSH_CTX_CALIBRAR) require('node:fs').writeFileSync(calibrator, calibratorCode)
     require('node:fs').writeFileSync(join(home, 'storages', 'local-optimizar.json'),
       JSON.stringify({ calibrator, job: jobBase, models: specs }, null, 1))
   }
-  if (helpers && pending.length > 0 && process.env.DSH_CTX_CALIBRAR && !alive(lockParts(calibrationLock).pid)) {
-    launchHelper('calibrar', process.env.DSH_CTX_CALIBRAR, { DSH_CTX_JOB: JSON.stringify({ ...jobBase, models: pending }) })
+  if (helpers && pending.length > 0 && calibratorCode && !alive(lockParts(calibrationLock).pid)) {
+    launchHelper('calibrar', calibratorCode, { DSH_CTX_JOB: JSON.stringify({ ...jobBase, models: pending }) })
   }
   // Modelo listo mientras la app está abierta (precarga.cjs). La app es el proceso
   // que ha lanzado este script: cuando se cierre, la precarga lo verá y lo descargará.

@@ -174,8 +174,10 @@ Cómo funciona:
 ## Modelos y configuración (`config.json`)
 
 **El selector de modelos muestra todos los modelos que tengas en Ollama**: la app
-se los pregunta a Ollama cada vez que arranca (descarga uno nuevo con `ollama pull`
-y reinicia la app para verlo). Los modelos solo de embeddings no aparecen.
+se los pregunta a Ollama al arrancar y **cada vez que abres el selector**, así que
+un modelo descargado con `ollama pull` o borrado con `ollama rm` se ve (o deja de
+verse) al abrirlo, sin reiniciar la app; si es nuevo, se mide en segundo plano
+como al arrancar. Los modelos solo de embeddings no aparecen.
 
 - **Ollama apagado**: al abrirse, la app lo arranca (la aplicación de Ollama, con
   su icono junto al reloj) y espera hasta 12 s. Si aun así no responde, el
@@ -215,7 +217,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Ollama como proveedor y modelo por defecto | `packages/bundle/base/cordis.patch.yml` |
 | Contexto por variantes, recomendado y capas en la gráfica medidos, modelo listo y limpieza de variantes | `packages/bundle/base/cordis.patch.yml`; código en [`sistema/contexto/`](sistema/contexto) (`arranque.cjs`, `calibrar.cjs`, `precarga.cjs`) |
 | Barra de contexto en el selector (opcional) | `packages/client/ui-model-selection` (`ContextSlider.tsx`) |
-| Botón «Optimize» junto a cada modelo (opcional) | `packages/api/session-controller` (`local-optimize.ts`) + `packages/client/ui-model-selection` (`LocalOptimizeButton.tsx`) |
+| Botón «Optimize» junto a cada modelo y lista de Ollama al día al abrir el selector (opcional) | `packages/api/session-controller` (`local-optimize.ts`, `local-ollama-live.ts`) + `packages/llm/llm-pi-ai` + `packages/client/ui-model-selection` (`LocalOptimizeButton.tsx`) |
 | Chats antiguos al contexto recomendado (opcional) | `packages/api/session-controller` y `packages/core/agent-default-model` (`local-ollama.ts`) |
 | Sin ventana de bienvenida ni inicio de sesión | `apps/desktop/src/welcome-api.ts` |
 | Sin menú ni ajustes de la cuenta de DeepSeek | `packages/bundle/web-app/cordis.patch.yml` |

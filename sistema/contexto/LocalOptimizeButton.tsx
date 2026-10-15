@@ -7,6 +7,8 @@
  *   - Modelos sin usar en 30 días: se marcan con lo que ocupan y se pueden borrar
  *     del disco (dos clics: el primero pide confirmación).
  *   - Interruptor «Limpieza automática de variantes» (en el menú del selector).
+ *     Al abrir el menú se vuelve a listar Ollama, así que los modelos borrados o
+ *     descargados se ven sin reiniciar la app.
  * Todo lo hace el Host (local-optimize.ts) a través de las llamadas que monta
  * index.ts con setLocalOptimizer.
  */
@@ -40,6 +42,8 @@ export interface LocalOptimizer {
   setCleanup: (enabled: boolean) => Promise<{ cleanup: boolean }>
   models: () => Promise<{ models: readonly LocalModelInfo[] }>
   deleteModel: (model: string) => Promise<{ deleted: readonly string[] }>
+  /** Vuelve a listar Ollama; la lista del selector se recarga sola al terminar. */
+  refresh: () => Promise<{ models: number }>
 }
 
 let optimizer: LocalOptimizer | undefined
@@ -263,6 +267,11 @@ export function LocalModelExtras({ model, t }: { model: string } & T) {
  */
 export function LocalCleanupSwitch({ t }: T) {
   const local = useLocal()
+  // Va en el menú del selector: al abrirlo, se vuelve a listar Ollama (modelos
+  // borrados o descargados sin reiniciar la app).
+  useEffect(() => {
+    optimizer?.refresh().then(() => { pollModels() }, () => undefined)
+  }, [])
   if (optimizer === undefined) return null
   const on = local.status.cleanup
   return (

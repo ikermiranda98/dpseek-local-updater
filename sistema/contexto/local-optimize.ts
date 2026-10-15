@@ -8,11 +8,12 @@
  * La medición va en un proceso aparte; las variantes del modelo se actualizan al
  * terminar y el nuevo recomendado se ve en la barra al volver a abrir la app.
  */
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
+import { publishLiveOllama } from './local-ollama-live.ts'
 
 /** Lo que deja arranque.cjs para poder medir cada modelo. */
 interface OptimizeSpec {
@@ -60,6 +61,61 @@ function launch(file: string, args: readonly string[], env: NodeJS.ProcessEnv): 
   const child = spawn(file, [...args], { env, detached: true, stdio: 'ignore' })
   child.on('error', () => undefined)
   child.unref()
+}
+
+// ── Lista de Ollama al abrir el selector ─────────────────────────────────────
+// Al arrancar, la expresión de la configuración deja arranque.cjs y su
+// configuración en storages/local-arranque.*; aquí se vuelve a ejecutar en modo
+// refresco (misma lista y limpieza, sin relanzar la precarga) y la lista nueva
+// pasa al adaptador por local-ollama-live.ts.
+
+const REFRESH_EVERY_MS = 3000
+let refreshing: Promise<{ readonly models: number }> | undefined
+let lastRefresh = 0
+
+/**
+ * Vuelve a listar los modelos de Ollama (por ejemplo, tras borrar o descargar
+ * uno) sin reiniciar la app. Abrir el selector varias veces seguidas solo
+ * refresca una vez.
+ * @returns cuántos modelos ofrece ahora el selector (0 si no se ha podido listar).
+ */
+export function localRefreshModels(): Promise<{ readonly models: number }> {
+  if (refreshing !== undefined) return refreshing
+  if (Date.now() - lastRefresh < REFRESH_EVERY_MS) return Promise.resolve({ models: 0 })
+  const dir = storages()
+  let settings: string
+  try {
+    settings = readFileSync(join(dir, 'local-arranque.json'), 'utf8')
+  } catch {
+    return Promise.resolve({ models: 0 })
+  }
+  const run = new Promise<{ readonly models: number }>((resolve) => {
+    execFile(process.execPath, [join(dir, 'local-arranque.cjs')], {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_CTX: settings, DSH_CTX_REFRESCO: '1', DSH_CTX_CALIBRAR: '', DSH_CTX_PRECARGA: '' },
+      timeout: 30_000, windowsHide: true, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024,
+    }, (error, stdout) => {
+      let models: unknown
+      if (error === null) {
+        try {
+          models = JSON.parse(stdout)
+        } catch {
+          models = undefined
+        }
+      }
+      // Ollama apagado o sin modelos: se queda la lista anterior.
+      if (!Array.isArray(models) || models.length === 0) {
+        resolve({ models: 0 })
+        return
+      }
+      publishLiveOllama(models)
+      resolve({ models: models.length })
+    })
+  })
+  refreshing = run.finally(() => {
+    refreshing = undefined
+    lastRefresh = Date.now()
+  })
+  return refreshing
 }
 
 /** Estado de la medición: qué modelo se mide (null si ninguno) y cuánto lleva (0 a 1). */
