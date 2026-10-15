@@ -295,10 +295,13 @@ const toPiAi = (m) => {
 
 /**
  * Expresión que la app evalúa al arrancar: ejecuta arranque.cjs en un proceso
- * Node síncrono (la configuración no admite esperas) y usa su salida como lista
- * de modelos. Cualquier fallo devuelve los modelos fijos.
+ * Node síncrono (la configuración no admite esperas) y devuelve los proveedores:
+ * Ollama con los modelos que haya (o los fijos si no responde) y, a su lado, los
+ * de <DSH_HOME>/proveedores-extra.json. Van todos en una sola expresión porque una
+ * fila de la configuración se sustituye entera: declarar otro proveedor en el
+ * perfil (o con «Create provider» de la app) dejaría la app sin Ollama.
  */
-function runtimeModelsExpression(fixed) {
+function runtimeProvidersExpression(ollama, fixed) {
   const startup = readFileSync(join(here, 'contexto', 'arranque.cjs'), 'utf8')
   const calibrator = readFileSync(join(here, 'contexto', 'calibrar.cjs'), 'utf8')
   const keeper = readFileSync(join(here, 'contexto', 'precarga.cjs'), 'utf8')
@@ -312,33 +315,35 @@ function runtimeModelsExpression(fixed) {
     efforts: EFFORTS,
   }
   return [
-    '((fixed) => { try {',
+    '((ollama, fixed) => { let models = fixed; let extra = {}; try {',
     `const out = process.getBuiltinModule('node:child_process').execFileSync(process.execPath, ['-e', ${JSON.stringify(startup)}],`,
     `{ env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', DSH_CTX: ${JSON.stringify(JSON.stringify(settings))}, DSH_CTX_CALIBRAR: ${JSON.stringify(calibrator)}, DSH_CTX_PRECARGA: ${JSON.stringify(keeper)} },`,
     "timeout: 30000, windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });",
-    'const models = JSON.parse(out);',
-    'return Array.isArray(models) && models.length > 0 ? models : fixed;',
-    `} catch (error) { return fixed; } })(${JSON.stringify(fixed)})`,
+    'const parsed = JSON.parse(out);',
+    'if (Array.isArray(parsed.models) && parsed.models.length > 0) models = parsed.models;',
+    "if (parsed.extra !== null && typeof parsed.extra === 'object' && !Array.isArray(parsed.extra)) extra = parsed.extra;",
+    '} catch (error) {}',
+    'const { ollama: ignored, ...others } = extra;',
+    'return { ...others, ollama: { ...ollama, models } };',
+    `})(${JSON.stringify(ollama)}, ${JSON.stringify(fixed)})`,
   ].join(' ')
 }
 
 function piAiBlock(models) {
+  // Ollama local por su API compatible con OpenAI. Ollama ignora el token; la
+  // cabecera fija evita depender de credenciales guardadas.
+  const ollama = {
+    displayName: 'Ollama (local)',
+    api: 'openai-completions',
+    baseURL: new URL('/v1', config.ollamaUrl).href,
+    headers: { Authorization: 'Bearer ollama' },
+    retryPolicy: { mode: 'normal', maxRetries: 2 },
+  }
   return [
-    '# Ollama local por su API compatible con OpenAI. Ollama ignora el token;',
-    '# la cabecera fija evita depender de credenciales guardadas.',
-    '# models: cada modelo de Ollama con varios contextos (Auto y fijos), resuelto al',
-    '# arrancar por sistema/contexto/arranque.cjs de dpseek-local-updater.',
-    'providers:',
-    '  ollama:',
-    '    displayName: Ollama (local)',
-    '    api: openai-completions',
-    `    baseURL: ${yamlString(new URL('/v1', config.ollamaUrl).href)}`,
-    '    headers:',
-    '      Authorization: Bearer ollama',
-    '    retryPolicy:',
-    '      mode: normal',
-    '      maxRetries: 2',
-    `    models: !!js ${yamlString(runtimeModelsExpression(models.map(toPiAi)))}`,
+    '# Proveedores resueltos al arrancar por sistema/contexto/arranque.cjs de',
+    '# dpseek-local-updater: Ollama (cada modelo con varios contextos, Auto y fijos)',
+    '# y los de <DSH_HOME>/proveedores-extra.json.',
+    `providers: !!js ${yamlString(runtimeProvidersExpression(ollama, models.map(toPiAi)))}`,
   ]
 }
 
@@ -1106,7 +1111,7 @@ optional('herramientas de modelos en el selector (optimizar, limpieza y modelos 
     const close = /(<\/button>\n)(\s*)\)\n(\s*)\}\)\}/
     if (!open.test(text) || !close.test(text)) skip(`no se encuentran las filas de la lista de modelos en ${rel(select)}`)
     text = text.replace(open, (all, pad, inner) => `return (\n${pad}<div className={localOptimizeCss.row} key={model.id}>\n${pad}<button\n${inner}ref={itemRef()}\n${inner}type="button"\n${inner}role="menuitemradio"\n`)
-    text = text.replace(close, (all, end, pad, pad2) => `${end}${pad}  {/* Local build: model tools (LocalOptimizeButton.tsx). */}\n${pad}  <LocalModelExtras model={model.id} t={t} />\n${pad}</div>\n${pad})\n${pad2}})}`)
+    text = text.replace(close, (all, end, pad, pad2) => `${end}${pad}  {/* Local build: Ollama model tools (LocalOptimizeButton.tsx). */}\n${pad}  {group.id === 'ollama' && <LocalModelExtras model={model.id} t={t} />}\n${pad}</div>\n${pad})\n${pad2}})}`)
   }
   if (!text.includes('<LocalCleanupSwitch')) {
     const effort = /^(\s*)\{reasoning !== undefined && \(\n/m

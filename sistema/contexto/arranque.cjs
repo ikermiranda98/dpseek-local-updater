@@ -363,7 +363,62 @@ async function main() {
     launchHelper('precarga', process.env.DSH_CTX_PRECARGA, { DSH_CTX_KEEP: JSON.stringify(keep) })
   }
   if (result.length === 0) throw new Error('Ollama no tiene modelos de texto')
-  process.stdout.write(JSON.stringify(result))
+  return result
 }
 
-main().catch(() => process.exit(1))
+const PROTOCOLS = new Set(['openai-completions', 'openai-responses', 'anthropic-messages'])
+
+/**
+ * Proveedores extra del usuario (<DSH_HOME>/proveedores-extra.json), en el formato
+ * del adaptador llm-pi-ai. Se añaden junto a Ollama en vez de sustituirlo, que es
+ * lo que pasa si se declaran en el perfil o con «Create provider» de la app. Los
+ * que no cumplen el formato se ignoran; Ollama sigue funcionando igual.
+ *
+ *   { "<id>": { "nombre": "…", "url": "https://…/v1", "protocolo": "openai-completions",
+ *               "clave": "…", "modelos": [{ "id": "…", "nombre": "…", "contexto": 131072 }] } }
+ */
+function extraProviders() {
+  let raw
+  try {
+    raw = JSON.parse(readFileSync(join(home, 'proveedores-extra.json'), 'utf8'))
+  } catch {
+    return {}
+  }
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out = {}
+  for (const [id, p] of Object.entries(raw)) {
+    if (id === 'ollama' || !/^[a-z][a-z0-9-]*$/.test(id) || p === null || typeof p !== 'object') continue
+    const api = p.protocolo ?? 'openai-completions'
+    if (!PROTOCOLS.has(api) || typeof p.url !== 'string' || !/^https?:\/\/\S+$/.test(p.url)) continue
+    const models = (Array.isArray(p.modelos) ? p.modelos : [])
+      .filter((m) => m !== null && typeof m === 'object' && typeof m.id === 'string' && m.id.trim() !== '')
+      .map((m) => ({
+        id: m.id.trim(),
+        name: typeof m.nombre === 'string' && m.nombre.trim() !== '' ? m.nombre.trim() : m.id.trim(),
+        ...Number.isInteger(m.contexto) && m.contexto > 0 ? { contextWindow: m.contexto } : {},
+        ...Number.isInteger(m.maxTokens) && m.maxTokens > 0 ? { maxTokens: m.maxTokens } : {},
+      }))
+    if (models.length === 0) continue
+    const key = typeof p.clave === 'string' && p.clave.trim() !== '' ? p.clave.trim() : undefined
+    out[id] = {
+      displayName: typeof p.nombre === 'string' && p.nombre.trim() !== '' ? p.nombre.trim() : id,
+      api,
+      baseURL: p.url.replace(/\/+$/, ''),
+      // Como Ollama: la clave va en la cabecera y no depende de credenciales guardadas.
+      // Sin clave se manda una ficticia: si no, el adaptador buscaría una en el
+      // entorno (OPENAI_API_KEY…) y la enviaría a este servidor.
+      headers: api === 'anthropic-messages'
+        ? { 'x-api-key': key ?? 'sin-clave' }
+        : { Authorization: `Bearer ${key ?? 'sin-clave'}` },
+      models,
+    }
+  }
+  return out
+}
+
+// Salida: { models: modelos de Ollama (vacío si no responde), extra: proveedores extra }.
+const extra = extraProviders()
+main().then(
+  (models) => { process.stdout.write(JSON.stringify({ models, extra })) },
+  () => { process.stdout.write(JSON.stringify({ models: [], extra })) },
+)
