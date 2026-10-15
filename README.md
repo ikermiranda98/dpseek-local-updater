@@ -204,41 +204,6 @@ Editar `config.json` en GitHub (o hacer push) recompila el instalador al momento
 Si editas los modelos desde la app (Settings → Models → Ollama), esa lista pasa a
 ser fija y deja de actualizarse sola.
 
-### Otros proveedores junto a Ollama (`proveedores-extra.json`)
-
-Para usar también un servidor compatible con OpenAI o Anthropic (un relé, otro
-equipo, una API de pago…), créalo en `%USERPROFILE%\.dsh\proveedores-extra.json`
-y reinicia la app: sus modelos salen en el selector junto a los de Ollama.
-
-```json
-{
-  "mi-servidor": {
-    "nombre": "Mi servidor",
-    "url": "https://servidor.ejemplo/v1",
-    "protocolo": "openai-completions",
-    "clave": "",
-    "modelos": [
-      { "id": "nombre-del-modelo", "nombre": "Nombre a mostrar", "contexto": 131072 }
-    ]
-  }
-}
-```
-
-- La clave del objeto (`mi-servidor`) es el id del proveedor: minúsculas, números
-  y guiones, empezando por letra. `ollama` está reservado.
-- `protocolo`: `openai-completions` (por defecto), `openai-responses` o
-  `anthropic-messages`. `clave` es opcional; sin clave se manda una ficticia para
-  que la app no envíe a ese servidor otra que encuentre en el entorno
-  (`OPENAI_API_KEY`…). En `modelos`, `id` es obligatorio; `nombre`, `contexto` y
-  `maxTokens`, opcionales.
-- Si el fichero tiene un error, se ignora (o ese proveedor) y Ollama sigue igual.
-- **No uses «Add model provider» de Settings → Models ni declares `llm-pi-ai` en
-  el perfil** (`profiles/desktop/cordis.patch.yml`): la configuración de la app se
-  sustituye por filas enteras, así que eso deja la app **sin Ollama**. Este fichero
-  existe para evitarlo.
-- Todo lo que mandes a un proveedor de fuera (mensajes, código y ficheros que lea
-  el agente) sale de tu equipo.
-
 ## Qué cambia respecto a la versión oficial
 
 Todo lo hace [`sistema/aplicar-cambios.mjs`](sistema/aplicar-cambios.mjs) sobre el
@@ -247,7 +212,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 
 | Cambio | Dónde |
 |---|---|
-| Ollama como proveedor y modelo por defecto, y proveedores extra de `proveedores-extra.json` | `packages/bundle/base/cordis.patch.yml` |
+| Ollama como proveedor y modelo por defecto | `packages/bundle/base/cordis.patch.yml` |
 | Contexto por variantes, recomendado y capas en la gráfica medidos, modelo listo y limpieza de variantes | `packages/bundle/base/cordis.patch.yml`; código en [`sistema/contexto/`](sistema/contexto) (`arranque.cjs`, `calibrar.cjs`, `precarga.cjs`) |
 | Barra de contexto en el selector (opcional) | `packages/client/ui-model-selection` (`ContextSlider.tsx`) |
 | Botón «Optimize» junto a cada modelo (opcional) | `packages/api/session-controller` (`local-optimize.ts`) + `packages/client/ui-model-selection` (`LocalOptimizeButton.tsx`) |
