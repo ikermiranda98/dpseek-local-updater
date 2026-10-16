@@ -2229,34 +2229,42 @@ optional('el subchat se abre al 40 % de la zona de chat', (tx) => {
 // ── 24. Mejorar un mensaje antes de enviarlo ──────────────────────────────────
 // Botón «Improve message» en la barra del cuadro de texto, junto al «+» y con su
 // mismo aspecto: el modelo del chat (en su misma variante de contexto, así Ollama no
-// lo recarga) reescribe el mensaje para que la IA lo entienda mejor. La sugerencia
-// sale editable encima del cuadro; «Use» la pone en el cuadro, sin enviarla.
-// Código: sistema/mejorar/.
+// lo recarga) reescribe el mensaje, o convierte un documento (PDF, DOCX o texto) en
+// un prompt, con los ficheros del proyecto a la vista para no inventar nombres y
+// preguntando si falta algo. La sugerencia sale editable encima del cuadro; «Use» la
+// pone en el cuadro, sin enviarla. Código: sistema/mejorar/.
 
 optional('mejorar un mensaje antes de enviarlo', (tx) => {
   const better = join(here, 'mejorar')
   const chatDir = join(repo, 'packages', 'client', 'ui-chat', 'src', 'client')
   const conversationDir = join(repo, 'packages', 'client', 'ui-conversation', 'src', 'client')
+  const previewDir = join(repo, 'packages', 'client', 'ui-sidebar-documentpreview', 'src', 'client')
   const hostIndex = join(hostDir, 'index.ts')
   const hostTypes = join(hostDir, 'types.ts')
 
-  // Host: la sugerencia, con los últimos mensajes del chat como contexto.
+  // Host: la sugerencia, con los últimos mensajes del chat y los ficheros del proyecto como contexto.
   tx.copy(join(better, 'local-improve.ts'), join(hostDir, 'local-improve.ts'))
   tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-improve.ts')
   let types = tx.read(hostTypes)
   if (!types.includes('interface SessionLocalImproveRequest')) {
     types = types.trimEnd() + '\n\n' + [
-      '/** Local build: rewrite a draft so the assistant understands it better. */',
+      '/** Local build: rewrite a draft, or turn a document into a prompt, so the assistant understands it better. */',
       'export interface SessionLocalImproveRequest {',
       '  readonly sessionId: SessionId',
       '  readonly draft: string',
       "  /** Ollama model to use; the chat's own model when omitted. */",
       '  readonly model?: string',
+      '  /** A document already turned into text (PDF pages marked «[p. N]»). */',
+      '  readonly document?: { readonly name: string; readonly text: string; readonly pages?: number }',
+      '  /** Answers to the questions of the previous suggestion. */',
+      '  readonly answers?: readonly { readonly question: string; readonly answer: string }[]',
       '}',
       '',
-      '/** Local build: the rewritten draft and how long it took. */',
+      '/** Local build: the suggested prompt, questions when something is missing, a note and how long it took. */',
       'export interface SessionLocalImproveValue {',
       '  readonly text: string',
+      '  readonly questions: readonly string[]',
+      '  readonly note?: string',
       '  readonly ms: number',
       '}',
       '',
@@ -2270,7 +2278,7 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
   }
   tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n",
     "import { ApiSessionList } from './list.ts'\n"
-      + "import { localImprovePrompt, localRecentTurns } from './local-improve.ts'\n"
+      + "import { localImprovePrompt, localProjectFiles, localRecentTurns } from './local-improve.ts'\n"
       + "import type { SessionLocalImproveRequest, SessionLocalImproveValue } from './types.ts'\n",
     'SessionLocalImproveRequest, SessionLocalImproveValue }')
   let host = tx.read(hostIndex)
@@ -2280,21 +2288,24 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
     if (doc < 0) skip(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
     host = host.slice(0, doc) + [
       '  /**',
-      '   * Local build: rewrite a draft so the assistant understands it better, with the',
-      "   * Session's last messages as context. By default the chat's own model, in its",
-      '   * context variant, so Ollama does not reload it.',
-      '   * @param request - Session, draft and optional model.',
+      '   * Local build: rewrite a draft, or turn a document into a prompt, so the assistant',
+      "   * understands it better, with the Session's last messages and project files as",
+      "   * context. By default the chat's own model, in its context variant, so Ollama",
+      '   * does not reload it.',
+      '   * @param request - Session, draft, optional document, answers and model.',
       '   * @param signal - cancels the request.',
-      '   * @returns the rewritten draft and how long it took.',
+      '   * @returns the suggested prompt, questions, a note and how long it took.',
       '   */',
       "  @Remote('localImprovePrompt')",
       '  async localImprovePrompt(request: SessionLocalImproveRequest, signal: AbortSignal): Promise<SessionLocalImproveValue> {',
       '    const started = Date.now()',
       '    try {',
       '      let events: { type: string; data: unknown }[] = []',
+      '      let cwd: string | undefined',
       '      {',
       '        using observation = await this.ctx.sessionQuery.observeSession(request.sessionId)',
       '        events = [...observation.events] as { type: string; data: unknown }[]',
+      '        cwd = observation.header.cwd',
       '      }',
       '      const found = await this.agents.resolveAgent(request.sessionId)',
       "      if ('error' in found) throw found.error",
@@ -2302,8 +2313,14 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       "      const chat = selection.provider === 'ollama' && typeof selection.model === 'string' ? selection.model : undefined",
       '      const model = request.model ?? chat',
       "      if (model === undefined) throw new Error('this chat does not use an Ollama model')",
-      '      const text = await localImprovePrompt(model, request.draft, localRecentTurns(events), signal)',
-      '      return { text, ms: Date.now() - started }',
+      '      const result = await localImprovePrompt(model, {',
+      '        draft: request.draft,',
+      '        recent: localRecentTurns(events),',
+      '        files: localProjectFiles(cwd),',
+      '        ...request.document === undefined ? {} : { document: request.document },',
+      '        ...request.answers === undefined ? {} : { answers: request.answers },',
+      '      }, signal)',
+      '      return { ...result, ms: Date.now() - started }',
       '    } catch (error) {',
       "      throw new RemoteError('session/local-improve-failed', error instanceof Error ? error.message : String(error), { sessionId: request.sessionId })",
       '    }',
@@ -2323,9 +2340,11 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
     '  // Local build: «Improve message» in the composer (local-improve-bridge.ts).\n'
       + '  ctx.effect(() => {\n'
       + '    setImprover({\n'
-      + '      improve: async (sessionId, draft, model) => {\n'
+      + '      improve: async (sessionId, draft, options) => {\n'
       + '        const result = await ctx.remote.session.localImprovePrompt({\n'
-      + '          sessionId: sessionId as SessionId, draft, ...model === undefined ? {} : { model },\n'
+      + '          sessionId: sessionId as SessionId, draft,\n'
+      + '          ...options?.document === undefined ? {} : { document: options.document },\n'
+      + '          ...options?.answers === undefined ? {} : { answers: options.answers },\n'
       + '        })\n'
       + '        if (!result.ok) throw new Error(result.error.message)\n'
       + '        return result.value\n'
@@ -2336,8 +2355,34 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       + '  const quotaNotice = createSnapshotStore<QuotaNoticeState | null>(null)\n',
     '    setImprover({\n')
 
+  // Las vistas previas ya traen el lector de PDF: lo publican para el botón (cargado solo al usarlo).
+  tx.copy(join(better, 'local-pdf-bridge.ts'), join(previewDir, 'pdf', 'local-pdf-bridge.ts'))
+  tx.copy(join(better, 'local-pdf-text.ts'), join(previewDir, 'pdf', 'local-pdf-text.ts'))
+  // En el trozo diferido de la vista previa: uno propio no lo sabría cargar la app.
+  const pdfBody = join(previewDir, 'pdf', 'pdf.tsx')
+  let body = tx.read(pdfBody)
+  if (!body.includes('local-pdf-text.ts')) {
+    body = body.trimEnd() + "\n\n// Local build: PDF text for «Improve message», in this deferred chunk (local-pdf-bridge.ts).\n"
+      + "export { localPdfText } from './local-pdf-text.ts'\n"
+    tx.write(pdfBody, body)
+  }
+  const previewIndex = join(previewDir, 'index.ts')
+  let preview = tx.read(previewIndex)
+  if (!preview.includes('setLocalPdfText')) {
+    const anchor = '  ctx.effect(() => disposePreviews)\n'
+    if (!preview.includes(anchor)) skip(`no se encuentra disposePreviews en ${rel(previewIndex)}`)
+    // Antes del primer import (los hay de varias líneas: no se puede insertar entre ellos a ciegas).
+    const first = preview.search(/^import /m)
+    if (first < 0) skip(`no se encuentran los import de ${rel(previewIndex)}`)
+    preview = preview.slice(0, first) + "import { setLocalPdfText } from './pdf/local-pdf-bridge.ts'\n" + preview.slice(first)
+    preview = preview.replace(anchor, anchor
+      + "  // Local build: PDF text for «Improve message» (pdf/local-pdf-bridge.ts).\n"
+      + "  ctx.effect(() => setLocalPdfText(), 'ui-sidebar-documentpreview: local pdf text')\n")
+    tx.write(previewIndex, preview)
+  }
+
   // ui-conversation: el botón, en la barra del cuadro junto al «+» y con su mismo estilo.
-  for (const file of ['local-improve-bridge.ts', 'LocalImprove.tsx', 'LocalImprove.module.css']) {
+  for (const file of ['local-improve-bridge.ts', 'local-document-text.ts', 'LocalImprove.tsx', 'LocalImprove.module.css']) {
     tx.copy(join(better, file), join(conversationDir, 'skeleton', file))
   }
   const inputBar = join(conversationDir, 'skeleton', 'InputBar.tsx')

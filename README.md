@@ -195,13 +195,28 @@ Para tareas que ocuparían mucho del chat sin llenarlo:
 En la barra del cuadro de texto, junto al **+**, el botón ✨ (**Improve message**)
 reescribe tu mensaje para que la IA lo entienda sin ambigüedad (qué hacer, con qué
 ficheros o nombres y qué resultado esperas), sin cambiar lo que pides, sin responderlo
-y en tu idioma; usa los últimos mensajes del chat para entender «el archivo», «eso»…
-La sugerencia sale encima del cuadro y se puede retocar: **Use** la pone en el cuadro
-(no la envía) y **Dismiss** deja lo tuyo.
+y en tu idioma. La sugerencia sale encima del cuadro y se puede retocar: **Use** la
+pone en el cuadro (no la envía) y **Dismiss** deja lo tuyo.
+
+- **No inventa nombres:** ve los últimos mensajes del chat y la lista de ficheros del
+  proyecto (solo los nombres), así que «el archivo de la calculadora» pasa a ser
+  `calculadora.py` si existe; si no, deja tus palabras.
+- **Pregunta en vez de adivinar:** si falta algo importante (qué lenguaje, qué
+  fichero…), la tarjeta trae una o dos preguntas; contéstalas y **Update with answers**
+  rehace la sugerencia.
+- **Según el tamaño:** una petición sencilla queda en una o dos frases; una tarea
+  grande, en apartados cortos (objetivo, ficheros, requisitos, restricciones y cuándo
+  está hecha).
+- **De un documento a un prompt:** con el cuadro vacío, ✨ pide un fichero (PDF, DOCX
+  o texto); con texto, suéltalo sobre ✨ o usa **Add file…** en la tarjeta, y tu
+  mensaje sirve de indicación. Se lee en tu equipo, sin internet (los PDF con el
+  mismo lector que las vistas previas). Un documento largo se resume antes por partes
+  (unos segundos por parte) y la tarjeta dice qué se ha leído; uno escaneado (solo
+  imagen) no tiene texto que leer y lo avisa.
 
 Lo escribe el **modelo del chat**, en su misma variante de contexto: Ollama no lo
-recarga y, medido, el siguiente mensaje tarda lo mismo que sin usar el botón (unos 3–4 s
-la sugerencia con Qwen3.6-35B).
+recarga y, medido, el siguiente mensaje tarda lo mismo que sin usar el botón (unos 2–5 s
+la sugerencia con Qwen3.6-35B; un PDF corto, unos 4 s).
 
 ## Contexto de cada chat
 
@@ -364,7 +379,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Actualizar Ollama desde la app, en el aviso de actualizaciones de abajo a la izquierda (opcional) | `packages/client/ui-settings-general` (`LocalUpdatesIndicator.tsx`) + `packages/client/ui-model-selection` (`local-ollama-bridge.ts`) + `packages/api/session-controller` (`local-ollama-update.ts`) |
 | Cursor normal (flecha) en toda la interfaz; la mano solo en los enlaces (opcional) | estilos `.css` de `packages/client`, `packages/extensions` y `apps/desktop/renderer` |
 | El subchat se abre al 40 % de la zona de chat (opcional) | `packages/client/ui-layout` (`localSetRightbarShare`) |
-| Mejorar un mensaje antes de enviarlo: botón ✨ «Improve message» junto al «+» (opcional) | `packages/client/ui-conversation` (`LocalImprove.tsx`) + `packages/client/ui-chat` (`local-improve-bridge.ts`) + `packages/api/session-controller` (`local-improve.ts`); código en [`sistema/mejorar/`](sistema/mejorar) |
+| Mejorar un mensaje antes de enviarlo: botón ✨ «Improve message» junto al «+», también desde un PDF, DOCX o texto (opcional) | `packages/client/ui-conversation` (`LocalImprove.tsx`) + `packages/client/ui-chat` (`local-improve-bridge.ts`) + `packages/api/session-controller` (`local-improve.ts`); código en [`sistema/mejorar/`](sistema/mejorar) |
 | Aviso antes de instalar: semáforo, detalles y «Skip this version» (opcional) | `apps/desktop/src/main.ts` y `update-coordinator.ts` (`local-update-notice.ts`); el informe, [`sistema/informe-actualizacion.mjs`](sistema/informe-actualizacion.mjs) en el workflow |
 | Instalador sin firma, sin la «actualización obligatoria» de DeepSeek | `apps/desktop/scripts` |
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |

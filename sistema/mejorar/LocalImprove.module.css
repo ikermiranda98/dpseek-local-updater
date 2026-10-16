@@ -1,4 +1,4 @@
-/* «Improve message» (dpseek-local-updater). El botón usa el estilo del «+» de la barra; esto es su animación y la tarjeta. */
+/* «Improve message» (dpseek-local-updater). El botón usa el estilo del «+» de la barra; esto es su animación, la tarjeta, el documento y las preguntas. */
 
 /* Mientras escribe la sugerencia, el icono late. */
 .busy {
@@ -62,12 +62,17 @@
 .actions {
   display: flex;
   gap: 8px;
-  justify-content: flex-end;
+  align-items: center;
   margin-top: 8px;
 }
 
+.spacer {
+  flex: 1;
+}
+
 .use,
-.dismiss {
+.dismiss,
+.secondary {
   height: 26px;
   padding: 0 12px;
   border-radius: var(--dsw-radius-sm);
@@ -81,8 +86,89 @@
   color: #fff;
 }
 
-.dismiss {
+.dismiss,
+.secondary {
   border: 0.5px solid var(--dsw-alias-border-l1);
   background: transparent;
   color: var(--dsw-alias-label-secondary);
+}
+
+.secondary:disabled {
+  opacity: 0.5;
+}
+
+/* El documento adjunto. */
+.chip {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  max-width: 100%;
+  margin-bottom: 6px;
+  padding: 2px 4px 2px 8px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-sm);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.chipName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chipRemove {
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  cursor: default;
+}
+
+.status,
+.note {
+  margin: 0 0 6px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
+
+.status {
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+/* Preguntas cuando falta algo: contestarlas rehace la sugerencia. */
+.questions {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.questionsTitle {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.question {
+  display: grid;
+  gap: 3px;
+  font-size: 13px;
+}
+
+.answer {
+  box-sizing: border-box;
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-layer-1, transparent);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+}
+
+.answer:focus {
+  outline: none;
+  border-color: var(--dsw-alias-state-business-primary);
 }

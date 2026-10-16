@@ -6,10 +6,31 @@
  * distintos y comparten un símbolo global.
  */
 
+/** Un documento adjunto, ya en texto. */
+export interface LocalImproveDocument {
+  readonly name: string
+  readonly text: string
+  readonly pages?: number
+}
+
+/** Lo que se pide además del borrador. */
+export interface LocalImproveOptions {
+  readonly document?: LocalImproveDocument
+  readonly answers?: readonly { readonly question: string; readonly answer: string }[]
+}
+
+/** La sugerencia: el prompt, las preguntas si falta algo, una nota sobre el documento y lo que tardó. */
+export interface LocalImproveSuggestion {
+  readonly text: string
+  readonly questions: readonly string[]
+  readonly note?: string
+  readonly ms: number
+}
+
 /** Llamadas al Host. */
 export interface LocalImprover {
-  /** La versión mejorada del borrador y lo que tardó (con el modelo del chat, salvo que se diga otro). */
-  improve: (sessionId: string, draft: string, model?: string) => Promise<{ readonly text: string; readonly ms: number }>
+  /** El prompt mejorado (con el modelo del chat). */
+  improve: (sessionId: string, draft: string, options?: LocalImproveOptions) => Promise<LocalImproveSuggestion>
 }
 
 interface Bridge {
