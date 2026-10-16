@@ -8,7 +8,7 @@
  *   - Icono «Regenerate» debajo de cada respuesta de la IA, también en las antiguas.
  *
  * El registro de un chat no se puede recortar: editar o regenerar el turno T copia
- * el chat hasta justo antes de T (sessions.fork), envía allí el mensaje (el mismo o
+ * el chat hasta justo antes de T (localForkBefore en el Host, con el historial completo), envía allí el mensaje (el mismo o
  * el editado) con el modelo elegido, abre la copia y archiva el original. Las copias
  * de un mismo turno forman un grupo de versiones; debajo de tu mensaje, «‹ 2/3 ›»
  * cambia de versión (desarchiva la elegida y archiva la que dejas). Cuando escribes
@@ -226,26 +226,6 @@ async function promptParts(sessionId: SessionId, content: readonly unknown[], te
   return parts
 }
 
-/**
- * Dónde cortar el chat para regenerar un turno: el último evento anterior a su
- * inicio que no sea la cola de mensajes. Justo antes de cada turno, la app pone tu
- * mensaje en la cola (agent/inbox/spliced); si la copia lo heredara, lo ejecutaría
- * además del que se envía al regenerar.
- * @param sessionId - chat de origen.
- * @param startSeq - seq del inicio del turno.
- * @returns el seq del corte, o undefined si esos eventos no están cargados.
- */
-function cutBefore(sessionId: SessionId, startSeq: number): number | undefined {
-  const entries = ctx?.sessions.binding(sessionId)?.eventSource.getSnapshot().entries ?? []
-  let cut: number | undefined
-  for (const entry of entries) {
-    const event = (entry as { event?: { type?: unknown; seq?: unknown } }).event
-    if (typeof event?.seq !== 'number' || event.seq >= startSeq || event.type === 'agent/inbox/spliced') continue
-    if (cut === undefined || event.seq > cut) cut = event.seq
-  }
-  return cut
-}
-
 let busy = false
 
 /**
@@ -266,24 +246,15 @@ async function regenerate(
   try {
     const parts = await promptParts(sessionId, content, text)
     if (parts.length === 0) return
-    const row = app.sessions.list.getSnapshot().byId[sessionId]
-    const cut = cutBefore(sessionId, turn.start.seq)
-    let child: SessionId | undefined
-    if (cut !== undefined) {
-      try {
-        child = await app.sessions.fork({ sessionId, atSeq: cut, increaseTitle: false })
-      } catch {
-        child = undefined
-      }
-    }
-    // Sin un punto donde cortar (historial no cargado o el fork falla), un chat nuevo.
-    child ??= await app.sessions.create(row?.cwd === undefined ? {} : { cwd: row.cwd })
+    // El Host corta con el historial completo y deja la copia en la misma carpeta y
+    // con el modelo elegido. Si no se puede copiar, se avisa: nunca un chat vacío.
+    const forked = await app.remote.session.localForkBefore({ sessionId, beforeSeq: turn.start.seq })
+    if (!forked.ok) throw new Error(forked.error.message)
+    const child = forked.value.sessionId
+    const cut = forked.value.atSeq
+    await app.sessions.refresh().catch(() => undefined)
     await app.sessions.using(child, { source: 'controllerOperation' }, async (reference) => {
       const binding = await reference.ready
-      const title = row?.title
-      if (typeof title === 'string' && title !== '' && binding.session.sessionId === child) {
-        await binding.session.rename(title).catch(() => undefined)
-      }
       const sent = await binding.session.prompt(parts, 'queue')
       if (!sent.ok) throw new Error(sent.error.message)
     })
@@ -294,7 +265,7 @@ async function regenerate(
         turn: turn.turn,
         members: [sessionId, child],
         marks: { [sessionId]: originalLast, [child]: undefined },
-        cuts: { [sessionId]: -1, [child]: cut ?? -1 },
+        cuts: { [sessionId]: -1, [child]: cut },
         lastTurns: originalLast === undefined ? {} : { [sessionId]: originalLast },
       }])
     } else {
@@ -302,7 +273,7 @@ async function regenerate(
         ...group,
         members: [...group.members, child],
         marks: { ...group.marks, [child]: undefined },
-        cuts: { ...group.cuts, [child]: cut ?? -1 },
+        cuts: { ...group.cuts, [child]: cut },
       }))
     }
     app.uiWorkspace.openSession(child)

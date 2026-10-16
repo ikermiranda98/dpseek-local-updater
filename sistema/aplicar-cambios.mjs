@@ -1238,6 +1238,70 @@ optional('editar tus mensajes y regenerar respuestas (con versiones)', (tx) => {
   tx.copy(join(here, 'regenerar', 'local-regenerate.tsx'), join(chatDir, 'chat', 'local-regenerate.tsx'))
   tx.copy(join(here, 'regenerar', 'local-regenerate.module.css'), join(chatDir, 'chat', 'local-regenerate.module.css'))
 
+  // Host: copiar el chat justo antes de un turno con el historial completo (el
+  // cliente solo tiene cargada una parte; si se quedaba corto, la copia salía mal).
+  const hostIndex = join(hostDir, 'index.ts')
+  const hostTypes = join(hostDir, 'types.ts')
+  let types = tx.read(hostTypes)
+  if (!types.includes('interface SessionLocalForkBeforeRequest')) {
+    types = types.trimEnd() + '\n\n' + [
+      '/** Local build: fork one Session right before one turn, to run that turn again. */',
+      'export interface SessionLocalForkBeforeRequest {',
+      '  readonly sessionId: SessionId',
+      '  /** Seq of the turn/start event of the turn to run again. */',
+      '  readonly beforeSeq: number',
+      '}',
+      '',
+      '/** Local build: the new Session and the inclusive seq it was cut at. */',
+      'export interface SessionLocalForkBeforeValue {',
+      '  readonly sessionId: SessionId',
+      '  readonly atSeq: number',
+      '}',
+    ].join('\n')
+    tx.write(hostTypes, types)
+  }
+  tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n",
+    "import { ApiSessionList } from './list.ts'\n"
+      + "import type { SessionLocalForkBeforeRequest, SessionLocalForkBeforeValue } from './types.ts'\n",
+    'SessionLocalForkBeforeRequest, SessionLocalForkBeforeValue }')
+  let host = tx.read(hostIndex)
+  if (!host.includes("@Remote('localForkBefore')")) {
+    const at = host.indexOf("  @Remote('list')")
+    const doc = at < 0 ? -1 : host.lastIndexOf('  /**', at)
+    if (doc < 0) skip(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
+    host = host.slice(0, doc) + [
+      '  /**',
+      '   * Local build: fork this Session right before one turn so it can run again',
+      '   * (edit and regenerate). The cut is the last event before the turn that is not',
+      '   * the queued copy of its prompt (agent/inbox/spliced), read from the whole log:',
+      '   * a queued copy in the child would run on its own next to the resent prompt.',
+      '   * @param request - Session identity and the seq of the turn/start event.',
+      '   * @returns the new Session (same Workspace and current model) and the cut.',
+      '   */',
+      "  @Remote('localForkBefore')",
+      '  async localForkBefore(request: SessionLocalForkBeforeRequest): Promise<SessionLocalForkBeforeValue> {',
+      '    let cut: number | undefined',
+      '    {',
+      '      using observation = await this.ctx.sessionQuery.observeSession(request.sessionId)',
+      '      for (const event of observation.events) {',
+      '        if (event.seq >= request.beforeSeq) break',
+      "        if (event.type !== 'agent/inbox/spliced') cut = event.seq",
+      '      }',
+      '    }',
+      '    if (cut === undefined) {',
+      "      throw new RemoteError('session/fork-unavailable',",
+      '        `nothing to keep before event ${String(request.beforeSeq)} in session "${request.sessionId}"`,',
+      '        { sessionId: request.sessionId })',
+      '    }',
+      '    const forked = await this.commands.fork({ sessionId: request.sessionId, atSeq: cut })',
+      '    return { sessionId: forked.sessionId, atSeq: cut }',
+      '  }',
+      '',
+      '',
+    ].join('\n') + host.slice(doc)
+    tx.write(hostIndex, host)
+  }
+
   // El módulo necesita el contexto del chat (sesiones, espacios de trabajo, Host).
   const apply = join(chatDir, 'apply.ts')
   tx.replace(apply, "import { ChatView } from './chat/ChatView.tsx'\n",
