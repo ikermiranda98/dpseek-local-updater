@@ -2014,6 +2014,36 @@ optional('actualizar Ollama desde la app', (tx) => {
   tx.replace(root, '        <DesktopUpdateIndicator wide={wide}', '        <LocalUpdatesIndicator wide={wide}')
 })
 
+// ── 22. Cursor normal, como en Windows ────────────────────────────────────────
+// La oficial pone la mano de los enlaces en casi todo lo que se pulsa (botones,
+// filas, pestañas, diálogos…). En Windows la mano es solo para los enlaces: aquí
+// se cambia por la flecha en todos los estilos de la interfaz, salvo en las reglas
+// de enlaces (su nombre lleva link, href, url, mention o anchor) y en los <a href>,
+// que tienen la mano del navegador.
+
+const LINK_RULE = /link|href|url|mention|anchor/i
+optional('cursor normal (flecha) salvo en los enlaces', (tx) => {
+  const roots = [join(repo, 'packages', 'client'), join(repo, 'packages', 'extensions'), join(repo, 'apps', 'desktop', 'renderer')]
+  const files = []
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (['node_modules', 'lib', 'tests', 'test', 'dist', '.desktop-build'].includes(entry.name)) continue
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) walk(full)
+      else if (entry.name.endsWith('.css')) files.push(full)
+    }
+  }
+  for (const root of roots) if (existsSync(root)) walk(root)
+  for (const file of files) {
+    const text = tx.read(file)
+    if (!/cursor:\s*pointer/.test(text)) continue
+    // Bloque a bloque (los de dentro de @media y los anidados también): el selector decide.
+    const next = text.replace(/([^{}]*)\{([^{}]*)\}/g, (rule, selector) =>
+      LINK_RULE.test(selector.replace(/\/\*[\s\S]*?\*\//g, '')) ? rule : rule.replace(/cursor:\s*pointer/g, 'cursor: default'))
+    if (next !== text) tx.write(file, next)
+  }
+})
+
 console.log('\nCambios aplicados:')
 for (const line of done) console.log(`  - ${line}`)
 if (omitted.length > 0) {

@@ -40,6 +40,7 @@ const LABELS = {
   'código en vivo en el panel derecho y deshacer por fichero': 'Live code in the right panel and per-file undo',
   subchats: 'Subchats',
   'actualizar Ollama desde la app': 'Update Ollama from the app',
+  'cursor normal (flecha) salvo en los enlaces': 'Normal arrow cursor (hand only on links)',
 }
 const label = (name) => LABELS[name] ?? name
 
@@ -93,7 +94,10 @@ const affected = touched.applied
 const previouslyApplied = previousReport?.applied === undefined ? undefined : new Set(previousReport.applied)
 const isNew = (feature) => previouslyApplied !== undefined && !previouslyApplied.has(feature.name)
 const added = touched.applied.filter((feature) => feature.name !== 'imprescindible' && isNew(feature))
-const changed = affected.filter((feature) => feature.name !== 'imprescindible' && !isNew(feature))
+// Retoques visuales que tocan muchos ficheros: si DeepSeek cambia alguno, no hay
+// nada que probar a mano (se aplican igual); van solo en los detalles.
+const COSMETIC = new Set(['cursor normal (flecha) salvo en los enlaces'])
+const changed = affected.filter((feature) => feature.name !== 'imprescindible' && !COSMETIC.has(feature.name) && !isNew(feature))
 
 // Omitidas que la versión anterior sí tenía (sin informe anterior, todas cuentan).
 const previouslyOmitted = new Set((previousReport?.omitted ?? []).map((feature) => feature.name))

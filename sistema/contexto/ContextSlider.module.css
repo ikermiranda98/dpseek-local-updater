@@ -61,7 +61,7 @@
   border-radius: var(--dsw-radius-sm);
   background: transparent;
   transform: translateX(-50%);
-  cursor: pointer;
+  cursor: default;
 }
 
 .step:disabled {
