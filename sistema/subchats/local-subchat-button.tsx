@@ -34,6 +34,13 @@ export function LocalSubchatSession({ sessionId, children }: { sessionId: string
   return <SubchatSession.Provider value={sessionId}>{children}</SubchatSession.Provider>
 }
 
+/** Si el chat es un subagente (también los subchats), según la lista de sesiones. */
+function isSubagent(sessionId: string): boolean {
+  const sessions = localCtx?.get('sessions') as
+    { list: { getSnapshot(): { byId: Record<string, { origin?: string } | undefined> } } } | undefined
+  return sessions?.list.getSnapshot().byId[sessionId]?.origin === 'subagent'
+}
+
 /**
  * «Open in subchat» en las acciones de una respuesta.
  * @returns el botón y, al pulsarlo, el cuadro para escribir la tarea.
@@ -44,7 +51,9 @@ export function LocalSubchatButton(): ReactNode {
   const [task, setTask] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  if (sessionId === undefined || localCtx === undefined) return null
+  // Dentro de un subchat (o de cualquier subagente) no se abre otro: el servicio de
+  // subagentes solo los lanza desde un chat principal.
+  if (sessionId === undefined || localCtx === undefined || isSubagent(sessionId)) return null
   const start = async (): Promise<void> => {
     const ctx = localCtx
     const text = task.trim()

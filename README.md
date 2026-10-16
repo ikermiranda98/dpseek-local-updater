@@ -159,7 +159,8 @@ Para tareas que ocuparían mucho del chat sin llenarlo:
 
 - **Abrir:** icono `└` («Open in subchat») bajo cada respuesta. Escribes la tarea y
   el subchat empieza con **toda la conversación**, trabaja con **esfuerzo alto** (y con
-  subagentes si le hacen falta) y se abre a la derecha.
+  subagentes si le hacen falta) y se abre a la derecha, ocupando el 35 % de la zona de
+  chat (luego se redimensiona a mano como siempre). Dentro de un subchat no se abre otro.
 - **Mismo modelo y contexto que el chat:** así Ollama no recarga el modelo (cambiar de
   contexto cuesta unos 13 s con un modelo grande) y la conversación cabe entera.
 - **Resultado:** al terminar, **solo su respuesta final** vuelve al chat principal (la
@@ -329,6 +330,8 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Código de cada turno a la derecha («View code») y deshacer por fichero (opcional) | `packages/client/ui-chat`, `ui-deliverables` y `packages/api/session-controller` (`localUndoTurnFile`); código en [`sistema/codigo-vivo/`](sistema/codigo-vivo) |
 | Subchats: «Open in subchat», anidados en la barra lateral y sugerencia junto al medidor de contexto (opcional) | `packages/client/ui-chat`, `ui-workspace`, `ui-conversation` y `packages/api/session-controller` (`localStartSubchat`); código en [`sistema/subchats/`](sistema/subchats) |
 | Actualizar Ollama desde la app, en el aviso de actualizaciones de abajo a la izquierda (opcional) | `packages/client/ui-settings-general` (`LocalUpdatesIndicator.tsx`) + `packages/client/ui-model-selection` (`local-ollama-bridge.ts`) + `packages/api/session-controller` (`local-ollama-update.ts`) |
+| Cursor normal (flecha) en toda la interfaz; la mano solo en los enlaces (opcional) | estilos `.css` de `packages/client`, `packages/extensions` y `apps/desktop/renderer` |
+| El subchat se abre al 35 % de la zona de chat (opcional) | `packages/client/ui-layout` (`localSetRightbarShare`) |
 | Aviso antes de instalar: semáforo, detalles y «Skip this version» (opcional) | `apps/desktop/src/main.ts` y `update-coordinator.ts` (`local-update-notice.ts`); el informe, [`sistema/informe-actualizacion.mjs`](sistema/informe-actualizacion.mjs) en el workflow |
 | Instalador sin firma, sin la «actualización obligatoria» de DeepSeek | `apps/desktop/scripts` |
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |
