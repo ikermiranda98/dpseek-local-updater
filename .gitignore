@@ -2,3 +2,10 @@ node_modules/
 codigo/
 Instalador/
 *.log
+
+# Datos y resultados del banco de pruebas de rendimiento
+sistema/rendimiento/banco/base/
+sistema/rendimiento/banco/base-caliente/
+sistema/rendimiento/banco/run-*/
+sistema/rendimiento/banco/resultados/
+sistema/rendimiento/banco/exe-*/
