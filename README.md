@@ -252,8 +252,12 @@ Cómo funciona:
 
 ## Actualizar Ollama desde la app
 
-Cuando sale una versión nueva de Ollama, el menú del selector de modelos lo dice
-(«Ollama 0.41.0 is available»), con sus novedades en «What's new». **Update**:
+Cuando sale una versión nueva de Ollama, aparece el botón **Update** de abajo a la
+izquierda (el mismo que avisa de las actualizaciones de la app). Abre un panel con
+una fila por actualización: la de la app (su camino de siempre, con el aviso antes de
+instalar) y la de Ollama, con sus novedades en «What's new». Si hay de las dos, el
+botón lleva un «2». Sin actualización de Ollama, el botón es el oficial tal cual.
+**Update** en la fila de Ollama:
 
 1. espera a que terminen las respuestas en marcha (el instalador cierra Ollama);
 2. descarga `OllamaSetup.exe` del Release oficial y lo instala en silencio, con los
@@ -324,7 +328,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | No volver a ofrecer una versión retirada (opcional) | `apps/desktop/src/update-coordinator.ts` (`local-skip-version.ts`) |
 | Código de cada turno a la derecha («View code») y deshacer por fichero (opcional) | `packages/client/ui-chat`, `ui-deliverables` y `packages/api/session-controller` (`localUndoTurnFile`); código en [`sistema/codigo-vivo/`](sistema/codigo-vivo) |
 | Subchats: «Open in subchat», anidados en la barra lateral y sugerencia junto al medidor de contexto (opcional) | `packages/client/ui-chat`, `ui-workspace`, `ui-conversation` y `packages/api/session-controller` (`localStartSubchat`); código en [`sistema/subchats/`](sistema/subchats) |
-| Actualizar Ollama desde la app (opcional) | `packages/client/ui-model-selection` (`LocalOllamaUpdate.tsx`) + `packages/api/session-controller` (`local-ollama-update.ts`) |
+| Actualizar Ollama desde la app, en el aviso de actualizaciones de abajo a la izquierda (opcional) | `packages/client/ui-settings-general` (`LocalUpdatesIndicator.tsx`) + `packages/client/ui-model-selection` (`local-ollama-bridge.ts`) + `packages/api/session-controller` (`local-ollama-update.ts`) |
 | Aviso antes de instalar: semáforo, detalles y «Skip this version» (opcional) | `apps/desktop/src/main.ts` y `update-coordinator.ts` (`local-update-notice.ts`); el informe, [`sistema/informe-actualizacion.mjs`](sistema/informe-actualizacion.mjs) en el workflow |
 | Instalador sin firma, sin la «actualización obligatoria» de DeepSeek | `apps/desktop/scripts` |
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |

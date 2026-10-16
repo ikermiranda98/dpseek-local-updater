@@ -1889,16 +1889,16 @@ optional('subchats', (tx) => {
 })
 
 // ── 21. Actualizar Ollama desde la app ────────────────────────────────────────
-// Cuando hay una versión nueva de Ollama, el menú del selector de modelos lo dice,
-// con las novedades, y la instala desde la app como lo hace el propio Ollama
+// Cuando hay una versión nueva de Ollama, el aviso de actualizaciones de abajo a la
+// izquierda (el de la app) aparece y abre un panel con una fila por actualización;
+// la de Ollama la instala desde la app como lo hace el propio Ollama
 // (OllamaSetup.exe en silencio): espera a las respuestas en marcha, vuelve a abrir
 // Ollama y mide el modelo por defecto para la versión nueva. Código:
-// sistema/contexto/local-ollama-update.ts y LocalOllamaUpdate.tsx.
+// sistema/contexto/local-ollama-update.ts, local-ollama-bridge.ts y LocalUpdatesIndicator.tsx.
 
 optional('actualizar Ollama desde la app', (tx) => {
   if (!toolsApplied) skip('necesita «herramientas de modelos en el selector»')
   const selectionDir = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client')
-  const select = join(selectionDir, 'ModelSelect.tsx')
   const selectionIndex = join(selectionDir, 'index.ts')
   const hostIndex = join(hostDir, 'index.ts')
   const hostTypes = join(hostDir, 'types.ts')
@@ -1979,37 +1979,39 @@ optional('actualizar Ollama desde la app', (tx) => {
     tx.write(hostIndex, host)
   }
 
-  // Menú del selector: la fila, junto al interruptor de limpieza.
-  tx.copy(join(here, 'contexto', 'LocalOllamaUpdate.tsx'), join(selectionDir, 'LocalOllamaUpdate.tsx'))
-  tx.copy(join(here, 'contexto', 'LocalOllamaUpdate.module.css'), join(selectionDir, 'LocalOllamaUpdate.module.css'))
-  tx.replace(select, "import localOptimizeCss from './LocalOptimizeButton.module.css'\n",
-    "import localOptimizeCss from './LocalOptimizeButton.module.css'\nimport { LocalOllamaUpdate } from './LocalOllamaUpdate.tsx'\n",
-    "import { LocalOllamaUpdate } from './LocalOllamaUpdate.tsx'")
-  const selectText = tx.read(select)
-  if (!selectText.includes('<LocalOllamaUpdate />')) {
-    const sw = /^(\s*)<LocalCleanupSwitch t=\{t\} \/>\n/m
-    if (!sw.test(selectText)) skip('no se encuentra el interruptor de limpieza en el selector')
-    tx.write(select,
-      selectText.replace(sw, (row, pad) => `${pad}{/* Local build: update Ollama from the app. */}\n${pad}<LocalOllamaUpdate />\n${row}`))
-  }
+  // El selector de modelos tiene acceso al Host: publica las llamadas en el puente.
+  tx.copy(join(here, 'contexto', 'local-ollama-bridge.ts'), join(selectionDir, 'local-ollama-bridge.ts'))
   tx.replace(selectionIndex, "import { setLocalOptimizer } from './LocalOptimizeButton.tsx'\n",
-    "import { setLocalOptimizer } from './LocalOptimizeButton.tsx'\nimport { setLocalOllamaUpdater } from './LocalOllamaUpdate.tsx'\n",
-    "import { setLocalOllamaUpdater }")
+    "import { setLocalOptimizer } from './LocalOptimizeButton.tsx'\nimport { setOllamaUpdater } from './local-ollama-bridge.ts'\n",
+    "import { setOllamaUpdater }")
   tx.replace(selectionIndex, "  }, 'ui-model-selection: local model tools')\n",
     "  }, 'ui-model-selection: local model tools')\n"
-      + '  // Local build: update Ollama from the app (LocalOllamaUpdate.tsx).\n'
+      + '  // Local build: Ollama update calls for the updates notice (local-ollama-bridge.ts).\n'
       + '  ctx.effect(() => {\n'
       + '    const unwrap = <T>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {\n'
       + '      if (!result.ok) throw new Error(result.error.message)\n'
       + '      return result.value\n'
       + '    }\n'
-      + '    setLocalOllamaUpdater({\n'
+      + '    setOllamaUpdater({\n'
       + '      info: async force => unwrap(await ctx.remote.session.localOllamaUpdateInfo({ force })),\n'
       + '      start: async () => unwrap(await ctx.remote.session.localOllamaUpdate({})),\n'
       + '    })\n'
-      + '    return () => { setLocalOllamaUpdater(undefined) }\n'
+      + '    return () => { setOllamaUpdater(undefined) }\n'
       + "  }, 'ui-model-selection: local Ollama update')\n",
-    'setLocalOllamaUpdater({')
+    'setOllamaUpdater({')
+
+  // Abajo a la izquierda: el aviso de actualizaciones de la app, ahora también con Ollama.
+  const settingsDir = join(repo, 'packages', 'client', 'ui-settings-general', 'src', 'client')
+  const indicator = join(settingsDir, 'DesktopUpdateIndicator.tsx')
+  const root = join(settingsDir, 'SettingsRoot.tsx')
+  for (const file of ['local-ollama-bridge.ts', 'LocalUpdatesIndicator.tsx', 'LocalUpdatesIndicator.module.css']) {
+    tx.copy(join(here, 'contexto', file), join(settingsDir, file))
+  }
+  tx.replace(indicator, 'function updateCopy(state: DesktopUpdatePresentation, t: SettingsTranslate)',
+    'export function updateCopy(state: DesktopUpdatePresentation, t: SettingsTranslate)')
+  tx.replace(root, "import { DesktopUpdateIndicator } from './DesktopUpdateIndicator.tsx'\n",
+    "import { LocalUpdatesIndicator } from './LocalUpdatesIndicator.tsx'\n")
+  tx.replace(root, '        <DesktopUpdateIndicator wide={wide}', '        <LocalUpdatesIndicator wide={wide}')
 })
 
 console.log('\nCambios aplicados:')

@@ -1,0 +1,128 @@
+/* Aviso de actualizaciones con Ollama (dpseek-local-updater). El botón es el oficial; esto es el panel. */
+
+.root {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
+  color: #fff;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* Se abre hacia arriba, encima del botón (posición calculada en LocalUpdatesIndicator.tsx). */
+.panel {
+  position: fixed;
+  z-index: 1000;
+  width: 300px;
+  max-height: min(420px, 70vh);
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: var(--dsw-radius-md);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  box-shadow: var(--dsw-elevation-prominent);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 18px;
+  cursor: default;
+}
+
+.row {
+  padding: 8px 10px;
+  border-radius: var(--dsw-radius-sm);
+}
+
+.row + .row {
+  border-top: 0.5px solid var(--dsw-alias-border-l2);
+}
+
+.head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.name {
+  font-weight: 500;
+}
+
+.action {
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
+  color: #fff;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.action:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.detail {
+  margin: 2px 0 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  white-space: pre-line;
+}
+
+.detail[data-error] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.bar {
+  height: 3px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--dsw-alias-border-l2);
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  background: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
+  transition: width 300ms ease;
+}
+
+.notesToggle {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.notes {
+  max-height: 140px;
+  overflow-y: auto;
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.hint {
+  margin: 4px 0 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
