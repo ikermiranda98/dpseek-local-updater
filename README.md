@@ -157,20 +157,37 @@ Como en Hermes Agent Desktop:
 
 Para tareas que ocuparían mucho del chat sin llenarlo:
 
-- **Abrir:** icono `└` («Open in subchat») bajo cada respuesta. Escribes la tarea y
-  el subchat empieza con **toda la conversación**, trabaja con **esfuerzo alto** (y con
-  subagentes si le hacen falta) y se abre a la derecha, ocupando el 40 % de la zona de
-  chat (luego se redimensiona a mano como siempre). Dentro de un subchat no se abre otro.
-- **Mismo modelo y contexto que el chat:** así Ollama no recarga el modelo (cambiar de
-  contexto cuesta unos 13 s con un modelo grande) y la conversación cabe entera.
-- **Resultado:** al terminar, **solo su respuesta final** vuelve al chat principal (la
-  tarjeta plegada «Subtask status updated») y el chat sigue con ella. El trabajo y el
-  razonamiento del subchat no ocupan contexto del chat principal.
-- **Barra lateral:** los subchats salen anidados bajo su chat, con un punto azul
-  mientras trabajan y verde al terminar. Un clic los abre.
+- **Abrir:** icono `└` («Open in subchat») bajo cada respuesta, o selecciona un trozo
+  de una respuesta y pulsa **Open in subchat** junto a él (va citado en la tarea). En
+  el cuadro hay **tareas rápidas** (Review the code, Write tests, Find the bug…) y la
+  casilla **«Let me review the result before it goes back»**. El subchat se abre a la
+  derecha, ocupando el 40 % de la zona de chat (luego se redimensiona a mano).
+- **Memoria:** empieza con **toda la conversación** del chat (una foto del momento en
+  que lo abres) y trabaja con **esfuerzo alto** (y con subagentes si le hacen falta), en
+  el mismo modelo y contexto que el chat: así Ollama no recarga el modelo y reutiliza lo
+  que ya tenía procesado.
+- **Ventana limpia:** el subchat empieza en tu tarea. La conversación copiada no se
+  pinta (una línea arriba, «Continues from the main chat · N earlier messages · Show»,
+  la enseña) y las instrucciones que acompañan a la tarea llegan al modelo pero no se
+  ven.
+- **Resultado:** al terminar bien, **solo su respuesta final** vuelve **una vez** al
+  chat principal, como la tarjeta **«Subchat · nombre · finished in …»** con sus primeras
+  líneas y «Open subchat», y el chat sigue con ella. Si lo paras o falla, no se manda
+  nada. Con «review», el resultado espera: lo mandas con el icono ✈ («Send to main
+  chat») bajo la respuesta del subchat o desde su menú.
+- **Barra lateral:** los subchats salen bajo su chat en un grupo que se **pliega y
+  despliega** («▾ 3 subchats»). Punto **azul** mientras trabaja, **ámbar** si espera una
+  respuesta o un permiso tuyo, **rojo** si se paró o falló, **violeta** si tiene un
+  resultado por revisar y **verde** al terminar; al pasar el ratón, el tiempo, los
+  tokens y si comparte el modelo con otro chat en marcha (entonces puede esperar su
+  turno). Clic derecho: Open, Open beside, Stop, Send result to main chat, Rename,
+  Remove from sidebar y Delete. Se seleccionan como los chats (Ctrl, Mayús, recuadro) y
+  se borran varios a la vez con **Supr**.
+- **Aviso:** cuando un subchat termina y no lo estás viendo, aviso de Windows.
 - **Sugerencia:** con el chat ya lleno, junto al medidor de contexto aparece **«Send
   to a subchat»** (desde el 60 % si estás escribiendo; desde el 80 %, siempre como aviso)
   con las cifras al pasar el ratón. Un clic manda lo que has escrito a un subchat.
+- Dentro de un subchat no se abre otro.
 
 ## Contexto de cada chat
 

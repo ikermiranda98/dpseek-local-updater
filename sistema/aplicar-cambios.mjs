@@ -1008,7 +1008,8 @@ optional('chats antiguos pasan solos al contexto recomendado', (tx) => {
 
 optional('aviso de Windows al terminar una respuesta en segundo plano', (tx) => {
   // Si DeepSeek añade sus propios avisos en la interfaz, se usan los suyos.
-  if (sourceMatches(join(repo, 'packages', 'client'), /new Notification\(/, ['local-reply-notifications.ts'])) {
+  // Nuestros propios avisos (este y el de los subchats) no cuentan como oficiales.
+  if (sourceMatches(join(repo, 'packages', 'client'), /new Notification\(/, ['local-reply-notifications.ts', 'local-subchat-rows.tsx'])) {
     official('avisos de respuesta terminada')
   }
   tx.copy(join(here, 'avisos', 'local-reply-notifications.ts'), join(uiDir, 'local-reply-notifications.ts'))
@@ -1722,7 +1723,8 @@ optional('subchats', (tx) => {
   }
 
   // Chat: el botón y el cuadro para escribir la tarea.
-  for (const file of ['local-subchat-store.ts', 'local-subchat-start.ts', 'local-subchat-button.tsx', 'local-subchat-button.module.css']) {
+  for (const file of ['local-subchat-store.ts', 'local-subchat-start.ts', 'local-subchat-button.tsx', 'local-subchat-button.module.css',
+    'local-subchat-view.tsx', 'local-subchat-view.module.css']) {
     tx.copy(join(sub, file), join(chatDir, 'chat', file))
   }
   const apply = join(chatDir, 'apply.ts')
@@ -1752,13 +1754,60 @@ optional('subchats', (tx) => {
     "import { LocalSubchatButton } from './local-subchat-button.tsx'")
   // Junto a «Regenerate» si está (sección 16); si no, solo.
   const tailText = tx.read(tail)
-  if (!tailText.includes('<LocalSubchatButton />')) {
+  if (!tailText.includes('<LocalSubchatButton replyText=')) {
     if (tailText.includes('<LocalRegenerateButton turn={turn} useChat={useChat} t={t} /></>}')) {
       tx.replace(tail, '<LocalRegenerateButton turn={turn} useChat={useChat} t={t} /></>}',
-        '<LocalRegenerateButton turn={turn} useChat={useChat} t={t} /><LocalSubchatButton /></>}')
+        '<LocalRegenerateButton turn={turn} useChat={useChat} t={t} /><LocalSubchatButton replyText={assistantText(closing.blocks)} /></>}')
     } else {
-      tx.replace(tail, 'extraActions={assistantActions}', 'extraActions={<>{assistantActions}<LocalSubchatButton /></>}')
+      tx.replace(tail, 'extraActions={assistantActions}',
+        'extraActions={<>{assistantActions}<LocalSubchatButton replyText={assistantText(closing.blocks)} /></>}')
     }
+  }
+
+  // Ventana del subchat: empieza en la tarea (lo copiado del chat principal se oculta,
+  // con una línea para verlo) y sin las instrucciones que la acompañan.
+  const flow = join(chatDir, 'chat', 'ChatFlow.tsx')
+  tx.replace(flow, "import { memo } from 'react'\n",
+    "import { memo, useState } from 'react'\nimport { LocalSubchatSeedLine, localSubchatSeed } from './local-subchat-view.tsx'\n",
+    "import { LocalSubchatSeedLine, localSubchatSeed }")
+  tx.replace(flow, '  const rows = entries.map((entry) => {\n',
+    '  // Local build: a subchat starts at its task; the copied main-chat turns stay hidden.\n'
+      + '  const [localShowSeed, setLocalShowSeed] = useState(false)\n'
+      + '  const localSeed = localSubchatSeed(entries, nodeStore)\n'
+      + '  const shownEntries = localSeed === undefined || localShowSeed ? entries : entries.slice(localSeed.index)\n'
+      + '  const rows = shownEntries.map((entry) => {\n',
+    '  const rows = shownEntries.map((entry) => {\n')
+  tx.replace(flow, '  return [...rows, ...pendingRows, ...running ?',
+    '  const localSeedRow = localSeed === undefined ? [] : [<LocalSubchatSeedLine key="local-subchat-seed" messages={localSeed.messages}\n'
+      + '    shown={localShowSeed} onToggle={() => { setLocalShowSeed(value => !value) }} />]\n'
+      + '  return [...localSeedRow, ...rows, ...pendingRows, ...running ?',
+    'return [...localSeedRow, ...rows')
+  const messageItem = join(chatDir, 'chat', 'MessageItem.tsx')
+  tx.replace(messageItem, "import css from './MessageItem.module.css'\n",
+    "import css from './MessageItem.module.css'\nimport { localVisibleContent } from './local-subchat-view.tsx'\n",
+    "import { localVisibleContent } from './local-subchat-view.tsx'")
+  tx.replace(messageItem, '      content={data.content}\n      interactive\n',
+    '      content={localVisibleContent(data.content)}\n      interactive\n')
+  // Chat principal: la respuesta de un subchat como su tarjeta (los demás avisos, como siempre).
+  const trigger = join(chatDir, 'chat', 'TurnTriggerNodeView.tsx')
+  tx.replace(trigger, "import css from './TurnTriggerNodeView.module.css'\n",
+    "import css from './TurnTriggerNodeView.module.css'\nimport { LocalSubchatResultCard, localSubchatNotice } from './local-subchat-view.tsx'\n",
+    "import { LocalSubchatResultCard, localSubchatNotice }")
+  tx.replace(trigger, "export function TurnTriggerNodeView({ node, t }: Pick<ChatNodeViewProps<'turn-trigger'>, 'node' | 't'>) {\n",
+    "function OfficialTurnTriggerNodeView({ node, t }: Pick<ChatNodeViewProps<'turn-trigger'>, 'node' | 't'>) {\n",
+    'function OfficialTurnTriggerNodeView(')
+  let triggerText = tx.read(trigger)
+  if (!triggerText.includes('export function TurnTriggerNodeView(')) {
+    triggerText = triggerText.trimEnd() + '\n\n' + [
+      '/** Local build: a subchat result gets its own card; every other trigger keeps the official notice. */',
+      "export function TurnTriggerNodeView({ node, t }: Pick<ChatNodeViewProps<'turn-trigger'>, 'node' | 't'>) {",
+      '  const subchat = localSubchatNotice(node.data.source)',
+      '  return subchat === undefined',
+      '    ? <OfficialTurnTriggerNodeView node={node} t={t} />',
+      '    : <LocalSubchatResultCard notice={subchat} content={node.data.content} time={formatMessageClock(node.data.time, t)} />',
+      '}',
+    ].join('\n')
+    tx.write(trigger, triggerText)
   }
 
   // Junto al medidor de contexto: con el chat ya lleno, sugerir un subchat con las cifras
@@ -1780,7 +1829,7 @@ optional('subchats', (tx) => {
     '<LocalSubchatHint sessionId={sessionId}')
 
   // Barra lateral: los subchats bajo su chat.
-  for (const file of ['local-subchat-store.ts', 'local-subchat-rows.tsx', 'local-subchat-rows.module.css']) {
+  for (const file of ['local-subchat-store.ts', 'local-subchat-start.ts', 'local-subchat-rows.tsx', 'local-subchat-rows.module.css']) {
     tx.copy(join(sub, file), join(workspaceDir, 'rows', file))
   }
   const rows = join(workspaceDir, 'rows', 'Rows.tsx')
@@ -1813,10 +1862,10 @@ optional('subchats', (tx) => {
       + '    ctx, ctx.remote.directoryPicker, workspaces, sessions, viewInstance.actions, notify,\n'
       + '  )\n'
       + '  // Local build: subchats nested under their chat (local-subchat-rows.tsx).\n'
-      + '  setLocalSubchats(sessions, (target) => { uiWorkspace.openSession(target) })\n',
-    '  setLocalSubchats(sessions,')
+      + "  ctx.effect(() => setLocalSubchats(ctx, sessions, (target) => { uiWorkspace.openSession(target) }), 'ui-workspace: local subchats')\n",
+    '  ctx.effect(() => setLocalSubchats(ctx,')
 
-  // Host: lanzar el subagente «fork».
+  // Host: lanzar el subagente «fork», entregar su resultado al chat principal y pararlo.
   const hostIndex = join(hostDir, 'index.ts')
   const hostTypes = join(hostDir, 'types.ts')
   tx.copy(join(sub, 'local-subchat.ts'), join(hostDir, 'local-subchat.ts'))
@@ -1831,11 +1880,32 @@ optional('subchats', (tx) => {
       '  readonly task: string',
       '  /** Short name shown for the subchat. */',
       '  readonly label: string',
+      '  /** Keep the result in the subchat until the user sends it back. */',
+      '  readonly review?: boolean',
       '}',
       '',
       '/** Local build: the subchat Session. */',
       'export interface SessionLocalSubchatValue {',
       '  readonly childSessionId: SessionId',
+      '}',
+      '',
+      "/** Local build: send a subchat's reply (or its latest one) back to its main chat. */",
+      'export interface SessionLocalSubchatDeliverRequest {',
+      '  readonly sessionId: SessionId',
+      '  readonly childSessionId: SessionId',
+      '  readonly label: string',
+      '  readonly text?: string',
+      '}',
+      '',
+      '/** Local build: stop a running subchat. */',
+      'export interface SessionLocalSubchatStopRequest {',
+      '  readonly sessionId: SessionId',
+      '  readonly childSessionId: SessionId',
+      '}',
+      '',
+      '/** Local build: whether the action was done. */',
+      'export interface SessionLocalSubchatDoneValue {',
+      '  readonly done: boolean',
       '}',
       '',
       "declare module '@deepseek-ai/dsh-typert-protocol' {",
@@ -1848,39 +1918,95 @@ optional('subchats', (tx) => {
   }
   tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n",
     "import { ApiSessionList } from './list.ts'\n"
-      + "import { localStartSubchat, type LocalSubagents } from './local-subchat.ts'\n"
-      + "import type { SessionLocalSubchatRequest, SessionLocalSubchatValue } from './types.ts'\n",
-    'SessionLocalSubchatRequest, SessionLocalSubchatValue }')
+      + 'import {\n'
+      + '  localClosingText, localDeliverNotice, localStartSubchat, localSubchatNotice, type LocalParentAgent, type LocalSubagents,\n'
+      + "} from './local-subchat.ts'\n"
+      + 'import type {\n'
+      + '  SessionLocalSubchatDeliverRequest, SessionLocalSubchatDoneValue, SessionLocalSubchatRequest,\n'
+      + '  SessionLocalSubchatStopRequest, SessionLocalSubchatValue,\n'
+      + "} from './types.ts'\n",
+    'SessionLocalSubchatDeliverRequest, SessionLocalSubchatDoneValue, SessionLocalSubchatRequest,')
   let host = tx.read(hostIndex)
   if (!host.includes("@Remote('localStartSubchat')")) {
     const at = host.indexOf("  @Remote('list')")
     const doc = at < 0 ? -1 : host.lastIndexOf('  /**', at)
     if (doc < 0) skip(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
     host = host.slice(0, doc) + [
+      '  /** Local build: the subagent service, when this app composes it. */',
+      '  private localSubagents(sessionId: SessionId): LocalSubagents {',
+      "    const subagents = (this.ctx as unknown as { get(name: string): unknown }).get('subagents') as LocalSubagents | undefined",
+      "    if (subagents === undefined) throw new RemoteError('session/local-subchat-failed', 'subagents are not available in this app', { sessionId })",
+      '    return subagents',
+      '  }',
+      '',
+      '  /** Local build: hand a subchat result to its main chat (loading it if needed). */',
+      '  private async localDeliverSubchat(parentId: SessionId, childId: string, label: string, text: string, durationMs?: number): Promise<void> {',
+      '    const found = await this.agents.resolveAgent(parentId)',
+      "    if ('error' in found) throw found.error",
+      '    localDeliverNotice(found.agent as unknown as LocalParentAgent, localSubchatNotice(childId, label, text, durationMs))',
+      '  }',
+      '',
       '  /**',
       '   * Local build: open a subchat, a fork subagent of this Session started by the',
-      '   * user: it begins with the completed conversation, works with high effort and',
-      "   * returns only its final answer to this Session (the subagent service's",
-      '   * parent delivery).',
-      '   * @param request - Session, task and label.',
+      '   * user: it begins with the completed conversation, works with high effort and its',
+      '   * final answer returns once to this Session (unless the user reviews it first).',
+      '   * @param request - Session, task, label and review choice.',
       '   * @param signal - cancels only the start.',
       '   * @returns the subchat Session.',
       '   */',
       "  @Remote('localStartSubchat')",
       '  async localStartSubchat(request: SessionLocalSubchatRequest, signal: AbortSignal): Promise<SessionLocalSubchatValue> {',
-      "    const subagents = (this.ctx as unknown as { get(name: string): unknown }).get('subagents') as LocalSubagents | undefined",
-      '    if (subagents === undefined) {',
-      "      throw new RemoteError('session/local-subchat-failed', 'subagents are not available in this app', { sessionId: request.sessionId })",
-      '    }',
+      '    const subagents = this.localSubagents(request.sessionId)',
       '    const found = await this.agents.resolveAgent(request.sessionId)',
       "    if ('error' in found) throw found.error",
       '    try {',
-      '      const child = await localStartSubchat(subagents, found.agent, request.task, request.label, signal)',
-      '      return { childSessionId: child as SessionId }',
+      '      const startedAt = Date.now()',
+      '      const started = await localStartSubchat(subagents, found.agent, request.task, request.label, signal)',
+      '      if (request.review !== true) {',
+      '        void started.result',
+      '          .then(result => result.completed',
+      '            ? this.localDeliverSubchat(request.sessionId, started.childId, request.label, result.text, Date.now() - startedAt)',
+      '            : undefined)',
+      "          .catch((error: unknown) => { console.warn('local subchat ' + started.childId + ': result not delivered', error) })",
+      '      }',
+      '      return { childSessionId: started.childId as SessionId }',
       '    } catch (error) {',
       "      throw new RemoteError('session/local-subchat-failed', error instanceof Error ? error.message : String(error),",
       '        { sessionId: request.sessionId })',
       '    }',
+      '  }',
+      '',
+      '  /**',
+      "   * Local build: send a subchat's reply back to its main chat, or its latest reply",
+      '   * when no text is given (read from the subchat log).',
+      '   * @param request - main chat, subchat, label and optional text.',
+      '   * @returns whether it was delivered.',
+      '   */',
+      "  @Remote('localSubchatDeliver')",
+      '  async localSubchatDeliver(request: SessionLocalSubchatDeliverRequest): Promise<SessionLocalSubchatDoneValue> {',
+      '    let text = request.text',
+      '    if (text === undefined) {',
+      '      using observation = await this.ctx.sessionQuery.observeSession(request.childSessionId)',
+      '      for (const event of observation.events) {',
+      "        if (event.type !== 'assistant/message') continue",
+      '        const content = (event.data as { message?: { content?: readonly { type: string; text?: string }[] } }).message?.content ?? []',
+      '        const closing = localClosingText(content)',
+      "        if (closing !== '') text = closing",
+      '      }',
+      '    }',
+      "    await this.localDeliverSubchat(request.sessionId, request.childSessionId, request.label, text ?? '')",
+      '    return { done: true }',
+      '  }',
+      '',
+      '  /**',
+      '   * Local build: stop a running subchat.',
+      '   * @param request - main chat and subchat.',
+      '   * @returns whether the stop was accepted.',
+      '   */',
+      "  @Remote('localSubchatStop')",
+      '  localSubchatStop(request: SessionLocalSubchatStopRequest): SessionLocalSubchatDoneValue {',
+      "    this.localSubagents(request.sessionId).interrupt(request.childSessionId, { kind: 'user', parentSessionId: request.sessionId })",
+      '    return { done: true }',
       '  }',
       '',
     ].join('\n') + host.slice(doc)

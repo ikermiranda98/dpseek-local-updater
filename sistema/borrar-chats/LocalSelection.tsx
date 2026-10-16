@@ -71,7 +71,8 @@ export interface LocalSelectionInjected {
 type Props = PropsRuntime<'shell.overlay'> & PropsLocale<'workspace'>
   & Omit<LocalSelectionInjected, 'hooks'> & PropsHooks<LocalSelectionInjected['hooks']>
 
-const SESSION = '[data-row-key^="session:"]'
+// Los subchats anidados (sección 20) se seleccionan y borran igual que los chats.
+const SESSION = '[data-row-key^="session:"], [data-row-key^="subchat:"]'
 const WORKSPACE = '[data-row-key^="workspace:"]'
 const SELECTED_ATTR = 'data-local-selected'
 const DROP_ATTR = 'data-local-drop'
@@ -90,7 +91,10 @@ const STYLE = `
 body[data-local-marquee], body[data-local-marquee] * { user-select: none !important; cursor: default !important; }
 `
 
-const idOf = (row: Element): SessionId => row.getAttribute('data-row-key')!.slice('session:'.length) as SessionId
+const idOf = (row: Element): SessionId => row.getAttribute('data-row-key')!.replace(/^(session|subchat):/, '') as SessionId
+
+/** Si la sesión es un subchat que se ve en la barra lateral (fila «subchat:»). */
+const isSubchat = (id: string): boolean => document.querySelector(`[data-row-key="subchat:${CSS.escape(id)}"]`) !== null
 
 /**
  * Columna de la barra lateral (donde empieza el recuadro): el contenedor más alto
@@ -132,8 +136,10 @@ export function LocalSelection({
   archiveOne, isPinned, pinMany, archiveMany, deleteMany, moveOptions, moveMany, t,
 }: Props) {
   const selection = useSelection(state => state)
-  const live = useRef({ selection, setSelection, isSelectable, moveOptions, moveMany, renameSession })
-  live.current = { selection, setSelection, isSelectable, moveOptions, moveMany, renameSession }
+  // Un subchat no es un chat de la lista oficial, pero se selecciona (para borrarlo) igual.
+  const canSelect = (id: SessionId): boolean => isSelectable(id) || isSubchat(id)
+  const live = useRef({ selection, setSelection, isSelectable: canSelect, moveOptions, moveMany, renameSession })
+  live.current = { selection, setSelection, isSelectable: canSelect, moveOptions, moveMany, renameSession }
   const anchor = useRef<SessionId | null>(null)
   const [box, setBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null)
   const [menu, setMenu] = useState<{ rect: DOMRect; ids: readonly SessionId[] } | null>(null)
@@ -227,6 +233,8 @@ export function LocalSelection({
       const id = idOf(row)
       const { selection: current, setSelection: set, isSelectable: selectable } = live.current
       if (!selectable(id)) return
+      // Un subchat solo tiene su propio menú (Stop, Send result, Rename…); con varios seleccionados, el de la selección.
+      if (isSubchat(id) && !(current.includes(id) && current.length > 1)) return
       event.preventDefault()
       event.stopPropagation()
       const ids = current.includes(id) ? current : [id]
@@ -287,7 +295,7 @@ export function LocalSelection({
       if (live.current.selection.length === 0 || typing(event.target)) return
       if (event.key === 'Escape') {
         live.current.setSelection([])
-      } else if (event.key === 'F2' && live.current.selection.length === 1) {
+      } else if (event.key === 'F2' && live.current.selection.length === 1 && !isSubchat(live.current.selection[0]!)) {
         event.preventDefault()
         live.current.renameSession(live.current.selection[0]!)
       } else if (event.key === 'Delete') {
@@ -371,6 +379,14 @@ export function LocalSelection({
 
   // Menú contextual: las mismas filas y el mismo aspecto que el resto de menús de la app.
   const items = (ids: readonly SessionId[]): MenuEntry[] => {
+    // Con subchats en la selección, solo lo que vale para ellos: borrar.
+    if (ids.some(isSubchat)) {
+      return [{
+        id: 'delete', danger: true, icon: <IconTrashOutlineRegular size={14} />,
+        label: ids.length === 1 ? t('local.deleteSession.action') : t('local.sel.deleteMany', { n: ids.length }),
+        shortcut: { keys: ['Del'], aria: 'Delete' },
+      }]
+    }
     const single = ids.length === 1
     const allPinned = ids.every(isPinned)
     const options = moveOptions(ids)
@@ -443,6 +459,8 @@ export function LocalSelection({
     setError(null)
     deleteMany(ids, setProgress).then((failed) => {
       setProgress(null)
+      // Quien guarde algo de estas sesiones (p. ej. los subchats de la barra lateral) se entera.
+      window.dispatchEvent(new CustomEvent('dpseek-local-deleted', { detail: ids }))
       if (failed.length > 0) {
         setError(t('local.bulk.failed', { titles: failed.join(', ') }))
         return
@@ -457,7 +475,10 @@ export function LocalSelection({
 
   const busy = progress !== null
   const count = confirming?.length ?? 0
-  const titles = confirming === null ? [] : titlesOf(confirming)
+  // Un subchat hereda el título de su chat: en el aviso va el nombre que se ve en su fila.
+  const titles = confirming === null ? [] : confirming.map((id) => isSubchat(id)
+    ? document.querySelector(`[data-row-key="subchat:${CSS.escape(id)}"]`)?.textContent?.trim() ?? id
+    : titlesOf([id])[0] ?? id)
 
   return (
     <>

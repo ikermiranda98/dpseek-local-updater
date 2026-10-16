@@ -55,3 +55,69 @@
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
 }
+
+.action[data-state='sent'] {
+  color: var(--dsw-alias-file-diff-added-marker);
+}
+
+.action[data-state='error'] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+/* Tareas rápidas encima de la tarea. */
+.quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.chip {
+  height: 26px;
+  padding: 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 13px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  cursor: default;
+}
+
+.chip:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.review {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+}
+
+/* Botón flotante junto al texto seleccionado. */
+.selection {
+  position: fixed;
+  z-index: 1000;
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-sm);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  box-shadow: var(--dsw-elevation-prominent);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.selection svg {
+  width: 13px;
+  height: 13px;
+}
