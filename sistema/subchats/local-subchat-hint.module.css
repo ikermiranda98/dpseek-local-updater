@@ -1,0 +1,41 @@
+/* Sugerencia de subchat junto al medidor de contexto (dpseek-local-updater). */
+
+.hint {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  height: 22px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 35%, transparent);
+  border-radius: var(--dsw-radius-sm);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.hint:hover:not(:disabled, [aria-disabled='true']) {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent);
+}
+
+/* Sin texto escrito no hay nada que mandar: es solo el aviso con las cifras. */
+.hint[aria-disabled='true'] {
+  opacity: 0.85;
+}
+
+.hint[data-level='high'] {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 40%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 8%, transparent);
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.hint[data-error] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.icon {
+  width: 13px;
+  height: 13px;
+}

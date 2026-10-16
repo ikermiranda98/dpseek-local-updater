@@ -38,6 +38,7 @@ const LABELS = {
   'al pasar por un chat, solo el menú «⋯»': 'Only the ⋯ menu when hovering a chat',
   'aviso antes de instalar una actualización (semáforo y saltar versión)': 'Update notice before installing',
   'código en vivo en el panel derecho y deshacer por fichero': 'Live code in the right panel and per-file undo',
+  subchats: 'Subchats',
 }
 const label = (name) => LABELS[name] ?? name
 

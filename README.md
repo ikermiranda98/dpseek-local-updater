@@ -136,6 +136,41 @@ Como en Hermes Agent Desktop:
   Cuando escribes un mensaje nuevo en una versión, esa queda como la buena y **las
   demás se borran del todo** (la barra avisa si alguna tenía mensajes posteriores).
 
+## Ver el código que escribe y deshacerlo
+
+- Cuando la IA escribe o edita ficheros, la línea de estado del turno («Deep diving…»
+  mientras trabaja, «Completed in…» al acabar) lleva **`</> View code · N files`**.
+  Abre a la derecha la pestaña **Live code**: una pestaña por fichero, con colores
+  y números de línea; las ediciones se ven como diferencias (rojo lo quitado, verde
+  lo añadido). «Follow» la mantiene en el fichero que se está escribiendo. El panel
+  no se abre solo.
+- **En tiempo real** si el proveedor envía el código por trozos (la API de DeepSeek,
+  OpenAI o Anthropic lo hacen). **Ollama lo entrega entero** cuando el modelo termina
+  de escribirlo, así que con Ollama el fichero aparece completo de una vez.
+- **Deshacer por fichero:** «Review changes and undo» abre la revisión de cambios del
+  turno; cada fichero tiene **Undo** (pide confirmación con un segundo clic) y lo deja
+  como estaba al empezar el turno: restaura lo editado, quita lo creado y recupera
+  lo borrado. Si el fichero se ha tocado después de ese turno, no lo cambia y avisa.
+  La revisión solo existe mientras la app sigue abierta desde ese turno.
+
+## Subchats
+
+Para tareas que ocuparían mucho del chat sin llenarlo:
+
+- **Abrir:** icono `└` («Open in subchat») bajo cada respuesta. Escribes la tarea y
+  el subchat empieza con **toda la conversación**, trabaja con **esfuerzo alto** (y con
+  subagentes si le hacen falta) y se abre a la derecha.
+- **Mismo modelo y contexto que el chat:** así Ollama no recarga el modelo (cambiar de
+  contexto cuesta unos 13 s con un modelo grande) y la conversación cabe entera.
+- **Resultado:** al terminar, **solo su respuesta final** vuelve al chat principal (la
+  tarjeta plegada «Subtask status updated») y el chat sigue con ella. El trabajo y el
+  razonamiento del subchat no ocupan contexto del chat principal.
+- **Barra lateral:** los subchats salen anidados bajo su chat, con un punto azul
+  mientras trabajan y verde al terminar. Un clic los abre.
+- **Sugerencia:** con el chat ya lleno, junto al medidor de contexto aparece **«Send
+  to a subchat»** (desde el 60 % si estás escribiendo; desde el 80 %, siempre como aviso)
+  con las cifras al pasar el ratón. Un clic manda lo que has escrito a un subchat.
+
 ## Contexto de cada chat
 
 En el selector de modelo de cada chat, debajo de «Model», hay una **barra de
@@ -274,6 +309,8 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Editar mensajes y regenerar respuestas, con versiones (opcional) | `packages/client/ui-chat`; código en [`sistema/regenerar/`](sistema/regenerar) |
 | Aviso de Windows al terminar una respuesta (opcional) | `packages/client/ui-workspace`; código en [`sistema/avisos/`](sistema/avisos) |
 | No volver a ofrecer una versión retirada (opcional) | `apps/desktop/src/update-coordinator.ts` (`local-skip-version.ts`) |
+| Código de cada turno a la derecha («View code») y deshacer por fichero (opcional) | `packages/client/ui-chat`, `ui-deliverables` y `packages/api/session-controller` (`localUndoTurnFile`); código en [`sistema/codigo-vivo/`](sistema/codigo-vivo) |
+| Subchats: «Open in subchat», anidados en la barra lateral y sugerencia junto al medidor de contexto (opcional) | `packages/client/ui-chat`, `ui-workspace`, `ui-conversation` y `packages/api/session-controller` (`localStartSubchat`); código en [`sistema/subchats/`](sistema/subchats) |
 | Aviso antes de instalar: semáforo, detalles y «Skip this version» (opcional) | `apps/desktop/src/main.ts` y `update-coordinator.ts` (`local-update-notice.ts`); el informe, [`sistema/informe-actualizacion.mjs`](sistema/informe-actualizacion.mjs) en el workflow |
 | Instalador sin firma, sin la «actualización obligatoria» de DeepSeek | `apps/desktop/scripts` |
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |

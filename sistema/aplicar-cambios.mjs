@@ -1594,7 +1594,7 @@ optional('código en vivo en el panel derecho y deshacer por fichero', (tx) => {
     '<LocalLiveSession sessionId={sessionId}>')
   tx.replace(chatView, '            </MarkdownDelegateProvider>\n',
     '            </MarkdownDelegateProvider>\n            </LocalLiveSession>\n',
-    '            </MarkdownDelegateProvider>\n            </LocalLiveSession>\n')
+    '</LocalLiveSession>')
   const running = join(chatDir, 'chat', 'RunningStatus.tsx')
   tx.replace(running, "import { RunningWhaleTail } from './RunningWhaleTail.tsx'\n",
     "import { RunningWhaleTail } from './RunningWhaleTail.tsx'\nimport { LocalLiveCodeButton } from './local-live-watch.tsx'\n",
@@ -1694,6 +1694,191 @@ optional('código en vivo en el panel derecho y deshacer por fichero', (tx) => {
       '      return { outcome: await localUndoTurnFile(changes, request.sessionId, request.seq, request.index, signal) }',
       '    } catch (error) {',
       "      throw new RemoteError('session/local-undo-failed', error instanceof Error ? error.message : String(error),",
+      '        { sessionId: request.sessionId })',
+      '    }',
+      '  }',
+      '',
+    ].join('\n') + host.slice(doc)
+    tx.write(hostIndex, host)
+  }
+})
+
+// ── 20. Subchats ──────────────────────────────────────────────────────────────
+// «Open in subchat» bajo cada respuesta: un subagente «fork» oficial lanzado desde
+// la app, que empieza con toda la conversación, trabaja con esfuerzo alto (y con
+// subagentes si le hacen falta) en el mismo modelo y contexto que el chat, y
+// devuelve al chat principal solo su respuesta final. Se abre a la derecha y queda
+// anidado bajo su chat en la barra lateral, con un punto de estado. Código:
+// sistema/subchats/.
+
+optional('subchats', (tx) => {
+  const sub = join(here, 'subchats')
+  const chatDir = join(repo, 'packages', 'client', 'ui-chat', 'src', 'client')
+  const workspaceDir = join(repo, 'packages', 'client', 'ui-workspace', 'src', 'client')
+  // Si DeepSeek añade subchats propios, se usan los suyos.
+  if (officialKeys(join(chatDir, 'locale.ts')).some((key) => /subchat|sub-chat/i.test(key))) official('subchats')
+  if (!tx.read(join(repo, 'packages', 'bundle', 'base', 'cordis.patch.yml')).includes('dsh-subagent-fork-in-process')) {
+    skip('la versión oficial ya no trae los subagentes «fork»')
+  }
+
+  // Chat: el botón y el cuadro para escribir la tarea.
+  for (const file of ['local-subchat-store.ts', 'local-subchat-start.ts', 'local-subchat-button.tsx', 'local-subchat-button.module.css']) {
+    tx.copy(join(sub, file), join(chatDir, 'chat', file))
+  }
+  const apply = join(chatDir, 'apply.ts')
+  tx.replace(apply, "import { ChatView } from './chat/ChatView.tsx'\n",
+    "import { ChatView } from './chat/ChatView.tsx'\nimport { setLocalSubchat } from './chat/local-subchat-button.tsx'\n",
+    "import { setLocalSubchat } from './chat/local-subchat-button.tsx'")
+  tx.replace(apply, '  const quotaNotice = createSnapshotStore<QuotaNoticeState | null>(null)\n',
+    '  // Local build: subchats (local-subchat-button.tsx).\n'
+      + '  setLocalSubchat(ctx)\n'
+      + "  ctx.effect(() => () => { setLocalSubchat(undefined) }, 'ui-chat: local subchats')\n"
+      + '  const quotaNotice = createSnapshotStore<QuotaNoticeState | null>(null)\n',
+    '  setLocalSubchat(ctx)\n')
+  const chatView = join(chatDir, 'chat', 'ChatView.tsx')
+  tx.replace(chatView, "import css from './ChatView.module.css'\n",
+    "import css from './ChatView.module.css'\nimport { LocalSubchatSession } from './local-subchat-button.tsx'\n",
+    "import { LocalSubchatSession } from './local-subchat-button.tsx'")
+  tx.replace(chatView, '            <MarkdownDelegateProvider openFile={requestOpenFile}',
+    '            <LocalSubchatSession sessionId={sessionId}>\n'
+      + '            <MarkdownDelegateProvider openFile={requestOpenFile}',
+    '<LocalSubchatSession sessionId={sessionId}>')
+  tx.replace(chatView, '            </MarkdownDelegateProvider>\n',
+    '            </MarkdownDelegateProvider>\n            </LocalSubchatSession>\n',
+    '</LocalSubchatSession>')
+  const tail = join(chatDir, 'chat', 'TurnTailNodeView.tsx')
+  tx.replace(tail, "import css from './TurnTailNodeView.module.css'\n",
+    "import css from './TurnTailNodeView.module.css'\nimport { LocalSubchatButton } from './local-subchat-button.tsx'\n",
+    "import { LocalSubchatButton } from './local-subchat-button.tsx'")
+  // Junto a «Regenerate» si está (sección 16); si no, solo.
+  const tailText = tx.read(tail)
+  if (!tailText.includes('<LocalSubchatButton />')) {
+    if (tailText.includes('<LocalRegenerateButton turn={turn} useChat={useChat} t={t} /></>}')) {
+      tx.replace(tail, '<LocalRegenerateButton turn={turn} useChat={useChat} t={t} /></>}',
+        '<LocalRegenerateButton turn={turn} useChat={useChat} t={t} /><LocalSubchatButton /></>}')
+    } else {
+      tx.replace(tail, 'extraActions={assistantActions}', 'extraActions={<>{assistantActions}<LocalSubchatButton /></>}')
+    }
+  }
+
+  // Junto al medidor de contexto: con el chat ya lleno, sugerir un subchat con las cifras
+  // (lo lanza ui-chat, que tiene acceso al Host, a través de local-subchat-store.ts).
+  const conversationDir = join(repo, 'packages', 'client', 'ui-conversation', 'src', 'client')
+  for (const file of ['local-subchat-store.ts', 'local-subchat-hint.tsx', 'local-subchat-hint.module.css']) {
+    tx.copy(join(sub, file), join(conversationDir, 'skeleton', file))
+  }
+  const inputBar = join(conversationDir, 'skeleton', 'InputBar.tsx')
+  tx.replace(inputBar, "import { ContextMeter } from './ContextMeter.tsx'\n",
+    "import { ContextMeter } from './ContextMeter.tsx'\nimport { LocalSubchatHint } from './local-subchat-hint.tsx'\n",
+    "import { LocalSubchatHint } from './local-subchat-hint.tsx'")
+  tx.replace(inputBar, '        {activity ? null : <ContextMeter useProjection={useProjection} t={t} />}\n',
+    '        {activity ? null : <>\n'
+      + '          <LocalSubchatHint sessionId={sessionId} useProjection={useProjection} draft={draft} subagent={subagent !== null}\n'
+      + "            clearDraft={() => { inputActions?.setDraft('') }} />\n"
+      + '          <ContextMeter useProjection={useProjection} t={t} />\n'
+      + '        </>}\n',
+    '<LocalSubchatHint sessionId={sessionId}')
+
+  // Barra lateral: los subchats bajo su chat.
+  for (const file of ['local-subchat-store.ts', 'local-subchat-rows.tsx', 'local-subchat-rows.module.css']) {
+    tx.copy(join(sub, file), join(workspaceDir, 'rows', file))
+  }
+  const rows = join(workspaceDir, 'rows', 'Rows.tsx')
+  tx.replace(rows, "import css from './Rows.module.css'\n",
+    "import css from './Rows.module.css'\nimport { LocalSubchatRows } from './local-subchat-rows.tsx'\n",
+    "import { LocalSubchatRows } from './local-subchat-rows.tsx'")
+  tx.replace(rows, '  return (\n    <HoverCard\n      anchor={ownRow}\n      content={<SessionHoverContent node={node}',
+    '  return (\n    <>\n    <HoverCard\n      anchor={ownRow}\n      content={<SessionHoverContent node={node}',
+    '  return (\n    <>\n    <HoverCard\n      anchor={ownRow}\n      content={<SessionHoverContent node={node}')
+  tx.replace(rows, "      disabled={menuOpen || drag?.active === true}\n"
+      + "      copyText={row.blank || row.title === '' ? undefined : row.title}\n"
+      + "      copyLabel={t('copy')}\n"
+      + "      copiedLabel={t('hover.copied')}\n"
+      + '    />\n  )\n}\n',
+    "      disabled={menuOpen || drag?.active === true}\n"
+      + "      copyText={row.blank || row.title === '' ? undefined : row.title}\n"
+      + "      copyLabel={t('copy')}\n"
+      + "      copiedLabel={t('hover.copied')}\n"
+      + '    />\n    <LocalSubchatRows parentId={node.id} currentId={currentId} />\n    </>\n  )\n}\n',
+    '<LocalSubchatRows parentId={node.id} currentId={currentId} />')
+  const workspaceIndex = join(workspaceDir, 'index.ts')
+  tx.replace(workspaceIndex, "import { createWorkspaceViewStore",
+    "import { setLocalSubchats } from './rows/local-subchat-rows.tsx'\nimport { createWorkspaceViewStore",
+    "import { setLocalSubchats } from './rows/local-subchat-rows.tsx'")
+  tx.replace(workspaceIndex,
+    '  const uiWorkspace = new UiWorkspaceService(\n'
+      + '    ctx, ctx.remote.directoryPicker, workspaces, sessions, viewInstance.actions, notify,\n'
+      + '  )\n',
+    '  const uiWorkspace = new UiWorkspaceService(\n'
+      + '    ctx, ctx.remote.directoryPicker, workspaces, sessions, viewInstance.actions, notify,\n'
+      + '  )\n'
+      + '  // Local build: subchats nested under their chat (local-subchat-rows.tsx).\n'
+      + '  setLocalSubchats(sessions, (target) => { uiWorkspace.openSession(target) })\n',
+    '  setLocalSubchats(sessions,')
+
+  // Host: lanzar el subagente «fork».
+  const hostIndex = join(hostDir, 'index.ts')
+  const hostTypes = join(hostDir, 'types.ts')
+  tx.copy(join(sub, 'local-subchat.ts'), join(hostDir, 'local-subchat.ts'))
+  tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-subchat.ts')
+  let types = tx.read(hostTypes)
+  if (!types.includes('interface SessionLocalSubchatRequest')) {
+    types = types.trimEnd() + '\n\n' + [
+      '/** Local build: open a subchat (a fork subagent) from one Session. */',
+      'export interface SessionLocalSubchatRequest {',
+      '  readonly sessionId: SessionId',
+      '  /** What the subchat should do. */',
+      '  readonly task: string',
+      '  /** Short name shown for the subchat. */',
+      '  readonly label: string',
+      '}',
+      '',
+      '/** Local build: the subchat Session. */',
+      'export interface SessionLocalSubchatValue {',
+      '  readonly childSessionId: SessionId',
+      '}',
+      '',
+      "declare module '@deepseek-ai/dsh-typert-protocol' {",
+      '  interface RemoteErrorDetailsMap {',
+      "    'session/local-subchat-failed': { readonly sessionId: SessionId }",
+      '  }',
+      '}',
+    ].join('\n')
+    tx.write(hostTypes, types)
+  }
+  tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n",
+    "import { ApiSessionList } from './list.ts'\n"
+      + "import { localStartSubchat, type LocalSubagents } from './local-subchat.ts'\n"
+      + "import type { SessionLocalSubchatRequest, SessionLocalSubchatValue } from './types.ts'\n",
+    'SessionLocalSubchatRequest, SessionLocalSubchatValue }')
+  let host = tx.read(hostIndex)
+  if (!host.includes("@Remote('localStartSubchat')")) {
+    const at = host.indexOf("  @Remote('list')")
+    const doc = at < 0 ? -1 : host.lastIndexOf('  /**', at)
+    if (doc < 0) skip(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
+    host = host.slice(0, doc) + [
+      '  /**',
+      '   * Local build: open a subchat, a fork subagent of this Session started by the',
+      '   * user: it begins with the completed conversation, works with high effort and',
+      "   * returns only its final answer to this Session (the subagent service's",
+      '   * parent delivery).',
+      '   * @param request - Session, task and label.',
+      '   * @param signal - cancels only the start.',
+      '   * @returns the subchat Session.',
+      '   */',
+      "  @Remote('localStartSubchat')",
+      '  async localStartSubchat(request: SessionLocalSubchatRequest, signal: AbortSignal): Promise<SessionLocalSubchatValue> {',
+      "    const subagents = (this.ctx as unknown as { get(name: string): unknown }).get('subagents') as LocalSubagents | undefined",
+      '    if (subagents === undefined) {',
+      "      throw new RemoteError('session/local-subchat-failed', 'subagents are not available in this app', { sessionId: request.sessionId })",
+      '    }',
+      '    const found = await this.agents.resolveAgent(request.sessionId)',
+      "    if ('error' in found) throw found.error",
+      '    try {',
+      '      const child = await localStartSubchat(subagents, found.agent, request.task, request.label, signal)',
+      '      return { childSessionId: child as SessionId }',
+      '    } catch (error) {',
+      "      throw new RemoteError('session/local-subchat-failed', error instanceof Error ? error.message : String(error),",
       '        { sessionId: request.sessionId })',
       '    }',
       '  }',

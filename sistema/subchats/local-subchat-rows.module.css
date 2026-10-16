@@ -1,0 +1,50 @@
+/* Subchats anidados bajo su chat (dpseek-local-updater). Medidas de las filas oficiales de la barra lateral. */
+
+.row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  height: 28px;
+  padding: 0 8px;
+  padding-inline-start: calc(14px + var(--dsh-workspace-indent, 0px));
+  border-radius: var(--dsw-radius-md);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  cursor: default;
+  user-select: none;
+}
+
+.row:hover,
+.row[aria-selected='true'] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.corner {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dsw-alias-file-diff-added-marker);
+}
+
+.dot[data-running] {
+  background: var(--dsw-alias-state-business-primary);
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
