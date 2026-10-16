@@ -2198,6 +2198,170 @@ optional('el subchat se abre al 40 % de la zona de chat', (tx) => {
     '  localSetRightbarShare(share: number): void {\n')
 })
 
+// ── 24. Mejorar un mensaje antes de enviarlo ──────────────────────────────────
+// Botón «Improve» en el cuadro de texto, con un selector del modelo que escribe la
+// sugerencia (uno pequeño aparte, idealmente, para no tocar lo que Ollama tiene
+// preparado del chat). La sugerencia sale editable encima del cuadro; «Use» la pone
+// en el cuadro, sin enviarla. Código: sistema/mejorar/.
+
+optional('mejorar un mensaje antes de enviarlo', (tx) => {
+  const better = join(here, 'mejorar')
+  const chatDir = join(repo, 'packages', 'client', 'ui-chat', 'src', 'client')
+  const conversationDir = join(repo, 'packages', 'client', 'ui-conversation', 'src', 'client')
+  const hostIndex = join(hostDir, 'index.ts')
+  const hostTypes = join(hostDir, 'types.ts')
+
+  // Host: modelos de Ollama y la sugerencia, con los últimos mensajes del chat como contexto.
+  tx.copy(join(better, 'local-improve.ts'), join(hostDir, 'local-improve.ts'))
+  tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-improve.ts')
+  let types = tx.read(hostTypes)
+  if (!types.includes('interface SessionLocalImproveRequest')) {
+    types = types.trimEnd() + '\n\n' + [
+      '/** Local build: the Ollama models that can rewrite a draft, for one Session. */',
+      'export interface SessionLocalImproveModelsRequest {',
+      '  readonly sessionId: SessionId',
+      '}',
+      '',
+      '/** Local build: Ollama models (smallest first) and the model the Session chats with. */',
+      'export interface SessionLocalImproveModelsValue {',
+      '  readonly models: readonly { readonly id: string; readonly sizeBytes: number }[]',
+      '  readonly chatModel: string | null',
+      '}',
+      '',
+      '/** Local build: rewrite a draft so the assistant understands it better. */',
+      'export interface SessionLocalImproveRequest {',
+      '  readonly sessionId: SessionId',
+      '  readonly draft: string',
+      '  readonly model: string',
+      '}',
+      '',
+      '/** Local build: the rewritten draft and how long it took. */',
+      'export interface SessionLocalImproveValue {',
+      '  readonly text: string',
+      '  readonly ms: number',
+      '}',
+      '',
+      "declare module '@deepseek-ai/dsh-typert-protocol' {",
+      '  interface RemoteErrorDetailsMap {',
+      "    'session/local-improve-failed': { readonly sessionId: SessionId }",
+      '  }',
+      '}',
+    ].join('\n')
+    tx.write(hostTypes, types)
+  }
+  tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n",
+    "import { ApiSessionList } from './list.ts'\n"
+      + "import { localImproveModels, localImprovePrompt, localRecentTurns } from './local-improve.ts'\n"
+      + 'import type {\n'
+      + '  SessionLocalImproveModelsRequest, SessionLocalImproveModelsValue, SessionLocalImproveRequest, SessionLocalImproveValue,\n'
+      + "} from './types.ts'\n",
+    'SessionLocalImproveModelsRequest, SessionLocalImproveModelsValue, SessionLocalImproveRequest, SessionLocalImproveValue,')
+  let host = tx.read(hostIndex)
+  if (!host.includes("@Remote('localImprovePrompt')")) {
+    const at = host.indexOf("  @Remote('list')")
+    const doc = at < 0 ? -1 : host.lastIndexOf('  /**', at)
+    if (doc < 0) skip(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
+    host = host.slice(0, doc) + [
+      '  /** Local build: the Ollama model this Session chats with (its context variant), if any. */',
+      '  private async localChatModel(sessionId: SessionId): Promise<string | null> {',
+      '    const found = await this.agents.resolveAgent(sessionId)',
+      "    if ('error' in found) return null",
+      '    const selection = this.agents.selectionFor(found.agent).current as { provider?: string; model?: string }',
+      "    return selection.provider === 'ollama' && typeof selection.model === 'string' ? selection.model : null",
+      '  }',
+      '',
+      '  /**',
+      '   * Local build: Ollama models that can rewrite a draft (smallest first) and the chat model.',
+      '   * @param request - the Session.',
+      '   * @returns models and the chat model.',
+      '   */',
+      "  @Remote('localImproveModels')",
+      '  async localImproveModels(request: SessionLocalImproveModelsRequest): Promise<SessionLocalImproveModelsValue> {',
+      '    try {',
+      '      return { models: await localImproveModels(), chatModel: await this.localChatModel(request.sessionId) }',
+      '    } catch (error) {',
+      "      throw new RemoteError('session/local-improve-failed', error instanceof Error ? error.message : String(error), { sessionId: request.sessionId })",
+      '    }',
+      '  }',
+      '',
+      '  /**',
+      '   * Local build: rewrite a draft so the assistant understands it better, with the',
+      "   * Session's last messages as context. With the chat model, its context variant is",
+      '   * used so Ollama does not reload it.',
+      '   * @param request - Session, draft and model.',
+      '   * @param signal - cancels the request.',
+      '   * @returns the rewritten draft and how long it took.',
+      '   */',
+      "  @Remote('localImprovePrompt')",
+      '  async localImprovePrompt(request: SessionLocalImproveRequest, signal: AbortSignal): Promise<SessionLocalImproveValue> {',
+      '    const started = Date.now()',
+      '    try {',
+      '      let events: { type: string; data: unknown }[] = []',
+      '      {',
+      '        using observation = await this.ctx.sessionQuery.observeSession(request.sessionId)',
+      '        events = [...observation.events] as { type: string; data: unknown }[]',
+      '      }',
+      '      const chat = await this.localChatModel(request.sessionId)',
+      "      const base = (id: string): string => id.replace(/:(?:(.+)-)?dsh-ctx-(?:auto|\\d+)$/, (_, tag: string | undefined) => ':' + (tag ?? 'latest'))",
+      '      const model = chat !== null && base(chat) === base(request.model) ? chat : request.model',
+      '      const text = await localImprovePrompt(model, request.draft, localRecentTurns(events), signal)',
+      '      return { text, ms: Date.now() - started }',
+      '    } catch (error) {',
+      "      throw new RemoteError('session/local-improve-failed', error instanceof Error ? error.message : String(error), { sessionId: request.sessionId })",
+      '    }',
+      '  }',
+      '',
+    ].join('\n') + host.slice(doc)
+    tx.write(hostIndex, host)
+  }
+
+  // ui-chat publica las llamadas para el botón del cuadro de texto (ui-conversation no tiene acceso al Host).
+  tx.copy(join(better, 'local-improve-bridge.ts'), join(chatDir, 'chat', 'local-improve-bridge.ts'))
+  const apply = join(chatDir, 'apply.ts')
+  tx.replace(apply, "import { ChatView } from './chat/ChatView.tsx'\n",
+    "import { ChatView } from './chat/ChatView.tsx'\nimport { setImprover } from './chat/local-improve-bridge.ts'\n",
+    "import { setImprover } from './chat/local-improve-bridge.ts'")
+  tx.replace(apply, '  const quotaNotice = createSnapshotStore<QuotaNoticeState | null>(null)\n',
+    '  // Local build: «Improve» in the composer (local-improve-bridge.ts).\n'
+      + '  ctx.effect(() => {\n'
+      + '    setImprover({\n'
+      + '      models: async (sessionId) => {\n'
+      + '        const result = await ctx.remote.session.localImproveModels({ sessionId: sessionId as SessionId })\n'
+      + '        if (!result.ok) throw new Error(result.error.message)\n'
+      + '        return result.value\n'
+      + '      },\n'
+      + '      improve: async (sessionId, draft, model) => {\n'
+      + '        const result = await ctx.remote.session.localImprovePrompt({ sessionId: sessionId as SessionId, draft, model })\n'
+      + '        if (!result.ok) throw new Error(result.error.message)\n'
+      + '        return result.value\n'
+      + '      },\n'
+      + '    })\n'
+      + '    return () => { setImprover(undefined) }\n'
+      + "  }, 'ui-chat: local improve')\n"
+      + '  const quotaNotice = createSnapshotStore<QuotaNoticeState | null>(null)\n',
+    '    setImprover({\n')
+  if (!tx.read(apply).includes("import type { SessionId } from '@deepseek-ai/dsh-session/types'")
+    && !/import type \{[^}]*\bSessionId\b[^}]*\} from '@deepseek-ai\/dsh-session\/types'/.test(tx.read(apply))) {
+    tx.replace(apply, "import { ChatView } from './chat/ChatView.tsx'\n",
+      "import { ChatView } from './chat/ChatView.tsx'\nimport type { SessionId } from '@deepseek-ai/dsh-session/types'\n",
+      "import type { SessionId } from '@deepseek-ai/dsh-session/types'\n")
+  }
+
+  // ui-conversation: el botón y su selector, al principio de la barra de debajo del cuadro.
+  for (const file of ['local-improve-bridge.ts', 'LocalImprove.tsx', 'LocalImprove.module.css']) {
+    tx.copy(join(better, file), join(conversationDir, 'skeleton', file))
+  }
+  const inputBar = join(conversationDir, 'skeleton', 'InputBar.tsx')
+  tx.replace(inputBar, "import { ContextMeter } from './ContextMeter.tsx'\n",
+    "import { ContextMeter } from './ContextMeter.tsx'\nimport { LocalImprove } from './LocalImprove.tsx'\n",
+    "import { LocalImprove } from './LocalImprove.tsx'")
+  tx.replace(inputBar, '      <div className={css.dock} data-composer-dock>\n',
+    '      <div className={css.dock} data-composer-dock>\n'
+      + '        {activity ? null : <LocalImprove sessionId={sessionId} draft={draft} subagent={subagent !== null}\n'
+      + '          setDraft={(text) => { inputActions?.setDraft(text) }} />}\n',
+    '<LocalImprove sessionId={sessionId}')
+})
+
 console.log('\nCambios aplicados:')
 for (const line of done) console.log(`  - ${line}`)
 if (omitted.length > 0) {
