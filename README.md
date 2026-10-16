@@ -73,24 +73,30 @@ Para forzar una compilación: pestaña **Actions** → *Compilar instalador* →
   Lo omitido aparece en las notas de cada Release («Funciones nuestras omitidas en
   esta versión») y en el resumen de la compilación en *Actions*.
 
-## Eliminar chats y proyectos
+## Chats en la barra lateral: seleccionar, borrar y mover
 
-- **Chat** (también los de «Ungrouped»): menú `⋯` del chat en la barra lateral →
-  **Delete session** → confirmar. Se borra del disco la conversación, sus
-  subagentes y su historial (`%USERPROFILE%\.dsh\sessions\…`). Los archivos de la
-  carpeta de trabajo no se tocan. **No se puede deshacer**: si dudas, usa
-  «Archive».
-- Si el chat está abierto o se ha usado desde que abriste la app, sigue cargado en memoria: se
-  detiene y desaparece de la lista al momento, pero sus ficheros se borran la
-  próxima vez que abras la app (así no se corrompe nada si aún estaba escribiendo).
-- **Varios a la vez**: menú `⋯` de un chat → **Select several**. Aparece una
-  casilla en cada chat y una barra abajo con el número de seleccionados,
-  **All** (marca o desmarca todos los visibles), **Delete** y **Cancel**.
-  «Delete» pide confirmación con la lista de chats; si alguno no se puede borrar,
-  queda seleccionado y se dice cuál.
-- **Proyecto** (espacio de trabajo): menú del proyecto → *Delete
-  workspace* (ya existía en la oficial). Solo lo quita de la lista; sus chats pasan
-  a «Ungrouped», desde donde se pueden eliminar uno a uno o varios a la vez.
+Funcionan como los archivos en el Explorador de Windows:
+
+- **Seleccionar:** clic abre el chat; **Ctrl+clic** añade o quita; **Mayús+clic**
+  selecciona un rango; pulsar en un hueco de la barra lateral y **arrastrar** dibuja
+  un recuadro que selecciona los chats que toca. Los seleccionados se rellenan con
+  el azul del tema. Un clic en un hueco o **Esc** quita la selección.
+- **Menú del chat:** el botón derecho y el `⋯` (lo único que aparece al pasar el
+  ratón) abren el mismo menú: Open, Pin, Rename (**F2**), Branch, Archive, Move to
+  project ▸, Copy session ID y Delete (**Supr**). Con varios seleccionados, actúa
+  sobre todos.
+- **Delete** pide confirmación y borra del disco la conversación, sus subagentes y
+  su historial (`%USERPROFILE%\.dsh\sessions\…`). Los archivos de la carpeta de
+  trabajo no se tocan. **No se puede deshacer**: si dudas, usa «Archive». Si el
+  chat está abierto o se ha usado desde que abriste la app, desaparece al momento
+  pero sus ficheros se borran la próxima vez que la abras (así no se corrompe nada
+  si aún estaba escribiendo).
+- **Move to project** (solo chats de «Ungrouped»): a un proyecto de la misma
+  carpeta de trabajo que el chat, o a uno nuevo para esa carpeta. La app no deja
+  meter un chat en un proyecto de otra carpeta, porque sus archivos dejarían de
+  encontrarse. También se pueden arrastrar sobre el proyecto.
+- **Proyecto** (espacio de trabajo): menú del proyecto → *Delete workspace* (ya
+  existía en la oficial). Solo lo quita de la lista; sus chats pasan a «Ungrouped».
 
 ## Editar mensajes y regenerar respuestas
 
@@ -241,7 +247,8 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Sin telemetría ni analítica | `cordis.patch.yml` |
 | Sin búsqueda web (usa la API de DeepSeek); la lectura de páginas se mantiene | bundles y presets |
 | «Delete session» en el menú de cada chat (opcional) | `packages/api/session-controller` (método `session.deletePermanently`) + `packages/client/ui-workspace`; código en [`sistema/borrar-chats/`](sistema/borrar-chats) |
-| Seleccionar varios chats («Select several») y eliminarlos a la vez (opcional) | `packages/client/ui-workspace` (`BulkDelete.tsx`) |
+| Seleccionar chats como en el Explorador, menú contextual y mover a un proyecto (opcional) | `packages/client/ui-workspace` (`LocalSelection.tsx`) + `packages/api/workspace-controller` (`localAttachSession`) |
+| Al pasar por un chat, solo el menú `⋯` (opcional) | `packages/client/ui-workspace` |
 | Editar mensajes y regenerar respuestas, con versiones (opcional) | `packages/client/ui-chat`; código en [`sistema/regenerar/`](sistema/regenerar) |
 | Aviso de Windows al terminar una respuesta (opcional) | `packages/client/ui-workspace`; código en [`sistema/avisos/`](sistema/avisos) |
 | No volver a ofrecer una versión retirada (opcional) | `apps/desktop/src/update-coordinator.ts` (`local-skip-version.ts`) |

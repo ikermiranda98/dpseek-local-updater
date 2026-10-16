@@ -599,8 +599,7 @@ const deleteApplied = optional('opción «Eliminar sesión» en el menú de cada
   tx.replace(uiIndex, "} from './session-actions/ArchiveSession.tsx'\n", [
     "} from './session-actions/ArchiveSession.tsx'",
     'import {',
-    '  DeleteSessionMenuItem, SessionDeleteDialog,',
-    '  type DeleteSessionInjected, type SessionDeleteDialogInjected, type SessionDeleteRequest,',
+    '  SessionDeleteDialog, type SessionDeleteDialogInjected, type SessionDeleteRequest,',
     "} from './session-actions/DeleteSession.tsx'",
     '',
   ].join('\n'), "from './session-actions/DeleteSession.tsx'")
@@ -610,7 +609,7 @@ const deleteApplied = optional('opción «Eliminar sesión» en el menú de cada
     if (!re.test(ui)) skip(`no se encuentra la lista inject de ${rel(uiIndex)}`)
     ui = ui.replace(re, "$1'remote', 'remote.session',")
   }
-  if (!ui.includes("id: 'local-delete'")) {
+  if (!ui.includes("id: 'workspace.session-delete'")) {
     const anchor = ui.match(/^([ \t]*)ctx\.slots\.inject\('conversation\.hero\.workspace'/m)
     if (!anchor) skip(`no se encuentra el final de apply() en ${rel(uiIndex)}`)
     for (const needed of ['uiWorkspace.archiveSession(', 'sessions.list.getSnapshot()', 'createSnapshotStore']) {
@@ -618,7 +617,7 @@ const deleteApplied = optional('opción «Eliminar sesión» en el menú de cada
     }
     const pad = anchor[1]
     ui = ui.replace(anchor[0], () => [
-      '// Local build: permanent delete — a menu row after Archive and its confirmation.',
+      '// Local build: permanent delete (selection bar, section 9) and its confirmation dialog.',
       'const localDeleteSession = async (sessionId: SessionId): Promise<void> => {',
       '  // Archiving first stops its work and leaves the view if it is open.',
       '  await uiWorkspace.archiveSession(sessionId, { stopActivity: true })',
@@ -626,12 +625,6 @@ const deleteApplied = optional('opción «Eliminar sesión» en el menú de cada
       '  if (!result.ok) throw new Error(result.error.message)',
       '}',
       'const deleteRequest = createSnapshotStore<SessionDeleteRequest | null>(null)',
-      'const deleteInjected = (): DeleteSessionInjected => ({',
-      '  requestSessionDelete: (sessionId) => {',
-      '    const displayTitle = sessions.list.getSnapshot().byId[sessionId]?.displayTitle ?? sessionId',
-      '    deleteRequest.set({ sessionId, displayTitle })',
-      '  },',
-      '})',
       'const deleteDialogInjected = (): SessionDeleteDialogInjected => ({',
       '  hooks: { deleteRequest },',
       '  settleSessionDelete: () => { deleteRequest.set(null) },',
@@ -640,10 +633,6 @@ const deleteApplied = optional('opción «Eliminar sesión» en el menú de cada
       '    await sessions.refresh()',
       '  },',
       '})',
-      "ctx.slots.inject('sidebar.workspaces.session.menu.item', () => ctx.slots.register(",
-      "  { name: 'sidebar.workspaces.session.menu.item', id: 'local-delete', order: 500, locale: NS, inject: deleteInjected },",
-      '  DeleteSessionMenuItem,',
-      '))',
       "ctx.slots.inject('shell.overlay', () => ctx.slots.register(",
       "  { name: 'shell.overlay', id: 'workspace.session-delete', locale: NS, inject: deleteDialogInjected },",
       '  SessionDeleteDialog,',
@@ -730,60 +719,142 @@ optional('barra de contexto en el selector de modelo', (tx) => {
   })
 })
 
-// ── 9. Eliminar varios chats a la vez ─────────────────────────────────────────
-// «Seleccionar varios» en el menú de un chat: casillas en la barra lateral y una
-// barra con «Todos», «Eliminar» y «Cancelar» (sistema/borrar-chats/BulkDelete.tsx).
-// Usa el borrado de la sección 7.
+// ── 9. Seleccionar chats como en el Explorador, borrarlos y moverlos ──────────
+// Ctrl+clic, Mayús+clic y recuadro arrastrando desde un hueco de la barra lateral;
+// los seleccionados se pintan con el azul del tema. Una barra con «Move to
+// project» (chats de «Ungrouped», a un proyecto de su misma carpeta o a uno nuevo
+// para ella) y «Delete»; Supr borra y Esc limpia. Los de «Ungrouped» también se
+// arrastran sobre un proyecto (sistema/borrar-chats/LocalSelection.tsx). Usa el
+// borrado de la sección 7.
 
-optional('selección de varios chats para eliminarlos a la vez', (tx) => {
+optional('seleccionar chats como en el Explorador (borrar y mover a un proyecto)', (tx) => {
   // Si DeepSeek añade la selección múltiple, se usa la suya.
-  if (officialKeys(uiLocales).some((key) => /select(ed|ion)|bulk|batch|multi/i.test(key))) {
+  if (officialKeys(uiLocales).some((key) => /select(ed|ion)|bulk|batch|multi/i.test(key) && !key.startsWith('local.'))) {
     official('la selección de varios chats')
   }
   if (!deleteApplied) skip('necesita «Eliminar sesión», que no se ha aplicado')
-  tx.copy(join(here, 'borrar-chats', 'BulkDelete.tsx'), join(uiDir, 'session-actions', 'BulkDelete.tsx'))
-  tx.copy(join(here, 'borrar-chats', 'BulkDelete.module.css'), join(uiDir, 'session-actions', 'BulkDelete.module.css'))
+
+  // Host: meter un chat de «Ungrouped» en un proyecto. attachSession comprueba que
+  // la carpeta del chat es la del proyecto (si no, la lectura de archivos fallaría).
+  const wsDir = join(repo, 'packages', 'api', 'workspace-controller', 'src')
+  const wsIndex = join(wsDir, 'index.ts')
+  tx.replace(wsIndex, "import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'\n",
+    "import { Remote, RemoteError, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'\n"
+      + "import { WorkspaceId as toWorkspaceId } from '@deepseek-ai/dsh-workspace'\n",
+    "import { WorkspaceId as toWorkspaceId }")
+  let ws = tx.read(wsIndex)
+  if (!ws.includes("@Remote('localAttachSession')")) {
+    const at = ws.indexOf("  @Remote('insertSessionBefore')")
+    const doc = at < 0 ? -1 : ws.lastIndexOf('  /**', at)
+    if (doc < 0) skip(`no se encuentra @Remote('insertSessionBefore') en ${rel(wsIndex)}`)
+    if (!ws.includes('workspaceView(')) skip(`${rel(wsIndex)} ya no usa workspaceView`)
+    ws = ws.slice(0, doc) + [
+      '  /**',
+      '   * Local build: put one ungrouped Session into a Workspace. Only Sessions no',
+      '   * Workspace accounts for; attachSession refuses one whose cwd is not the',
+      "   * Workspace's directory, so its files keep resolving.",
+      '   * @param request - Workspace and Session identities.',
+      '   * @returns the updated Workspace projection.',
+      '   */',
+      "  @Remote('localAttachSession')",
+      '  async localAttachSession(request: WorkspaceInsertSessionBeforeRequest): Promise<WorkspaceValue> {',
+      '    const registry = this.ctx.workspaceRegistry',
+      '    const details = { workspaceId: request.workspaceId, sessionId: request.sessionId }',
+      '    if (registry.list().some(workspace => workspace.sessionIds.includes(request.sessionId))) {',
+      "      throw new RemoteError('workspace/move-invalid', `session '${request.sessionId}' already belongs to a workspace`, details)",
+      '    }',
+      '    const workspace = registry.get(toWorkspaceId(request.workspaceId))',
+      "    if (workspace === undefined) throw new RemoteError('workspace/move-invalid', `workspace '${request.workspaceId}' not found`, details)",
+      '    try {',
+      '      await workspace.attachSession(request.sessionId)',
+      '    } catch (error) {',
+      "      throw new RemoteError('workspace/move-invalid', error instanceof Error ? error.message : String(error), details)",
+      '    }',
+      '    return { workspace: workspaceView(workspace) }',
+      '  }',
+      '',
+      '',
+    ].join('\n') + ws.slice(doc)
+    tx.write(wsIndex, ws)
+  }
+  // El test oficial simula todo el espacio remoto «workspace»: se le añade el
+  // método nuevo para que siga compilando (si el test cambia, no se toca).
+  const wsTest = join(repo, 'packages', 'api', 'workspace-controller', 'tests', 'model.client.spec.ts')
+  const fakeAnchor = "    this.record('insertSessionBefore', request)\n    return this.onInsertSessionBefore(request)\n  }\n"
+  if (existsSync(wsTest)) {
+    const test = tx.read(wsTest)
+    if (!test.includes('localAttachSession(') && test.includes(fakeAnchor)) {
+      tx.write(wsTest, test.replace(fakeAnchor, () => fakeAnchor + [
+        '',
+        '  localAttachSession(request: WorkspaceInsertSessionBeforeRequest): Promise<RemoteResult<WorkspaceValue>> {',
+        "    this.record('localAttachSession', request)",
+        '    return this.onInsertSessionBefore(request)',
+        '  }',
+        '',
+      ].join('\n')))
+    }
+  }
+
+  // Interfaz.
+  tx.copy(join(here, 'borrar-chats', 'LocalSelection.tsx'), join(uiDir, 'session-actions', 'LocalSelection.tsx'))
+  tx.copy(join(here, 'borrar-chats', 'LocalSelection.module.css'), join(uiDir, 'session-actions', 'LocalSelection.module.css'))
   tx.replace(uiIndex, "} from './session-actions/DeleteSession.tsx'\n", [
     "} from './session-actions/DeleteSession.tsx'",
-    'import {',
-    '  BulkDeleteBar, BulkSelectCheckbox, BulkSelectMenuItem,',
-    '  type BulkDeleteBarInjected, type BulkSelectInjected, type BulkSelection,',
-    "} from './session-actions/BulkDelete.tsx'",
+    "import { LocalSelection, type LocalMoveOptions, type LocalSelectionInjected } from './session-actions/LocalSelection.tsx'",
     '',
-  ].join('\n'), "from './session-actions/BulkDelete.tsx'")
+  ].join('\n'), "from './session-actions/LocalSelection.tsx'")
   let ui = tx.read(uiIndex)
-  if (!ui.includes("id: 'local-bulk-select'")) {
+  if (!ui.includes("'remote.workspace'")) {
+    const re = /^(export const inject = \[[^\]]*?)'remote',/m
+    if (!re.test(ui)) skip(`no se encuentra la lista inject de ${rel(uiIndex)}`)
+    ui = ui.replace(re, "$1'remote', 'remote.workspace',")
+  }
+  if (!ui.includes("id: 'workspace.local-selection'")) {
     const anchor = ui.match(/^([ \t]*)\/\/ Local build: bulk delete hook \(section 9\)\.\r?\n/m)
     if (!anchor) skip(`no se encuentra el punto de enganche de la sección 7 en ${rel(uiIndex)}`)
-    if (!ui.includes('workspaces.list.getSnapshot()')) skip(`${rel(uiIndex)} ya no usa workspaces.list.getSnapshot()`)
+    for (const needed of ['workspaces.list.getSnapshot()', 'const requestSessionRename', 'const forkInjected', 'const sessionIdInjected', 'const archiveInjected']) {
+      if (!ui.includes(needed)) skip(`${rel(uiIndex)} ya no tiene ${needed}`)
+    }
     const pad = anchor[1]
     ui = ui.replace(anchor[0], () => [
-      '// Local build: select several sessions and delete them together.',
-      'const bulkSelection = createSnapshotStore<BulkSelection>({ active: false, ids: [] })',
+      '// Local build: select sessions like the Windows Explorer, delete or move them.',
+      'const localSelection = createSnapshotStore<readonly SessionId[]>([])',
       'const titleOf = (id: SessionId): string => sessions.list.getSnapshot().byId[id]?.displayTitle ?? id',
-      'const bulkSelectInjected = (): BulkSelectInjected => ({',
-      '  hooks: { selection: bulkSelection },',
-      '  startSelection: (sessionId) => { bulkSelection.set({ active: true, ids: [sessionId] }) },',
-      '  toggleSelected: (sessionId) => {',
-      '    const { ids } = bulkSelection.getSnapshot()',
-      '    bulkSelection.set({ active: true, ids: ids.includes(sessionId) ? ids.filter(id => id !== sessionId) : [...ids, sessionId] })',
+      "const samePath = (a: string, b: string): boolean => a.replace(/[\\\\/]+$/, '').toLowerCase() === b.replace(/[\\\\/]+$/, '').toLowerCase()",
+      'const ungroupedFolder = (id: SessionId): string | null => {',
+      '  if (workspaces.list.getSnapshot().items.some(item => item.sessionIds.includes(id))) return null',
+      '  return sessions.list.getSnapshot().byId[id]?.cwd ?? null',
+      '}',
+      'const localSelectionInjected = (): LocalSelectionInjected => ({',
+      '  hooks: { selection: localSelection },',
+      '  setSelection: (ids) => { localSelection.set(ids) },',
+      '  isSelectable: (id) => {',
+      '    const row = sessions.list.getSnapshot().byId[id]',
+      "    return row !== undefined && row.parentId === undefined && row.origin !== 'subagent' && !row.blank",
       '  },',
-      '})',
-      'const bulkBarInjected = (): BulkDeleteBarInjected => ({',
-      '  hooks: { selection: bulkSelection },',
-      '  toggleAll: () => {',
-      '    // Los chats que se ven en la barra lateral: ni subagentes, ni en blanco, ni archivados.',
-      '    const list = sessions.list.getSnapshot()',
-      '    const archived = new Set(workspaces.list.getSnapshot().archivedSessionIds)',
-      '    const all = list.ids.filter((id) => {',
-      '      const row = list.byId[id]',
-      "      return row !== undefined && row.parentId === undefined && row.origin !== 'subagent' && !row.blank && !archived.has(id)",
-      '    })',
-      '    const { ids } = bulkSelection.getSnapshot()',
-      '    bulkSelection.set({ active: true, ids: all.every(id => ids.includes(id)) ? [] : all })',
-      '  },',
-      '  cancelSelection: () => { bulkSelection.set({ active: false, ids: [] }) },',
       '  titlesOf: ids => ids.map(titleOf),',
+      '  openSession: (id) => { uiWorkspace.openSession(id) },',
+      '  // Las acciones del menú «⋯» oficial, tal cual (diálogos, avisos y deshacer incluidos).',
+      "  renameSession: (id) => { requestSessionRename(id, sessions.list.getSnapshot().byId[id]?.title ?? '') },",
+      '  forkSession: (id) => { forkInjected().forkSession(id) },',
+      '  copySessionId: (id) => { void sessionIdInjected().copySessionId(id) },',
+      '  archiveOne: (id) => { archiveInjected().archiveSession(id) },',
+      '  isPinned: id => workspaces.list.getSnapshot().pinnedSessionIds.includes(id),',
+      '  pinMany: async (ids, pinned) => {',
+      '    const failed: SessionId[] = []',
+      '    for (const id of ids) {',
+      '      try { await (pinned ? uiWorkspace.pinSession(id) : uiWorkspace.unpinSession(id)) } catch { failed.push(id) }',
+      '    }',
+      '    return failed.map(titleOf)',
+      '  },',
+      '  archiveMany: async (ids) => {',
+      '    const failed: SessionId[] = []',
+      '    // Sin parar el trabajo: un chat que está respondiendo no se archiva.',
+      '    for (const id of ids) {',
+      '      try { await uiWorkspace.archiveSession(id) } catch { failed.push(id) }',
+      '    }',
+      '    return failed.map(titleOf)',
+      '  },',
       '  deleteMany: async (ids, progress) => {',
       '    const failed: SessionId[] = []',
       '    let done = 0',
@@ -793,47 +864,85 @@ optional('selección de varios chats para eliminarlos a la vez', (tx) => {
       '    }',
       '    await sessions.refresh()',
       '    // Quedan seleccionados los que no se pudieron borrar.',
-      '    bulkSelection.set({ active: true, ids: failed })',
+      '    localSelection.set(failed)',
+      '    return failed.map(titleOf)',
+      '  },',
+      '  moveOptions: (ids): LocalMoveOptions | null => {',
+      '    const folders = ids.map(ungroupedFolder)',
+      '    if (folders.length === 0 || folders.some(folder => folder === null)) return null',
+      '    const first = folders[0] as string',
+      '    const shared = folders.every(folder => samePath(folder as string, first)) ? first : undefined',
+      '    const targets = workspaces.list.getSnapshot().items',
+      '      .filter(item => folders.every(folder => samePath(item.path, folder as string)))',
+      '      .map(item => ({ workspaceId: item.workspaceId as string, title: item.title }))',
+      '    return { targets, ...(shared !== undefined && targets.length === 0 ? { newFolder: shared } : {}) }',
+      '  },',
+      '  moveMany: async (ids, target) => {',
+      "    const workspaceId = 'workspaceId' in target",
+      '      ? target.workspaceId as WorkspaceId',
+      '      : (await workspaces.create({ path: target.newFolder })).workspaceId',
+      '    const failed: SessionId[] = []',
+      '    for (const id of ids) {',
+      '      const result = await ctx.remote.workspace.localAttachSession({ workspaceId, sessionId: id })',
+      '      if (!result.ok) failed.push(id)',
+      '    }',
+      '    await sessions.refresh()',
       '    return failed.map(titleOf)',
       '  },',
       '})',
-      "ctx.slots.inject('sidebar.workspaces.session.menu.item', () => ctx.slots.register(",
-      "  { name: 'sidebar.workspaces.session.menu.item', id: 'local-bulk-select', order: 450, locale: NS, inject: bulkSelectInjected },",
-      '  BulkSelectMenuItem,',
-      '))',
-      "ctx.slots.inject('sidebar.session.row.leading', () => ctx.slots.register(",
-      "  { name: 'sidebar.session.row.leading', id: 'local-bulk-checkbox', order: 0, locale: NS, inject: bulkSelectInjected },",
-      '  BulkSelectCheckbox,',
-      '))',
       "ctx.slots.inject('shell.overlay', () => ctx.slots.register(",
-      "  { name: 'shell.overlay', id: 'workspace.local-bulk-delete', locale: NS, inject: bulkBarInjected },",
-      '  BulkDeleteBar,',
+      "  { name: 'shell.overlay', id: 'workspace.local-selection', locale: NS, inject: localSelectionInjected },",
+      '  LocalSelection,',
       '))',
     ].map((line) => (line === '' ? '' : pad + line)).join('\n') + '\n')
     tx.write(uiIndex, ui)
   }
   addLocaleKeys(tx, uiLocales, 'WorkspaceKey', {
-    'local.bulk.menu': '选择多个',
-    'local.bulk.select': '选择会话',
     'local.bulk.count': '已选择 {n} 个',
-    'local.bulk.all': '全部',
     'local.bulk.title': '删除 {n} 个会话？',
     'local.bulk.desc': '将永久删除它们及其子智能体和历史记录。工作目录中的文件不受影响。此操作无法撤销。',
     'local.bulk.confirm': '删除 {n} 个',
     'local.bulk.more': '以及另外 {n} 个',
-    'local.bulk.progress': '正在删除第 {done} 个，共 {n} 个…',
+    'local.bulk.progress': '已删除 {done}/{n}…',
     'local.bulk.failed': '无法删除：{titles}',
+    'local.sel.move': '移动到项目',
+    'local.sel.newProject': '为 {folder} 新建项目',
+    'local.sel.noTarget': '没有使用同一文件夹的项目',
+    'local.sel.moveFailed': '无法移动：{titles}',
+    'local.sel.clear': '清除选择 (Esc)',
+    'local.sel.open': '打开',
+    'local.sel.rename': '重命名',
+    'local.sel.pin': '置顶',
+    'local.sel.unpin': '取消置顶',
+    'local.sel.archive': '归档',
+    'local.sel.archiveMany': '归档 {n} 个会话',
+    'local.sel.deleteMany': '删除 {n} 个会话',
+    'local.sel.actionFailed': '无法完成：{titles}',
+    'local.sel.fork': '创建分支',
+    'local.sel.copyId': '复制会话 ID',
   }, {
-    'local.bulk.menu': 'Select several',
-    'local.bulk.select': 'Select session',
     'local.bulk.count': '{n} selected',
-    'local.bulk.all': 'All',
     'local.bulk.title': 'Delete {n} sessions?',
     'local.bulk.desc': 'They will be permanently deleted, with their subagents and history. Files in the working folders are not touched. This cannot be undone.',
     'local.bulk.confirm': 'Delete {n}',
     'local.bulk.more': 'and {n} more',
-    'local.bulk.progress': 'Deleting {done} of {n}…',
+    'local.bulk.progress': 'Deleted {done}/{n}…',
     'local.bulk.failed': 'Could not delete: {titles}',
+    'local.sel.move': 'Move to project',
+    'local.sel.newProject': 'New project for {folder}',
+    'local.sel.noTarget': 'No project uses the same folder',
+    'local.sel.moveFailed': 'Could not move: {titles}',
+    'local.sel.clear': 'Clear selection (Esc)',
+    'local.sel.open': 'Open',
+    'local.sel.rename': 'Rename',
+    'local.sel.pin': 'Pin',
+    'local.sel.unpin': 'Unpin',
+    'local.sel.archive': 'Archive',
+    'local.sel.archiveMany': 'Archive {n} sessions',
+    'local.sel.deleteMany': 'Delete {n} sessions',
+    'local.sel.actionFailed': 'Could not complete: {titles}',
+    'local.sel.fork': 'Branch',
+    'local.sel.copyId': 'Copy session ID',
   })
 })
 
@@ -1369,6 +1478,26 @@ optional('editar tus mensajes y regenerar respuestas (con versiones)', (tx) => {
     'local.versions.warn': 'Continuing here deletes the other versions',
     'local.versions.warnLater': 'Continuing here deletes the other versions (one has {n} more turns)',
   })
+})
+
+// ── 17. Al pasar por un chat, solo los tres puntos ──────────────────────────────
+// La oficial muestra «Archive» y «Pin» como botones al pasar el ratón por un chat;
+// los dos ya están en el menú «⋯» y en el del botón derecho (sección 9), así que
+// la fila queda limpia, como en el Explorador.
+
+optional('al pasar por un chat, solo el menú «⋯»', (tx) => {
+  tx.replace(uiIndex,
+    "  ctx.slots.inject('sidebar.workspaces.session.row.action', function* () {\n"
+      + "    yield ctx.slots.register({ name: 'sidebar.workspaces.session.row.action', id: 'archive', order: 100, locale: NS, inject: archiveInjected }, ArchiveSessionRowButton)\n"
+      + "    yield ctx.slots.register({ name: 'sidebar.workspaces.session.row.action', id: 'pin', order: 200, locale: NS, inject: pinInjected }, PinSessionRowButton)\n"
+      + '  })\n',
+    "  // Local build: no hover buttons; Archive and Pin live in the row menus.\n",
+    'Local build: no hover buttons')
+  // Sus componentes dejan de usarse: fuera de las importaciones (noUnusedLocals).
+  tx.replace(uiIndex, 'ArchiveSessionMenuItem, ArchiveSessionRowButton, SessionArchiveConfirmDialog',
+    'ArchiveSessionMenuItem, SessionArchiveConfirmDialog', 'ArchiveSessionMenuItem, SessionArchiveConfirmDialog }')
+  tx.replace(uiIndex, 'import { PinSessionMenuItem, PinSessionRowButton } from', 'import { PinSessionMenuItem } from',
+    'import { PinSessionMenuItem } from')
 })
 
 console.log('\nCambios aplicados:')

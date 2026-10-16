@@ -1,0 +1,50 @@
+/* Selección de chats como en el Explorador (dpseek-local-updater). Tonos y radios del tema. */
+
+/* Recuadro de selección: el azul de acento del tema, translúcido, como en Windows. */
+.marquee {
+  position: fixed;
+  z-index: 1001;
+  border: 1px solid var(--dsw-alias-state-business-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);
+  pointer-events: none;
+}
+
+/* El menú contextual se coloca en el puntero; su ancla no ocupa sitio. */
+.menuAnchor {
+  position: fixed;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* Aviso discreto si una acción no se pudo completar (se cierra al pulsarlo). */
+.toast {
+  position: fixed;
+  left: 12px;
+  bottom: 64px;
+  z-index: 1000;
+  max-width: 300px;
+  padding: 8px 12px;
+  border-radius: var(--dsw-radius-md);
+  --dsw-elevation-stroke-color: var(--dsw-alias-border-l1);
+  box-shadow: var(--dsw-elevation-prominent);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-state-error-primary);
+  font-size: 13px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+.titles {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+/* Dentro del menú, también la flecha normal (como los menús del sistema). */
+.menuList,
+.menuList * {
+  cursor: default !important;
+}
