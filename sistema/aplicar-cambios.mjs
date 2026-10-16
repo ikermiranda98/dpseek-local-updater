@@ -38,6 +38,18 @@ const rel = (file) => relative(repo, file).replaceAll('\\', '/')
 const read = (file) => readFileSync(file, 'utf8')
 function write(file, text) {
   writeFileSync(file, text.endsWith('\n') ? text : text + '\n')
+  touch(file)
+}
+
+// Ficheros oficiales que modifica cada función: al compilar se comparan con la
+// versión oficial anterior para avisar, antes de instalar, de qué puede cambiar
+// (ver sistema/informe-actualizacion.mjs). Lo imprescindible va junto.
+const BASE = 'imprescindible'
+const touched = new Map()
+let applying = BASE
+function touch(file) {
+  if (!touched.has(applying)) touched.set(applying, new Set())
+  touched.get(applying).add(rel(file))
 }
 
 // ── Edición de filas YAML de Cordis conservando comentarios ────────────────────
@@ -170,6 +182,7 @@ function editRows(find, edit) {
 // Lo omitido se avisa aquí y en las notas del Release.
 
 const omitted = []
+const omittedFeatures = []
 class Skip extends Error {}
 const skip = (reason) => { throw new Skip(reason) }
 /** La versión oficial ya trae la función: se omite la nuestra. */
@@ -216,11 +229,14 @@ function optional(name, apply) {
   } catch (error) {
     if (!(error instanceof Skip)) throw error
     omitted.push(`${name}: ${error.message}`)
+    omittedFeatures.push({ name, reason: error.message, official: error.message.startsWith('la versión oficial ya incluye') })
     warn(`se omite «${name}»: ${error.message}`)
     return false
   }
   for (const [from, to] of copies) copyFileSync(from, to)
+  applying = name
   for (const [file, text] of staged) write(file, text)
+  applying = BASE
   done.push(name)
   return true
 }
@@ -1017,7 +1033,7 @@ optional('aviso de Windows al terminar una respuesta en segundo plano', (tx) => 
 // sistema/volver-a-version-anterior.ps1 instala un Release anterior y anota la
 // versión retirada; la app no la vuelve a ofrecer, pero sí la siguiente.
 
-optional('no volver a ofrecer una versión retirada', (tx) => {
+const skipApplied = optional('no volver a ofrecer una versión retirada', (tx) => {
   const src = join(repo, 'apps', 'desktop', 'src')
   const coordinator = join(src, 'update-coordinator.ts')
   tx.copy(join(here, 'escritorio', 'local-skip-version.ts'), join(src, 'local-skip-version.ts'))
@@ -1500,6 +1516,49 @@ optional('al pasar por un chat, solo el menú «⋯»', (tx) => {
     'import { PinSessionMenuItem } from')
 })
 
+// ── 18. Aviso antes de instalar una actualización ─────────────────────────────
+// Cada Release lleva local-update-info.json (sistema/informe-actualizacion.mjs): lo
+// que la versión nueva cambia para nuestras funciones. La confirmación de «Install
+// and Restart» lo enseña como un semáforo, con los detalles y «Skip this version»
+// (que la deja de ofrecer, igual que volver-a-version-anterior.ps1).
+
+optional('aviso antes de instalar una actualización (semáforo y saltar versión)', (tx) => {
+  if (!skipApplied) skip('necesita «no volver a ofrecer una versión retirada»')
+  const src = join(repo, 'apps', 'desktop', 'src')
+  const main = join(src, 'main.ts')
+  const coordinator = join(src, 'update-coordinator.ts')
+  if (!tx.read(join(src, 'update-dialog.ts')).includes('readonly technicalDetails?: string')) {
+    skip('la confirmación de actualizaciones ya no admite detalles desplegables')
+  }
+  tx.copy(join(here, 'escritorio', 'local-update-notice.ts'), join(src, 'local-update-notice.ts'))
+  let text = tx.read(main)
+  if (!text.includes("from './local-update-notice.ts'")) {
+    const lastImport = [...text.matchAll(/^import [^\n]*\n|^} from '[^']+'\n/gm)].pop()
+    if (lastImport === undefined) skip(`no se encuentran los imports de ${rel(main)}`)
+    const at = lastImport.index + lastImport[0].length
+    text = text.slice(0, at)
+      + "import { LOCAL_SKIP_RESPONSE, localSkipVersion, localUpdateConfirmation, localUpdateReport } from './local-update-notice.ts'\n"
+      + text.slice(at)
+    tx.write(main, text)
+  }
+  tx.replace(main,
+    '      const confirmation: Electron.MessageBoxOptions = {\n',
+    '      // Local build: what this version changes for the local features (see local-update-notice.ts).\n'
+      + "      const localReport = await localUpdateReport(updates.state.version ?? '')\n"
+      + '      const confirmation: Electron.MessageBoxOptions = {\n',
+    'const localReport = await localUpdateReport')
+  tx.replace(main,
+    '        const result = await updateDialog.show(parent, confirmation)\n'
+      + '        if (result.response !== 0 || isMandatory()) return false\n',
+    '        const result = await updateDialog.show(parent, localUpdateConfirmation(confirmation, localReport, locale.messages.updateLater))\n'
+      + "        if (result.response === LOCAL_SKIP_RESPONSE) localSkipVersion(updates.state.version ?? '')\n"
+      + '        if (result.response !== 0 || isMandatory()) return false\n')
+  tx.replace(coordinator,
+    "        if (!await this.beforeRestart()) return this.setState({ phase: 'ready', version })\n",
+    '        // Local build: a version skipped from the confirmation stops being offered.\n'
+      + "        if (!await this.beforeRestart()) return this.setState(localSkippedVersion(version) ? { phase: 'idle' } : { phase: 'ready', version })\n")
+})
+
 console.log('\nCambios aplicados:')
 for (const line of done) console.log(`  - ${line}`)
 if (omitted.length > 0) {
@@ -1508,6 +1567,12 @@ if (omitted.length > 0) {
 }
 // GitHub Actions las añade a las notas del Release.
 if (process.env.DSH_LOCAL_OMITIDOS) writeFileSync(process.env.DSH_LOCAL_OMITIDOS, omitted.map((line) => `- ${line}\n`).join(''))
+if (process.env.DSH_LOCAL_TOCADOS) {
+  writeFileSync(process.env.DSH_LOCAL_TOCADOS, JSON.stringify({
+    applied: [...touched].map(([name, files]) => ({ name, files: [...files].sort() })),
+    omitted: omittedFeatures,
+  }, null, 2) + '\n')
+}
 if (warnings.length > 0) {
   console.log(`\n${warnings.length} aviso(s); revisa los mensajes AVISO de arriba.`)
 }

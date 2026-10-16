@@ -96,6 +96,10 @@ jobs:
     steps:
       - name: Descargar esta herramienta
         uses: actions/checkout@v4
+        with:
+          # Historial y etiquetas: el aviso antes de instalar resume los cambios
+          # propios desde el Release anterior.
+          fetch-depth: 0
 
       - name: Preparar Node.js
         uses: actions/setup-node@v4
@@ -118,6 +122,8 @@ jobs:
           # Funciones nuestras omitidas (porque la oficial ya las trae o porque no
           # encajan en esta versión); van a las notas del Release.
           DSH_LOCAL_OMITIDOS: ${{ runner.temp }}/omitidos.md
+          # Ficheros oficiales que toca cada función, para el aviso antes de instalar.
+          DSH_LOCAL_TOCADOS: ${{ runner.temp }}/tocados.json
         run: |
           node sistema/aplicar-cambios.mjs $env:CODIGO
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -190,7 +196,23 @@ jobs:
           # Con cada Release va el script para volver a una versión anterior.
           $volver = Join-Path $dir 'volver-a-version-anterior.ps1'
           Copy-Item sistema/volver-a-version-anterior.ps1 $volver
-          $files = @($nuevoExe, "$nuevoExe.blockmap", $feed, $volver) | Where-Object { Test-Path $_ }
+
+          # Aviso antes de instalar: qué cambia para nuestras funciones frente al
+          # Release anterior (la app lo enseña como un semáforo).
+          $informe = Join-Path $dir 'local-update-info.json'
+          $anterior = gh release view --repo $env:GITHUB_REPOSITORY --json tagName -q .tagName 2>$null
+          $argumentos = @('--tocados', "$env:RUNNER_TEMP/tocados.json", '--codigo', $env:CODIGO, '--oficial', $env:ETIQUETA,
+            '--build', $env:BUILD, '--salida', $informe)
+          if ($anterior) {
+            $argumentos += @('--anterior', $anterior)
+            gh release download $anterior --repo $env:GITHUB_REPOSITORY -p local-update-info.json -D "$env:RUNNER_TEMP/anterior" 2>$null
+            if (Test-Path "$env:RUNNER_TEMP/anterior/local-update-info.json") { $argumentos += @('--anterior-informe', "$env:RUNNER_TEMP/anterior/local-update-info.json") }
+          }
+          gh release view $env:ETIQUETA --repo deepseek-ai/deepseek-harness --json body -q .body 2>$null | Out-File -Encoding utf8NoBOM "$env:RUNNER_TEMP/notas-oficiales.md"
+          if ($LASTEXITCODE -eq 0) { $argumentos += @('--notas-oficiales', "$env:RUNNER_TEMP/notas-oficiales.md") }
+          node sistema/informe-actualizacion.mjs @argumentos
+          if ($LASTEXITCODE) { Write-Host "::warning::No se ha podido preparar el aviso antes de instalar." }
+          $files = @($nuevoExe, "$nuevoExe.blockmap", $feed, $volver, $informe) | Where-Object { Test-Path $_ }
           $notes = @"
           Instalador de DeepSeek Harness **$env:VERSION** con los cambios locales:
           Ollama como proveedor, sin modelos online ni inicio de sesión de DeepSeek, sin telemetría, eliminar chats (uno o varios a la vez), barra de contexto en el selector de cada chat (con el recomendado medido para tu equipo), el modelo listo mientras la app está abierta, nombres cortos de los modelos y aviso de Windows al terminar una respuesta.
@@ -204,6 +226,11 @@ jobs:
           $omitidos = Join-Path $env:RUNNER_TEMP 'omitidos.md'
           if ((Test-Path $omitidos) -and (Get-Item $omitidos).Length -gt 0) {
             $notes += "`n`n**Funciones nuestras omitidas en esta versión** (la oficial ya las trae o no encajan con su código):`n" + (Get-Content $omitidos -Raw)
+          }
+          if (Test-Path $informe) {
+            $aviso = Get-Content $informe -Raw | ConvertFrom-Json
+            $punto = @{ green = '🟢'; amber = '🟡'; red = '🔴' }[$aviso.level]
+            $notes += "`n`n**Aviso antes de instalar:** $punto $($aviso.headline)`n`n" + '```' + "`n$($aviso.detail)`n" + '```'
           }
           gh release create $nombre $files --title $nombre --notes $notes --latest
 

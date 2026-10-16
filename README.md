@@ -43,6 +43,28 @@ No hay que hacer nada:
 3. La app instalada lo detecta (Application → Check for Updates, o sola cada
    pocos minutos), lo descarga y se instala con «Install and Restart».
 
+### Aviso antes de instalar
+
+Antes de «Install and Restart», la app te dice qué cambia para las funciones de
+esta versión local, con un semáforo:
+
+- 🟢 **verde:** nada de lo nuestro se ve afectado;
+- 🟡 **ámbar:** DeepSeek ha cambiado código que usa alguna función nuestra (se ha
+  aplicado, pero conviene probarla), o ahora la trae la oficial;
+- 🔴 **rojo:** se pierde alguna función que tienes ahora.
+
+Debajo van las funciones afectadas y los cambios propios desde la versión anterior.
+*View technical details* muestra los ficheros que han cambiado y un extracto de
+las notas de DeepSeek. Los botones son **Install and Restart**, **Update later** y
+**Skip this version**: con este último, la app no la vuelve a ofrecer, pero sí la
+siguiente que se publique.
+
+Lo prepara la compilación ([`sistema/informe-actualizacion.mjs`](sistema/informe-actualizacion.mjs)):
+compara los ficheros oficiales que toca cada función entre la versión oficial
+anterior y la nueva, y lo publica en cada Release como `local-update-info.json`.
+Si la app no puede leerlo (sin conexión, o un Release antiguo), lo dice y enseña
+la confirmación normal.
+
 ### Volver a la versión anterior
 
 Si una versión te da problemas: descarga `volver-a-version-anterior.ps1` de
@@ -252,6 +274,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Editar mensajes y regenerar respuestas, con versiones (opcional) | `packages/client/ui-chat`; código en [`sistema/regenerar/`](sistema/regenerar) |
 | Aviso de Windows al terminar una respuesta (opcional) | `packages/client/ui-workspace`; código en [`sistema/avisos/`](sistema/avisos) |
 | No volver a ofrecer una versión retirada (opcional) | `apps/desktop/src/update-coordinator.ts` (`local-skip-version.ts`) |
+| Aviso antes de instalar: semáforo, detalles y «Skip this version» (opcional) | `apps/desktop/src/main.ts` y `update-coordinator.ts` (`local-update-notice.ts`); el informe, [`sistema/informe-actualizacion.mjs`](sistema/informe-actualizacion.mjs) en el workflow |
 | Instalador sin firma, sin la «actualización obligatoria» de DeepSeek | `apps/desktop/scripts` |
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |
 | Prueba de arranque antes de publicar | [`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs) en el workflow |
