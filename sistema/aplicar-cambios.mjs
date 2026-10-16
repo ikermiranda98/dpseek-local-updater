@@ -1559,6 +1559,125 @@ optional('aviso antes de instalar una actualización (semáforo y saltar versió
       + "        if (!await this.beforeRestart()) return this.setState(localSkippedVersion(version) ? { phase: 'idle' } : { phase: 'ready', version })\n")
 })
 
+// ── 19. Código en vivo en el panel derecho y deshacer por fichero ─────────────
+// Como VS Code con Claude: la pestaña «Live code» del panel derecho enseña en
+// tiempo real lo que el modelo escribe (write/edit), con una pestaña por fichero,
+// y se abre sola sin quitar el foco. En la revisión de cambios del turno, cada
+// fichero tiene «Undo», que lo deja como estaba al empezar el turno (si nadie lo
+// ha tocado después). Código: sistema/codigo-vivo/.
+
+optional('código en vivo en el panel derecho y deshacer por fichero', (tx) => {
+  const live = join(here, 'codigo-vivo')
+  const chatDir = join(repo, 'packages', 'client', 'ui-chat', 'src', 'client')
+  const deliverablesDir = join(repo, 'packages', 'client', 'ui-deliverables', 'src', 'client')
+  const deliverablesIndex = join(deliverablesDir, 'index.ts')
+  const review = join(deliverablesDir, 'ReviewTab.tsx')
+  // Si DeepSeek añade algo parecido (seguir lo que se escribe o deshacer), se usa lo suyo.
+  if (/undo|revert|live ?code|follow/i.test(tx.read(join(deliverablesDir, 'locales.ts')))) {
+    official('ver el código en vivo o deshacer cambios del turno')
+  }
+
+  // Chat: publica lo que el modelo va escribiendo.
+  tx.copy(join(live, 'local-live-store.ts'), join(chatDir, 'chat', 'local-live-store.ts'))
+  tx.copy(join(live, 'local-live-watch.tsx'), join(chatDir, 'chat', 'local-live-watch.tsx'))
+  const chatView = join(chatDir, 'chat', 'ChatView.tsx')
+  tx.replace(chatView, "import css from './ChatView.module.css'\n",
+    "import css from './ChatView.module.css'\nimport { LocalLiveWatcher } from './local-live-watch.tsx'\n",
+    "import { LocalLiveWatcher } from './local-live-watch.tsx'")
+  tx.replace(chatView, '            <MarkdownDelegateProvider openFile={requestOpenFile}',
+    '            <LocalLiveWatcher sessionId={sessionId} useChat={useChat} />\n'
+      + '            <MarkdownDelegateProvider openFile={requestOpenFile}',
+    '<LocalLiveWatcher sessionId={sessionId} useChat={useChat} />')
+
+  // Panel derecho: la pestaña y el botón «Undo» de la revisión.
+  tx.copy(join(live, 'local-live-store.ts'), join(deliverablesDir, 'local-live-store.ts'))
+  tx.copy(join(live, 'local-live-code.tsx'), join(deliverablesDir, 'local-live-code.tsx'))
+  tx.copy(join(live, 'local-live-code.module.css'), join(deliverablesDir, 'local-live-code.module.css'))
+  tx.replace(deliverablesIndex, "import { ReviewTab, type ReviewInjected } from './ReviewTab.tsx'\n",
+    "import { ReviewTab, type ReviewInjected } from './ReviewTab.tsx'\nimport { setLocalLive } from './local-live-code.tsx'\n",
+    "import { setLocalLive } from './local-live-code.tsx'")
+  tx.replace(deliverablesIndex,
+    "  ctx.effect(() => ctx.sidebarRightTabs.register(changesReviewDefinition(t)), 'ui-deliverables: changes-review type')\n",
+    "  ctx.effect(() => ctx.sidebarRightTabs.register(changesReviewDefinition(t)), 'ui-deliverables: changes-review type')\n"
+      + '  // Local build: «Live code» tab and per-file undo (local-live-code.tsx).\n'
+      + '  setLocalLive(ctx)\n')
+  tx.replace(review, "import { FileDiff } from './FileDiff.tsx'\n",
+    "import { FileDiff } from './FileDiff.tsx'\nimport { LocalUndoButton } from './local-live-code.tsx'\n",
+    "import { LocalUndoButton } from './local-live-code.tsx'")
+  tx.replace(review, "          {file !== undefined && <Tooltip label={t('review.openFile')}",
+    '          {file !== undefined && <LocalUndoButton sessionId={sessionId} seq={seq} index={index} file={file} />}\n'
+      + "          {file !== undefined && <Tooltip label={t('review.openFile')}",
+    '<LocalUndoButton sessionId={sessionId}')
+
+  // Host: deshacer un fichero con la comparación que guarda workspace-changes.
+  const hostIndex = join(hostDir, 'index.ts')
+  const hostTypes = join(hostDir, 'types.ts')
+  tx.copy(join(live, 'local-undo.ts'), join(hostDir, 'local-undo.ts'))
+  tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-undo.ts')
+  let types = tx.read(hostTypes)
+  if (!types.includes('interface SessionLocalUndoRequest')) {
+    types = types.trimEnd() + '\n\n' + [
+      "/** Local build: put one file of a turn's changes back as it was when the turn started. */",
+      'export interface SessionLocalUndoRequest {',
+      '  readonly sessionId: SessionId',
+      '  /** Seq of the turn\'s workspace/changes event. */',
+      '  readonly seq: number',
+      '  /** Index of the file in that summary. */',
+      '  readonly index: number',
+      '}',
+      '',
+      '/** Local build: what undoing did to the file. */',
+      'export interface SessionLocalUndoValue {',
+      "  readonly outcome: 'restored' | 'deleted' | 'recreated'",
+      '}',
+      '',
+      "declare module '@deepseek-ai/dsh-typert-protocol' {",
+      '  interface RemoteErrorDetailsMap {',
+      "    'session/local-undo-unavailable': { readonly sessionId: SessionId }",
+      "    'session/local-undo-failed': { readonly sessionId: SessionId }",
+      '  }',
+      '}',
+    ].join('\n')
+    tx.write(hostTypes, types)
+  }
+  tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n",
+    "import { ApiSessionList } from './list.ts'\n"
+      + "import { localUndoTurnFile, type LocalWorkspaceChanges } from './local-undo.ts'\n"
+      + "import type { SessionLocalUndoRequest, SessionLocalUndoValue } from './types.ts'\n",
+    'SessionLocalUndoRequest, SessionLocalUndoValue }')
+  let host = tx.read(hostIndex)
+  if (!host.includes("@Remote('localUndoTurnFile')")) {
+    const at = host.indexOf("  @Remote('list')")
+    const doc = at < 0 ? -1 : host.lastIndexOf('  /**', at)
+    if (doc < 0) skip(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
+    host = host.slice(0, doc) + [
+      '  /**',
+      "   * Local build: put one file of a turn's changes back as it was when the turn",
+      '   * started, from the comparison workspace-changes keeps. A file changed since',
+      '   * the turn ended is left alone.',
+      '   * @param request - Session, workspace/changes seq and file index.',
+      '   * @param signal - cancels the comparison read.',
+      '   * @returns what was done to the file.',
+      '   */',
+      "  @Remote('localUndoTurnFile')",
+      '  async localUndoTurnFile(request: SessionLocalUndoRequest, signal: AbortSignal): Promise<SessionLocalUndoValue> {',
+      "    const changes = (this.ctx as unknown as { get(name: string): unknown }).get('workspaceChanges') as LocalWorkspaceChanges | undefined",
+      '    if (changes === undefined) {',
+      "      throw new RemoteError('session/local-undo-unavailable', 'turn changes are not recorded in this app', { sessionId: request.sessionId })",
+      '    }',
+      '    try {',
+      '      return { outcome: await localUndoTurnFile(changes, request.sessionId, request.seq, request.index, signal) }',
+      '    } catch (error) {',
+      "      throw new RemoteError('session/local-undo-failed', error instanceof Error ? error.message : String(error),",
+      '        { sessionId: request.sessionId })',
+      '    }',
+      '  }',
+      '',
+    ].join('\n') + host.slice(doc)
+    tx.write(hostIndex, host)
+  }
+})
+
 console.log('\nCambios aplicados:')
 for (const line of done) console.log(`  - ${line}`)
 if (omitted.length > 0) {
