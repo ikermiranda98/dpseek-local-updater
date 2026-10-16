@@ -41,7 +41,7 @@ const LABELS = {
   subchats: 'Subchats',
   'actualizar Ollama desde la app': 'Update Ollama from the app',
   'cursor normal (flecha) salvo en los enlaces': 'Normal arrow cursor (hand only on links)',
-  'el subchat se abre al 35 % de la zona de chat': 'Subchats open at 35% of the chat area',
+  'el subchat se abre al 40 % de la zona de chat': 'Subchats open at 40% of the chat area',
 }
 const label = (name) => LABELS[name] ?? name
 

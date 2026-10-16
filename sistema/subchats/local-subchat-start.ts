@@ -13,7 +13,7 @@ function labelOf(task: string): string {
 }
 
 /** Ancho del panel del subchat al abrirse: parte de la zona de chat (ventana menos barra lateral). */
-const ASIDE_SHARE = 0.35
+const ASIDE_SHARE = 0.4
 
 /** Abre el subchat a la derecha, en una pestaña, como el catálogo oficial de subagentes. */
 function openAside(ctx: Context, parentId: string, childId: string): void {
@@ -21,7 +21,7 @@ function openAside(ctx: Context, parentId: string, childId: string): void {
   const query = new URLSearchParams({ parent: parentId, mode: 'continuable' })
   try {
     right?.openResource(`dsh-resource://subagentchat/session/${encodeURIComponent(childId)}?${query}`, { kind: 'subagentchat' })
-    // Al 35 % de la zona de chat (sección 23 de aplicar-cambios.mjs); luego se redimensiona a mano.
+    // Al 40 % de la zona de chat (sección 23 de aplicar-cambios.mjs); luego se redimensiona a mano.
     const layout = ctx.get('layout') as { localSetRightbarShare?: (share: number) => void } | undefined
     layout?.localSetRightbarShare?.(ASIDE_SHARE)
   } catch (error) {
