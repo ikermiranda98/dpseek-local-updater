@@ -6,18 +6,10 @@
  * distintos y comparten un símbolo global.
  */
 
-/** Un modelo de Ollama que puede escribir la sugerencia. */
-export interface LocalImproveModel {
-  readonly id: string
-  readonly sizeBytes: number
-}
-
 /** Llamadas al Host. */
 export interface LocalImprover {
-  /** Modelos de Ollama y el del chat (para avisar si coinciden). */
-  models: (sessionId: string) => Promise<{ readonly models: readonly LocalImproveModel[]; readonly chatModel: string | null }>
-  /** La versión mejorada del borrador y lo que tardó. */
-  improve: (sessionId: string, draft: string, model: string) => Promise<{ readonly text: string; readonly ms: number }>
+  /** La versión mejorada del borrador y lo que tardó (con el modelo del chat, salvo que se diga otro). */
+  improve: (sessionId: string, draft: string, model?: string) => Promise<{ readonly text: string; readonly ms: number }>
 }
 
 interface Bridge {

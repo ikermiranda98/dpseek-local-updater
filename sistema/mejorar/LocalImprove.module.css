@@ -1,60 +1,11 @@
-/* «Improve» en el cuadro de texto (dpseek-local-updater). */
+/* «Improve message» (dpseek-local-updater). El botón usa el estilo del «+» de la barra; esto es su animación y la tarjeta. */
 
-.root {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  margin-right: 8px;
-  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 35%, transparent);
-  border-radius: var(--dsw-radius-sm);
-  overflow: hidden;
+/* Mientras escribe la sugerencia, el icono late. */
+.busy {
+  animation: pulse 1s ease-in-out infinite;
 }
 
-.improve,
-.model {
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  height: 22px;
-  padding: 0 8px;
-  border: 0;
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);
-  color: var(--dsw-alias-state-business-primary);
-  font-size: 12px;
-  white-space: nowrap;
-  cursor: default;
-}
-
-.model {
-  border-left: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 35%, transparent);
-  color: var(--dsw-alias-label-secondary);
-}
-
-.improve:hover:not(:disabled),
-.model:hover {
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent);
-}
-
-.improve:disabled {
-  opacity: 0.6;
-}
-
-/* Con el modelo del chat: aviso de que el siguiente mensaje tardará más. */
-.improve[data-warn] {
-  color: #c27c0e;
-}
-
-.item {
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-  width: 100%;
-}
-
-.size {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-}
+@keyframes pulse { 50% { opacity: 0.35; } }
 
 /* La tarjeta de la sugerencia, encima del cuadro de texto. */
 .card {

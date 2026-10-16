@@ -191,17 +191,16 @@ Para tareas que ocuparían mucho del chat sin llenarlo:
 
 ## Mejorar un mensaje antes de enviarlo
 
-Con algo escrito en el cuadro, debajo aparece **✨ Improve** con un selector del modelo
-que escribe la sugerencia (se recuerda; por defecto, el más pequeño que tengas en
-Ollama). Reescribe tu mensaje para que la IA lo entienda sin ambigüedad (qué hacer, con
-qué ficheros o nombres y qué resultado esperas), sin cambiar lo que pides, sin
-responderlo y en tu idioma; usa los últimos mensajes del chat para entender «el
-archivo», «eso»… La sugerencia sale encima del cuadro y se puede retocar: **Use** la
-pone en el cuadro (no la envía) y **Dismiss** deja lo tuyo.
+En la barra del cuadro de texto, junto al **+**, el botón ✨ (**Improve message**)
+reescribe tu mensaje para que la IA lo entienda sin ambigüedad (qué hacer, con qué
+ficheros o nombres y qué resultado esperas), sin cambiar lo que pides, sin responderlo
+y en tu idioma; usa los últimos mensajes del chat para entender «el archivo», «eso»…
+La sugerencia sale encima del cuadro y se puede retocar: **Use** la pone en el cuadro
+(no la envía) y **Dismiss** deja lo tuyo.
 
-Con el **mismo modelo que el chat** el botón sale en ámbar: Ollama pierde lo que tenía
-preparado de la conversación y tu siguiente mensaje tarda más en empezar. Un modelo
-pequeño aparte (por ejemplo, `ollama pull qwen2.5:1.5b`, unos 1 GB) lo evita.
+Lo escribe el **modelo del chat**, en su misma variante de contexto: Ollama no lo
+recarga y, medido, el siguiente mensaje tarda lo mismo que sin usar el botón (unos 3–4 s
+la sugerencia con Qwen3.6-35B).
 
 ## Contexto de cada chat
 
@@ -363,7 +362,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Actualizar Ollama desde la app, en el aviso de actualizaciones de abajo a la izquierda (opcional) | `packages/client/ui-settings-general` (`LocalUpdatesIndicator.tsx`) + `packages/client/ui-model-selection` (`local-ollama-bridge.ts`) + `packages/api/session-controller` (`local-ollama-update.ts`) |
 | Cursor normal (flecha) en toda la interfaz; la mano solo en los enlaces (opcional) | estilos `.css` de `packages/client`, `packages/extensions` y `apps/desktop/renderer` |
 | El subchat se abre al 40 % de la zona de chat (opcional) | `packages/client/ui-layout` (`localSetRightbarShare`) |
-| Mejorar un mensaje antes de enviarlo: «Improve» y selector de modelo (opcional) | `packages/client/ui-conversation` (`LocalImprove.tsx`) + `packages/client/ui-chat` (`local-improve-bridge.ts`) + `packages/api/session-controller` (`local-improve.ts`); código en [`sistema/mejorar/`](sistema/mejorar) |
+| Mejorar un mensaje antes de enviarlo: botón ✨ «Improve message» junto al «+» (opcional) | `packages/client/ui-conversation` (`LocalImprove.tsx`) + `packages/client/ui-chat` (`local-improve-bridge.ts`) + `packages/api/session-controller` (`local-improve.ts`); código en [`sistema/mejorar/`](sistema/mejorar) |
 | Aviso antes de instalar: semáforo, detalles y «Skip this version» (opcional) | `apps/desktop/src/main.ts` y `update-coordinator.ts` (`local-update-notice.ts`); el informe, [`sistema/informe-actualizacion.mjs`](sistema/informe-actualizacion.mjs) en el workflow |
 | Instalador sin firma, sin la «actualización obligatoria» de DeepSeek | `apps/desktop/scripts` |
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |
