@@ -250,6 +250,19 @@ Cómo funciona:
   que quites de `contexto.tamanos`. Solo toca nombres `dsh-ctx-`, nunca un modelo
   descargado.
 
+## Actualizar Ollama desde la app
+
+Cuando sale una versión nueva de Ollama, el menú del selector de modelos lo dice
+(«Ollama 0.41.0 is available»), con sus novedades en «What's new». **Update**:
+
+1. espera a que terminen las respuestas en marcha (el instalador cierra Ollama);
+2. descarga `OllamaSetup.exe` del Release oficial y lo instala en silencio, con los
+   mismos parámetros que usa el actualizador del propio Ollama;
+3. vuelve a abrir Ollama, refresca la lista de modelos y vuelve a medir el modelo por
+   defecto para la versión nueva (los demás se miden solos al abrir la app).
+
+La app consulta GitHub como mucho cada 6 horas. Solo en Windows.
+
 ## Modelos y configuración (`config.json`)
 
 **El selector de modelos muestra todos los modelos que tengas en Ollama**: la app
@@ -311,6 +324,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | No volver a ofrecer una versión retirada (opcional) | `apps/desktop/src/update-coordinator.ts` (`local-skip-version.ts`) |
 | Código de cada turno a la derecha («View code») y deshacer por fichero (opcional) | `packages/client/ui-chat`, `ui-deliverables` y `packages/api/session-controller` (`localUndoTurnFile`); código en [`sistema/codigo-vivo/`](sistema/codigo-vivo) |
 | Subchats: «Open in subchat», anidados en la barra lateral y sugerencia junto al medidor de contexto (opcional) | `packages/client/ui-chat`, `ui-workspace`, `ui-conversation` y `packages/api/session-controller` (`localStartSubchat`); código en [`sistema/subchats/`](sistema/subchats) |
+| Actualizar Ollama desde la app (opcional) | `packages/client/ui-model-selection` (`LocalOllamaUpdate.tsx`) + `packages/api/session-controller` (`local-ollama-update.ts`) |
 | Aviso antes de instalar: semáforo, detalles y «Skip this version» (opcional) | `apps/desktop/src/main.ts` y `update-coordinator.ts` (`local-update-notice.ts`); el informe, [`sistema/informe-actualizacion.mjs`](sistema/informe-actualizacion.mjs) en el workflow |
 | Instalador sin firma, sin la «actualización obligatoria» de DeepSeek | `apps/desktop/scripts` |
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |

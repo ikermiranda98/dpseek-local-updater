@@ -39,6 +39,7 @@ const LABELS = {
   'aviso antes de instalar una actualización (semáforo y saltar versión)': 'Update notice before installing',
   'código en vivo en el panel derecho y deshacer por fichero': 'Live code in the right panel and per-file undo',
   subchats: 'Subchats',
+  'actualizar Ollama desde la app': 'Update Ollama from the app',
 }
 const label = (name) => LABELS[name] ?? name
 

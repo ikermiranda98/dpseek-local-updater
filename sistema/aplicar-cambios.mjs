@@ -1888,6 +1888,130 @@ optional('subchats', (tx) => {
   }
 })
 
+// ── 21. Actualizar Ollama desde la app ────────────────────────────────────────
+// Cuando hay una versión nueva de Ollama, el menú del selector de modelos lo dice,
+// con las novedades, y la instala desde la app como lo hace el propio Ollama
+// (OllamaSetup.exe en silencio): espera a las respuestas en marcha, vuelve a abrir
+// Ollama y mide el modelo por defecto para la versión nueva. Código:
+// sistema/contexto/local-ollama-update.ts y LocalOllamaUpdate.tsx.
+
+optional('actualizar Ollama desde la app', (tx) => {
+  if (!toolsApplied) skip('necesita «herramientas de modelos en el selector»')
+  const selectionDir = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client')
+  const select = join(selectionDir, 'ModelSelect.tsx')
+  const selectionIndex = join(selectionDir, 'index.ts')
+  const hostIndex = join(hostDir, 'index.ts')
+  const hostTypes = join(hostDir, 'types.ts')
+
+  // Host.
+  tx.copy(join(here, 'contexto', 'local-ollama-update.ts'), join(hostDir, 'local-ollama-update.ts'))
+  tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-ollama-update.ts')
+  let types = tx.read(hostTypes)
+  if (!types.includes('interface SessionLocalOllamaUpdateInfo')) {
+    types = types.trimEnd() + '\n\n' + [
+      '/** Local build: check for a new Ollama version (force: ask GitHub now). */',
+      'export interface SessionLocalOllamaInfoRequest {',
+      '  readonly force?: boolean',
+      '}',
+      '',
+      '/** Local build: progress of an Ollama update started from the app. */',
+      'export interface SessionLocalOllamaUpdateState {',
+      "  readonly phase: 'idle' | 'waiting' | 'downloading' | 'installing' | 'starting' | 'done' | 'error'",
+      '  readonly percent?: number',
+      '  readonly waitingFor?: number',
+      '  readonly message?: string',
+      '  readonly version?: string',
+      '}',
+      '',
+      '/** Local build: installed and latest Ollama, its highlights and the update in progress. */',
+      'export interface SessionLocalOllamaUpdateInfo {',
+      '  readonly installed: string | null',
+      '  readonly latest: string | null',
+      '  readonly available: boolean',
+      '  readonly highlights: readonly string[]',
+      '  readonly url: string | null',
+      '  readonly state: SessionLocalOllamaUpdateState',
+      '}',
+      '',
+      '/** Local build: whether the Ollama update started. */',
+      'export interface SessionLocalOllamaUpdateValue {',
+      '  readonly started: boolean',
+      '}',
+    ].join('\n')
+    tx.write(hostTypes, types)
+  }
+  tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n",
+    "import { ApiSessionList } from './list.ts'\n"
+      + "import { localOllamaUpdateInfo, localOllamaUpdateStart } from './local-ollama-update.ts'\n"
+      + 'import type {\n'
+      + '  SessionLocalOllamaInfoRequest, SessionLocalOllamaUpdateInfo, SessionLocalOllamaUpdateValue,\n'
+      + "} from './types.ts'\n",
+    'SessionLocalOllamaInfoRequest, SessionLocalOllamaUpdateInfo, SessionLocalOllamaUpdateValue,')
+  let host = tx.read(hostIndex)
+  if (!host.includes("@Remote('localOllamaUpdateInfo')")) {
+    if (!host.includes('SessionLocalEmptyRequest')) skip('falta SessionLocalEmptyRequest (sección 14)')
+    const at = host.indexOf("  @Remote('list')")
+    const doc = at < 0 ? -1 : host.lastIndexOf('  /**', at)
+    if (doc < 0) skip(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
+    host = host.slice(0, doc) + [
+      '  /**',
+      '   * Local build: installed and latest Ollama, highlights and update progress.',
+      '   * @param request - force asks GitHub now instead of the cached answer.',
+      '   * @returns versions, highlights and the update state.',
+      '   */',
+      "  @Remote('localOllamaUpdateInfo')",
+      '  async localOllamaUpdateInfo(request: SessionLocalOllamaInfoRequest): Promise<SessionLocalOllamaUpdateInfo> {',
+      '    return localOllamaUpdateInfo(request.force === true)',
+      '  }',
+      '',
+      '  /**',
+      '   * Local build: install the latest Ollama in the background, after the replies',
+      '   * in progress finish (the installer closes Ollama).',
+      '   * @param _request - no fields are required.',
+      '   * @returns whether it started.',
+      '   */',
+      "  @Remote('localOllamaUpdate')",
+      '  localOllamaUpdate(_request: SessionLocalEmptyRequest): SessionLocalOllamaUpdateValue {',
+      "    return localOllamaUpdateStart(() => this.ctx.agents.list().filter((agent) => agent.status === 'running').length)",
+      '  }',
+      '',
+    ].join('\n') + host.slice(doc)
+    tx.write(hostIndex, host)
+  }
+
+  // Menú del selector: la fila, junto al interruptor de limpieza.
+  tx.copy(join(here, 'contexto', 'LocalOllamaUpdate.tsx'), join(selectionDir, 'LocalOllamaUpdate.tsx'))
+  tx.copy(join(here, 'contexto', 'LocalOllamaUpdate.module.css'), join(selectionDir, 'LocalOllamaUpdate.module.css'))
+  tx.replace(select, "import localOptimizeCss from './LocalOptimizeButton.module.css'\n",
+    "import localOptimizeCss from './LocalOptimizeButton.module.css'\nimport { LocalOllamaUpdate } from './LocalOllamaUpdate.tsx'\n",
+    "import { LocalOllamaUpdate } from './LocalOllamaUpdate.tsx'")
+  const selectText = tx.read(select)
+  if (!selectText.includes('<LocalOllamaUpdate />')) {
+    const sw = /^(\s*)<LocalCleanupSwitch t=\{t\} \/>\n/m
+    if (!sw.test(selectText)) skip('no se encuentra el interruptor de limpieza en el selector')
+    tx.write(select,
+      selectText.replace(sw, (row, pad) => `${pad}{/* Local build: update Ollama from the app. */}\n${pad}<LocalOllamaUpdate />\n${row}`))
+  }
+  tx.replace(selectionIndex, "import { setLocalOptimizer } from './LocalOptimizeButton.tsx'\n",
+    "import { setLocalOptimizer } from './LocalOptimizeButton.tsx'\nimport { setLocalOllamaUpdater } from './LocalOllamaUpdate.tsx'\n",
+    "import { setLocalOllamaUpdater }")
+  tx.replace(selectionIndex, "  }, 'ui-model-selection: local model tools')\n",
+    "  }, 'ui-model-selection: local model tools')\n"
+      + '  // Local build: update Ollama from the app (LocalOllamaUpdate.tsx).\n'
+      + '  ctx.effect(() => {\n'
+      + '    const unwrap = <T>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {\n'
+      + '      if (!result.ok) throw new Error(result.error.message)\n'
+      + '      return result.value\n'
+      + '    }\n'
+      + '    setLocalOllamaUpdater({\n'
+      + '      info: async force => unwrap(await ctx.remote.session.localOllamaUpdateInfo({ force })),\n'
+      + '      start: async () => unwrap(await ctx.remote.session.localOllamaUpdate({})),\n'
+      + '    })\n'
+      + '    return () => { setLocalOllamaUpdater(undefined) }\n'
+      + "  }, 'ui-model-selection: local Ollama update')\n",
+    'setLocalOllamaUpdater({')
+})
+
 console.log('\nCambios aplicados:')
 for (const line of done) console.log(`  - ${line}`)
 if (omitted.length > 0) {

@@ -1,0 +1,76 @@
+/* «Update Ollama» en el menú del selector de modelos (dpseek-local-updater). */
+
+.box {
+  margin: 4px 4px 6px;
+  padding: 8px 10px;
+  border-radius: var(--dsw-radius-md);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  line-height: 18px;
+  cursor: default;
+}
+
+.line {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.text[data-error] {
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.update {
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-state-business-primary);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.bar {
+  height: 3px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--dsw-alias-border-l2);
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  background: var(--dsw-alias-state-business-primary);
+  transition: width 300ms ease;
+}
+
+.notesToggle {
+  margin-top: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* El menú se abre sobre el cuadro de texto: las novedades no deben sacarlo de la pantalla. */
+.notes {
+  max-height: 112px;
+  overflow-y: auto;
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.hint {
+  margin: 4px 0 0;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
