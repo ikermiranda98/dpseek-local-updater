@@ -315,6 +315,12 @@ const toPiAi = (m) => {
  * de modelos. Cualquier fallo devuelve los modelos fijos. Deja arranque.cjs y su
  * configuración en <DSH_HOME>/storages (local-arranque.*) para que el Host vuelva
  * a listar Ollama al abrir el selector (local-optimize.ts → localRefreshModels).
+ *
+ * El Host evalúa la configuración varias veces al arrancar (medido: 9), y cada una
+ * lanzaba arranque.cjs en un proceso nuevo y síncrono (~150–200 ms cada uno, unos 3 s
+ * en total con el Host bloqueado). Ahora se ejecuta una vez por proceso y las demás
+ * evaluaciones reciben una copia del mismo resultado; los cambios posteriores en
+ * Ollama llegan igual, por el refresco del selector (local-ollama-live.ts).
  */
 function runtimeModelsExpression(fixed) {
   const startup = readFileSync(join(here, 'contexto', 'arranque.cjs'), 'utf8')
@@ -330,6 +336,8 @@ function runtimeModelsExpression(fixed) {
     efforts: EFFORTS,
   }
   return [
+    // Una vez por proceso (process es el mismo en todas las evaluaciones); copia para que nadie comparta el array.
+    'structuredClone(process.__dshLocalOllamaModels ??=',
     `((fixed, code, settings) => { try {`,
     "const fs = process.getBuiltinModule('node:fs'); const path = process.getBuiltinModule('node:path');",
     "const home = (process.env.DSH_HOME || '').trim() || path.join(process.getBuiltinModule('node:os').homedir(), '.dsh');",
@@ -340,7 +348,7 @@ function runtimeModelsExpression(fixed) {
     "timeout: 30000, windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });",
     'const models = JSON.parse(out);',
     'return Array.isArray(models) && models.length > 0 ? models : fixed;',
-    `} catch (error) { return fixed; } })(${JSON.stringify(fixed)}, ${JSON.stringify(startup)}, ${JSON.stringify(JSON.stringify(settings))})`,
+    `} catch (error) { return fixed; } })(${JSON.stringify(fixed)}, ${JSON.stringify(startup)}, ${JSON.stringify(JSON.stringify(settings))}))`,
   ].join(' ')
 }
 
@@ -2395,6 +2403,68 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       + '            <LocalImprove sessionId={sessionId} draft={draft} subagent={subagent !== null} className={css.add}\n'
       + "              disabled={locked} setDraft={(text) => { inputActions?.setDraft(text) }} />\n",
     '<LocalImprove sessionId={sessionId}')
+})
+
+// ── 25. Chat más ligero: scroll fluido y mensajes antiguos sin pulsar ───────────
+// Medido con un chat de prueba de 400 turnos (sistema/rendimiento/README.md): con todo el
+// historial cargado, cada frame del scroll volvía a maquetar ~37 000 elementos (hasta
+// 110 ms por frame) y llegar al principio costaba 27 clics en «Load earlier».
+// - Cada bloque del chat lleva content-visibility: auto, así el navegador no maqueta ni
+//   pinta lo que no se ve. Como eso recorta lo que se sale del bloque, el bloque se
+//   ensancha (margen negativo y el mismo relleno) hasta el ancho que usan las tablas
+//   anchas (100cqw del contenedor del chat): el contenido queda exactamente igual.
+// - «Load earlier» pide la página siguiente solo, al subir cerca de lo cargado
+//   (LocalOlderButton.tsx), salvo mientras se sigue el final del chat.
+// - Las páginas de mensajes antiguos traen al menos 6 turnos (antes 2); la primera
+//   carga de un chat no cambia.
+
+optional('chat más ligero (scroll fluido y mensajes antiguos sin pulsar)', (tx) => {
+  const chatDir = join(repo, 'packages', 'client', 'ui-chat', 'src', 'client', 'chat')
+  const css = join(chatDir, 'ChatView.module.css')
+  let styles = tx.read(css)
+  if (!styles.includes('content-visibility: auto')) {
+    if (!/^\.flowItem \{/m.test(styles)) skip(`no se encuentra .flowItem en ${rel(css)}`)
+    styles = styles.trimEnd() + '\n\n' + [
+      '/* Local build (dpseek-local-updater): the browser skips layout and paint of',
+      '   Chat blocks out of view. Paint containment clips overflow, so each block',
+      '   spans the breakout width that wide tables use (100cqw of the Chat scroll',
+      '   container) with equal padding: its content box, and the layout, stay the same. */',
+      '.flowItem {',
+      '  content-visibility: auto;',
+      '  contain-intrinsic-size: auto 120px;',
+      '  margin-inline: calc((100% - 100cqw) / 2);',
+      '  padding-inline: calc((100cqw - 100%) / 2);',
+      '}',
+    ].join('\n') + '\n'
+    tx.write(css, styles)
+  }
+
+  tx.copy(join(here, 'rendimiento', 'LocalOlderButton.tsx'), join(chatDir, 'LocalOlderButton.tsx'))
+  const view = join(chatDir, 'ChatView.tsx')
+  tx.replace(view, "import css from './ChatView.module.css'\n",
+    "import css from './ChatView.module.css'\nimport { LocalOlderButton } from './LocalOlderButton.tsx'\n",
+    "import { LocalOlderButton } from './LocalOlderButton.tsx'")
+  tx.replace(view,
+    '                <button type="button" disabled={loadingOlder} onClick={scroll.loadEarlier}>\n'
+      + "                  {loadingOlder ? t('loading') : t('chat.loadOlder')}\n"
+      + '                </button>\n',
+    '                {/* Local build: also loads by itself near the top (LocalOlderButton.tsx). */}\n'
+      + '                <LocalOlderButton loading={loadingOlder} followingTail={scroll.followingTail} onLoad={scroll.loadEarlier}>\n'
+      + "                  {loadingOlder ? t('loading') : t('chat.loadOlder')}\n"
+      + '                </LocalOlderButton>\n',
+    '<LocalOlderButton loading={loadingOlder}')
+
+  const session = join(repo, 'packages', 'api', 'session-controller', 'src', 'client', 'sessions', 'session.ts')
+  tx.replace(session,
+    'const HISTORY_PAGE_OPTIONS = { maxMessages: 500, turnWindow: { minMessages: PAGE_MESSAGES, minTurns: 2 } }\n',
+    'const HISTORY_PAGE_OPTIONS = { maxMessages: 500, turnWindow: { minMessages: PAGE_MESSAGES, minTurns: 2 } }\n'
+      + '/** Local build: older pages bring at least 6 Turns (fewer round trips while scrolling up); the first page is unchanged. */\n'
+      + 'const LOCAL_OLDER_PAGE_OPTIONS = { maxMessages: 500, turnWindow: { minMessages: 150, minTurns: 6 } }\n',
+    'const LOCAL_OLDER_PAGE_OPTIONS')
+  tx.replace(session,
+    '        beforeSeq: this.baseSeq,\n        ...HISTORY_PAGE_OPTIONS,\n',
+    '        beforeSeq: this.baseSeq,\n        ...LOCAL_OLDER_PAGE_OPTIONS,\n',
+    '...LOCAL_OLDER_PAGE_OPTIONS,\n')
 })
 
 console.log('\nCambios aplicados:')

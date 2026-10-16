@@ -350,6 +350,19 @@ Editar `config.json` en GitHub (o hacer push) recompila el instalador al momento
 Si editas los modelos desde la app (Settings → Models → Ollama), esa lista pasa a
 ser fija y deja de actualizarse sola.
 
+## Rendimiento
+
+Medido con un banco de pruebas propio (150 chats y uno de 400 turnos; detalles y cómo
+repetirlo en [`sistema/rendimiento/`](sistema/rendimiento)):
+
+- **Arranque:** la lista de modelos de Ollama se pide una vez, no nueve: de 4,1 s a 3,0 s
+  hasta poder usar la app.
+- **Chats largos:** el navegador ya no maqueta lo que no se ve. El scroll con todo el
+  historial pasa de frames de hasta 110 ms a ninguna tarea larga, y usa menos memoria.
+- **Mensajes antiguos:** se cargan solos al subir, en páginas más grandes. Llegar al
+  principio de un chat de 400 turnos pasa de 27 clics y 5,7 s a hacerlo con la rueda en
+  3,8 s (o 2,2 s pulsando «Load earlier»).
+
 ## Qué cambia respecto a la versión oficial
 
 Todo lo hace [`sistema/aplicar-cambios.mjs`](sistema/aplicar-cambios.mjs) sobre el
@@ -383,6 +396,8 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Aviso antes de instalar: semáforo, detalles y «Skip this version» (opcional) | `apps/desktop/src/main.ts` y `update-coordinator.ts` (`local-update-notice.ts`); el informe, [`sistema/informe-actualizacion.mjs`](sistema/informe-actualizacion.mjs) en el workflow |
 | Instalador sin firma, sin la «actualización obligatoria» de DeepSeek | `apps/desktop/scripts` |
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |
+| Arranque: la lista de modelos de Ollama, una vez por proceso | `packages/bundle/base/cordis.patch.yml` |
+| Chat más ligero: `content-visibility`, «Load earlier» que carga solo y páginas más grandes (opcional) | `packages/client/ui-chat` (`ChatView.module.css`, `LocalOlderButton.tsx`) + `packages/api/session-controller` (`session.ts`) |
 | Prueba de arranque antes de publicar | [`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs) en el workflow |
 
 La app va en inglés (o en chino), como la oficial: no se añade ningún idioma.
