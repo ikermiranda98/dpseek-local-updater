@@ -1560,9 +1560,10 @@ optional('aviso antes de instalar una actualización (semáforo y saltar versió
 })
 
 // ── 19. Código en vivo en el panel derecho y deshacer por fichero ─────────────
-// Como VS Code con Claude: la pestaña «Live code» del panel derecho enseña en
-// tiempo real lo que el modelo escribe (write/edit), con una pestaña por fichero,
-// y se abre sola sin quitar el foco. En la revisión de cambios del turno, cada
+// Como VS Code con Claude: la pestaña «Live code» del panel derecho enseña lo que
+// el modelo escribe (write/edit), con una pestaña por fichero; en tiempo real si el
+// proveedor lo envía por trozos (Ollama lo da entero al terminar). No se abre sola:
+// «View code» en la línea de estado del turno del chat. En la revisión de cambios del turno, cada
 // fichero tiene «Undo», que lo deja como estaba al empezar el turno (si nadie lo
 // ha tocado después). Código: sistema/codigo-vivo/.
 
@@ -1577,17 +1578,41 @@ optional('código en vivo en el panel derecho y deshacer por fichero', (tx) => {
     official('ver el código en vivo o deshacer cambios del turno')
   }
 
-  // Chat: publica lo que el modelo va escribiendo.
+  // Chat: publica lo que el modelo va escribiendo y pone «View code» en la línea
+  // de estado del turno («Deep diving…» mientras trabaja, «Completed in…» al acabar).
   tx.copy(join(live, 'local-live-store.ts'), join(chatDir, 'chat', 'local-live-store.ts'))
   tx.copy(join(live, 'local-live-watch.tsx'), join(chatDir, 'chat', 'local-live-watch.tsx'))
+  tx.copy(join(live, 'local-live-watch.module.css'), join(chatDir, 'chat', 'local-live-watch.module.css'))
   const chatView = join(chatDir, 'chat', 'ChatView.tsx')
   tx.replace(chatView, "import css from './ChatView.module.css'\n",
-    "import css from './ChatView.module.css'\nimport { LocalLiveWatcher } from './local-live-watch.tsx'\n",
-    "import { LocalLiveWatcher } from './local-live-watch.tsx'")
+    "import css from './ChatView.module.css'\nimport { LocalLiveSession, LocalLiveWatcher } from './local-live-watch.tsx'\n",
+    "import { LocalLiveSession, LocalLiveWatcher } from './local-live-watch.tsx'")
   tx.replace(chatView, '            <MarkdownDelegateProvider openFile={requestOpenFile}',
     '            <LocalLiveWatcher sessionId={sessionId} useChat={useChat} />\n'
+      + '            <LocalLiveSession sessionId={sessionId}>\n'
       + '            <MarkdownDelegateProvider openFile={requestOpenFile}',
-    '<LocalLiveWatcher sessionId={sessionId} useChat={useChat} />')
+    '<LocalLiveSession sessionId={sessionId}>')
+  tx.replace(chatView, '            </MarkdownDelegateProvider>\n',
+    '            </MarkdownDelegateProvider>\n            </LocalLiveSession>\n',
+    '            </MarkdownDelegateProvider>\n            </LocalLiveSession>\n')
+  const running = join(chatDir, 'chat', 'RunningStatus.tsx')
+  tx.replace(running, "import { RunningWhaleTail } from './RunningWhaleTail.tsx'\n",
+    "import { RunningWhaleTail } from './RunningWhaleTail.tsx'\nimport { LocalLiveCodeButton } from './local-live-watch.tsx'\n",
+    "import { LocalLiveCodeButton } from './local-live-watch.tsx'")
+  tx.replace(running, '        <TextShimmer active className={css.runningText}>{label}</TextShimmer>\n',
+    '        <TextShimmer active className={css.runningText}>{label}</TextShimmer>\n'
+      + '        <LocalLiveCodeButton placement="running" />\n',
+    '<LocalLiveCodeButton placement="running" />')
+  const processView = join(chatDir, 'chat', 'TurnProcessNodeView.tsx')
+  tx.replace(processView, "import css from './TurnProcessNodeView.module.css'\n",
+    "import css from './TurnProcessNodeView.module.css'\nimport { LocalLiveCodeButton } from './local-live-watch.tsx'\n",
+    "import { LocalLiveCodeButton } from './local-live-watch.tsx'")
+  tx.replace(processView, '  return (\n    <>\n      <span className={a11yCss.visuallyHidden}',
+    "  return (\n    <div style={{ position: 'relative' }}>\n      <span className={a11yCss.visuallyHidden}",
+    "<div style={{ position: 'relative' }}>")
+  tx.replace(processView, '      </button>\n    </>\n  )\n',
+    '      </button>\n      <LocalLiveCodeButton turn={node.data.turn} placement="process" />\n    </div>\n  )\n',
+    '<LocalLiveCodeButton turn={node.data.turn} placement="process" />')
 
   // Panel derecho: la pestaña y el botón «Undo» de la revisión.
   tx.copy(join(live, 'local-live-store.ts'), join(deliverablesDir, 'local-live-store.ts'))

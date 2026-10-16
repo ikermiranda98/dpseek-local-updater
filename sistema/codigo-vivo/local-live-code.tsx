@@ -2,8 +2,9 @@
  * Código en vivo, lado del panel derecho (añadido por dpseek-local-updater).
  *
  * - Pestaña «Live code»: lo que el modelo escribe en el turno actual, en tiempo
- *   real, con una pestaña por fichero. Se abre sola cuando el modelo empieza a
- *   escribir un fichero (se puede desactivar) y sin quitar el foco de donde estés.
+ *   real (si el proveedor lo envía por trozos; Ollama lo da entero al terminar),
+ *   con una pestaña por fichero. Se abre con «View code» en la línea de estado
+ *   del turno en el chat (local-live-watch.tsx), nunca sola.
  * - Botón «Undo» en la revisión de cambios del turno: deja ese fichero como
  *   estaba al empezar el turno (localUndoTurnFile en el Host).
  */
@@ -22,21 +23,13 @@ import css from './local-live-code.module.css'
 /** Tipo de pestaña y su identidad en el sistema de pestañas. */
 export const LIVE_KIND = 'local-live-code'
 const LIVE_ID = 'dpseek-local-updater/live-code'
-const AUTO_KEY = 'dpseek-local-updater.live-code.auto'
 /** Más allá de esto se dibuja sin colores: resaltar en cada pulsación saldría caro. */
 const HIGHLIGHT_LIMIT = 120_000
 
 let localCtx: Context | undefined
 
-const readAuto = (): boolean => {
-  try { return localStorage.getItem(AUTO_KEY) !== 'off' } catch { return true }
-}
-const writeAuto = (on: boolean): void => {
-  try { localStorage.setItem(AUTO_KEY, on ? 'on' : 'off') } catch { /* sin almacenamiento: solo esta vez */ }
-}
-
 /**
- * Registra la pestaña, su cuerpo y la apertura automática.
+ * Registra la pestaña, su cuerpo y su apertura desde el chat.
  * @param ctx - contexto del plugin de entregables.
  */
 export function setLocalLive(ctx: Context): void {
@@ -56,9 +49,6 @@ export function setLocalLive(ctx: Context): void {
     LiveCodeTab,
   )), 'local: live code body')
   ctx.effect(() => onLiveOpen((sessionId) => {
-    if (!readAuto()) return
-    // Se abre donde está el chat, sin quitar el foco al cuadro de texto ni a nada.
-    const focused = document.activeElement
     const right = ctx.sidebarRight as typeof ctx.sidebarRight & {
       openTabIn?: (sessionId: SessionId, kind: string) => void
     }
@@ -68,10 +58,7 @@ export function setLocalLive(ctx: Context): void {
     } catch (error) {
       console.warn('local live code:', error)
     }
-    if (focused instanceof HTMLElement && focused !== document.body) {
-      requestAnimationFrame(() => { if (document.activeElement !== focused) focused.focus({ preventScroll: true }) })
-    }
-  }), 'local: live code auto-open')
+  }), 'local: live code open')
 }
 
 /** El fichero que conviene ver: el que se está escribiendo o, si no, el último. */
@@ -142,7 +129,6 @@ function LiveCodeTab({ sessionId, useTabInfo }: PropsRuntime<'sidebar.right.pane
   const live = useSyncExternalStore(subscribeLive, () => liveSnapshot(sessionId))
   const files = live?.files ?? []
   const [chosen, setChosen] = useState<string | undefined>(undefined)
-  const [auto, setAuto] = useState(readAuto)
   // Una pestaña elegida a mano deja de seguir al modelo hasta que pulses «Follow» o empiece otro turno.
   const turn = live?.turn
   useEffect(() => { setChosen(undefined) }, [turn])
@@ -180,18 +166,15 @@ function LiveCodeTab({ sessionId, useTabInfo }: PropsRuntime<'sidebar.right.pane
         {file === undefined
           ? <p className={css.empty}>
             {live?.running === true
-              ? 'Nothing written yet in this turn. When the agent writes or edits a file, you will see it here as it types.'
-              : 'When the agent writes or edits a file, you will see it here as it types, one tab per file.'}
+              ? 'Nothing written yet in this turn. When the agent writes or edits a file, it shows up here.'
+              : 'When the agent writes or edits a file, it shows up here, one tab per file.'}
           </p>
           : edits.map((edit, index) => (
             <EditBlock key={edit.callId} edit={edit} index={index} count={edits.length} highlight={highlight} />
           ))}
       </div>
       <div className={css.footer}>
-        <label title="Open this tab when the agent starts writing a file">
-          <input type="checkbox" checked={auto} onChange={(event) => { setAuto(event.target.checked); writeAuto(event.target.checked) }} />
-          Open automatically
-        </label>
+        <span>{live === undefined ? '' : `Turn ${String(live.turn)}${live.running ? ' · running' : ''}`}</span>
         {review && <button type="button" className={css.tool} onClick={() => {
           tab.actions.openResource(changesReviewAddress({ sessionId, seq: live.changesSeq ?? 0, turn: live.turn }))
         }}>Review changes and undo</button>}

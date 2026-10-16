@@ -5,16 +5,19 @@
  * publica lo que van escribiendo (local-live-store.ts). Los argumentos crecen en
  * su sitio mientras llegan, sin avisar, así que mientras el turno está en marcha
  * se leen unas siete veces por segundo.
+ *
+ * El panel no se abre solo: la línea de estado del turno («Deep diving…» y
+ * «Completed in…») lleva el botón «View code» cuando el turno escribe ficheros.
  */
-import { useEffect, useRef } from 'react'
+import { createContext, useContext, useEffect, useRef, useSyncExternalStore } from 'react'
+import type { ReactNode } from 'react'
+import { LinkIconMedium } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ToolCallBlock } from '../contract/snapshot.ts'
 import type { UseChat } from '../contract/slots.ts'
-import { liveSnapshot, publishLive, requestLiveOpen, type LiveEdit, type LiveFile } from './local-live-store.ts'
+import { liveSnapshot, publishLive, requestLiveOpen, subscribeLive, type LiveEdit, type LiveFile } from './local-live-store.ts'
+import css from './local-live-watch.module.css'
 
 const TICK_MS = 150
-
-/** Último turno de cada chat para el que ya se pidió abrir la pestaña. */
-const openedTurns = new Map<string, number>()
 
 interface ReadCall {
   readonly path: string
@@ -98,11 +101,6 @@ export function LocalLiveWatcher({ sessionId, useChat }: { sessionId: string; us
       if (now === last) return
       last = now
       publishLive({ sessionId, turn, running, files, ...changes === undefined ? {} : { changesSeq: changes.seq } })
-      // Solo con lo que se escribe ahora: abrir un chat ya terminado no abre la pestaña.
-      if (running && files.length > 0 && openedTurns.get(sessionId) !== turn) {
-        openedTurns.set(sessionId, turn)
-        requestLiveOpen(sessionId)
-      }
     }
     read()
     const unsubscribe = source.subscribe(read)
@@ -121,4 +119,43 @@ export function LocalLiveWatcher({ sessionId, useChat }: { sessionId: string; us
     }
   }, [sessionId, turn, running, source])
   return null
+}
+
+/** El chat de la vista, para los botones de las líneas de estado del turno. */
+const LiveSession = createContext<string | undefined>(undefined)
+
+/**
+ * Da el chat a los botones «View code» de dentro.
+ * @param props - chat y contenido.
+ * @returns el contenido.
+ */
+export function LocalLiveSession({ sessionId, children }: { sessionId: string; children: ReactNode }) {
+  return <LiveSession.Provider value={sessionId}>{children}</LiveSession.Provider>
+}
+
+/**
+ * «View code» en la línea de estado del turno: abre la pestaña «Live code».
+ * @param props - turno de la línea (sin él, el que está en marcha) y dónde va.
+ * @returns el botón, o nada si ese turno no ha escrito ficheros.
+ */
+export function LocalLiveCodeButton({ turn, placement }: { turn?: number; placement: 'running' | 'process' }) {
+  const sessionId = useContext(LiveSession)
+  const live = useSyncExternalStore(subscribeLive, () => sessionId === undefined ? undefined : liveSnapshot(sessionId))
+  if (sessionId === undefined || live === undefined || live.files.length === 0) return null
+  if (turn === undefined ? !live.running : live.turn !== turn) return null
+  const writing = live.files.some((file) => file.edits.some((edit) => edit.status === 'writing'))
+  const count = live.files.length
+  return (
+    <button type="button" className={css.button} data-placement={placement} data-live-code-button
+      title="Open the code in the right panel"
+      onClick={(event) => {
+        // Dentro de la línea «Completed in…», que pliega el turno: el clic es solo nuestro.
+        event.stopPropagation()
+        requestLiveOpen(sessionId)
+      }}>
+      <LinkIconMedium kind="code" className={css.icon} />
+      <span>{writing ? 'Writing code' : 'View code'}</span>
+      <span className={css.count}>{count === 1 ? '1 file' : `${String(count)} files`}</span>
+    </button>
+  )
 }

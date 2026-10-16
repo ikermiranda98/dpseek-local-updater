@@ -1,0 +1,39 @@
+/* «View code» en la línea de estado del turno (dpseek-local-updater). Discreto, con el azul del tema. */
+
+.button {
+  display: inline-flex;
+  flex: none;
+  gap: 5px;
+  align-items: center;
+  height: 24px;
+  margin-left: 10px;
+  padding: 0 8px;
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 35%, transparent);
+  border-radius: var(--dsw-radius-sm);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);
+  color: var(--dsw-alias-state-business-primary);
+  font: var(--dsw-font-xs-13);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.button:hover {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent);
+}
+
+/* En «Completed in…» va a la derecha de la línea, que es entera un botón (plegar el turno). */
+.button[data-placement='process'] {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin-left: 0;
+}
+
+.icon {
+  width: 14px;
+  height: 14px;
+}
+
+.count {
+  color: var(--dsw-alias-label-tertiary);
+}
