@@ -2047,36 +2047,25 @@ optional('cursor normal (flecha) salvo en los enlaces', (tx) => {
 // ── 23. El subchat se abre al 40 % de la zona de chat ─────────────────────────
 // Al abrir un subchat a la derecha, el panel ocupa el 40 % de la zona de chat (la
 // ventana menos la barra lateral); luego se redimensiona a mano como siempre.
-// ui-layout guarda ese ancho y no lo expone: se añade la acción y el subchat la
-// usa si está (local-subchat-start.ts); sin ella, se abre con el ancho de siempre.
+// ui-layout guarda ese ancho y no lo expone: se añade al controlador un método que
+// mide la barra lateral en pantalla y usa la acción oficial setRightbar (sin tocar
+// el almacén, cuyos tests oficiales enumeran sus acciones). El subchat lo usa si
+// está (local-subchat-start.ts); sin él, se abre con el ancho de siempre.
 
 optional('el subchat se abre al 40 % de la zona de chat', (tx) => {
-  const layoutDir = join(repo, 'packages', 'client', 'ui-layout', 'src', 'client')
-  const stores = join(layoutDir, 'stores.ts')
-  const service = join(layoutDir, 'service.ts')
-  tx.replace(stores, '  closeRightbar: (draft: LayoutState) => void\n',
-    '  closeRightbar: (draft: LayoutState) => void\n'
-      + '  /** Local build: right panel width as a share of the chat area (frame minus sidebar). */\n'
-      + '  localSetRightbarShare: (draft: LayoutState, share: number) => void\n',
-    'localSetRightbarShare: (draft: LayoutState, share: number) => void')
-  tx.replace(stores, '      closeRightbar: (d) => {\n',
-    '      localSetRightbarShare: (d, share: number) => {\n'
-      + '        d.layoutInfo.rightbarInstant = false\n'
-      + '        // Below the auto-collapse breakpoint the sidebar does not take room from the chat.\n'
-      + '        const sidebar = d.layoutInfo.viewportWidth < SIDEBAR_AUTO_COLLAPSE ? 0 : d.layoutInfo.sidebar\n'
-      + '        const px = Math.round((d.layoutInfo.viewportWidth - sidebar) * share)\n'
-      + '        d.layoutInfo.rightbar = clampWidth(px, RIGHTBAR_MIN, Math.max(RIGHTBAR_MIN, d.layoutInfo.viewportWidth * RIGHTBAR_MAX_RATIO))\n'
-      + '      },\n'
-      + '      closeRightbar: (d) => {\n',
-    '      localSetRightbarShare: (d, share: number) => {\n')
+  const service = join(repo, 'packages', 'client', 'ui-layout', 'src', 'client', 'service.ts')
+  if (!tx.read(service).includes('this.panels.openRightbar(track, fullscreen)')) skip('el controlador de ui-layout ha cambiado')
   tx.replace(service, '  /** Report the right panel as hidden: no track, no handle. */\n  closeRightbar(): void {\n',
     '  /**\n'
-      + '   * Local build: set the right panel width as a share of the chat area; it stays\n'
-      + '   * resizable by hand as always.\n'
-      + '   * @param share - fraction of the frame minus the sidebar, e.g. 0.4.\n'
+      + '   * Local build: set the right panel width as a share of the chat area (frame\n'
+      + '   * minus sidebar, measured on screen); it stays resizable by hand as always.\n'
+      + '   * @param share - fraction of the chat area, e.g. 0.4.\n'
       + '   */\n'
       + '  localSetRightbarShare(share: number): void {\n'
-      + '    this.panels.localSetRightbarShare(share)\n'
+      + "    const frame = document.querySelector('[data-rightbar-col]')?.parentElement\n"
+      + '    if (frame === null || frame === undefined) return\n'
+      + '    const sidebar = Number.parseFloat(getComputedStyle(frame).gridTemplateColumns.split(\' \')[0] ?? \'0\') || 0\n'
+      + '    this.panels.setRightbar(Math.round((frame.getBoundingClientRect().width - sidebar) * share))\n'
       + '  }\n'
       + '\n'
       + '  /** Report the right panel as hidden: no track, no handle. */\n  closeRightbar(): void {\n',
