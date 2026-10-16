@@ -12,7 +12,7 @@
 import { spawn } from 'node:child_process'
 import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { localOptimizeModel, localRefreshModels } from './local-optimize.ts'
@@ -233,4 +233,43 @@ export function localOllamaUpdateStart(running: () => number): { readonly starte
     }
   })()
   return { started: true }
+}
+
+/** Lo que cambia la versión nueva de la app para las funciones locales (`local-update-info.json` de su Release). */
+export interface LocalAppUpdateNotes {
+  readonly version: string
+  readonly level: 'green' | 'amber' | 'red'
+  readonly headline: string
+  readonly detail: string
+}
+
+/** Dirección de los Releases, la misma que usa el actualizador de la app (el Host corre con el ejecutable de Electron). */
+function appFeedUrl(): string | undefined {
+  if (process.env.DSH_LOCAL_INFORME_URL) return process.env.DSH_LOCAL_INFORME_URL.replace(/\/+$/, '')
+  const resources = (process as { resourcesPath?: string }).resourcesPath ?? join(dirname(process.execPath), 'resources')
+  try {
+    const yml = readFileSync(join(resources, 'app-update.yml'), 'utf8')
+    return /^url:\s*['"]?([^'"\s]+)/m.exec(yml)?.[1]?.replace(/\/+$/, '')
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * @param version - versión nueva de la app.
+ * @returns sus novedades para las funciones locales, o `null` si no se pueden leer o son de otra versión.
+ */
+export async function localAppUpdateNotes(version: string): Promise<LocalAppUpdateNotes | null> {
+  const url = appFeedUrl()
+  if (url === undefined || version === '') return null
+  try {
+    const response = await fetch(`${url}/local-update-info.json`, { signal: AbortSignal.timeout(8000), cache: 'no-store' })
+    if (!response.ok) return null
+    const report = await response.json() as Partial<Record<keyof LocalAppUpdateNotes, unknown>>
+    if (report.version !== version || typeof report.headline !== 'string' || typeof report.detail !== 'string'
+      || (report.level !== 'green' && report.level !== 'amber' && report.level !== 'red')) return null
+    return { version, level: report.level, headline: report.headline, detail: report.detail }
+  } catch {
+    return null
+  }
 }

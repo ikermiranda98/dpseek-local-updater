@@ -1,4 +1,4 @@
-/* Aviso de actualizaciones con Ollama (dpseek-local-updater). El botón es el oficial; esto es el panel. */
+/* Aviso de actualizaciones de la app y de Ollama (dpseek-local-updater). El botón tiene el aspecto del oficial; esto es el panel. */
 
 .root {
   position: relative;
@@ -125,4 +125,19 @@
   margin: 4px 0 0;
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
+}
+
+/* Semáforo y resumen de lo que cambia la versión nueva de la app para las funciones locales. */
+.level {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.notesText {
+  max-height: 160px;
+  overflow-y: auto;
+  margin: 4px 0 0;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  white-space: pre-line;
 }

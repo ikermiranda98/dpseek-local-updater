@@ -2063,13 +2063,29 @@ optional('actualizar Ollama desde la app', (tx) => {
       'export interface SessionLocalOllamaUpdateValue {',
       '  readonly started: boolean',
       '}',
+      '',
+      '/** Local build: what a new app version changes for the local features. */',
+      'export interface SessionLocalAppNotesRequest {',
+      '  readonly version: string',
+      '}',
+      '',
+      '/** Local build: the traffic light and summary published with the new version. */',
+      'export interface SessionLocalAppNotes {',
+      '  readonly notes: {',
+      '    readonly version: string',
+      "    readonly level: 'green' | 'amber' | 'red'",
+      '    readonly headline: string',
+      '    readonly detail: string',
+      '  } | null',
+      '}',
     ].join('\n')
     tx.write(hostTypes, types)
   }
   tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n",
     "import { ApiSessionList } from './list.ts'\n"
-      + "import { localOllamaUpdateInfo, localOllamaUpdateStart } from './local-ollama-update.ts'\n"
+      + "import { localAppUpdateNotes, localOllamaUpdateInfo, localOllamaUpdateStart } from './local-ollama-update.ts'\n"
       + 'import type {\n'
+      + '  SessionLocalAppNotes, SessionLocalAppNotesRequest,\n'
       + '  SessionLocalOllamaInfoRequest, SessionLocalOllamaUpdateInfo, SessionLocalOllamaUpdateValue,\n'
       + "} from './types.ts'\n",
     'SessionLocalOllamaInfoRequest, SessionLocalOllamaUpdateInfo, SessionLocalOllamaUpdateValue,')
@@ -2101,6 +2117,17 @@ optional('actualizar Ollama desde la app', (tx) => {
       "    return localOllamaUpdateStart(() => this.ctx.agents.list().filter((agent) => agent.status === 'running').length)",
       '  }',
       '',
+      '  /**',
+      '   * Local build: what a new app version changes for the local features, from',
+      '   * the local-update-info.json published with it.',
+      '   * @param request - the new version.',
+      '   * @returns its traffic light and summary, or null when it cannot be read.',
+      '   */',
+      "  @Remote('localAppUpdateNotes')",
+      '  async localAppUpdateNotes(request: SessionLocalAppNotesRequest): Promise<SessionLocalAppNotes> {',
+      '    return { notes: await localAppUpdateNotes(request.version) }',
+      '  }',
+      '',
     ].join('\n') + host.slice(doc)
     tx.write(hostIndex, host)
   }
@@ -2121,6 +2148,7 @@ optional('actualizar Ollama desde la app', (tx) => {
       + '    setOllamaUpdater({\n'
       + '      info: async force => unwrap(await ctx.remote.session.localOllamaUpdateInfo({ force })),\n'
       + '      start: async () => unwrap(await ctx.remote.session.localOllamaUpdate({})),\n'
+      + '      appNotes: async version => unwrap(await ctx.remote.session.localAppUpdateNotes({ version })).notes,\n'
       + '    })\n'
       + '    return () => { setOllamaUpdater(undefined) }\n'
       + "  }, 'ui-model-selection: local Ollama update')\n",

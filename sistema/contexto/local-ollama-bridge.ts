@@ -1,5 +1,5 @@
 /**
- * Puente para actualizar Ollama (añadido por dpseek-local-updater).
+ * Puente para las actualizaciones de Ollama y de la app (añadido por dpseek-local-updater).
  *
  * El selector de modelos (ui-model-selection) tiene acceso a las llamadas del
  * Host y las publica aquí; el aviso de actualizaciones de abajo a la izquierda
@@ -25,10 +25,20 @@ export interface LocalOllamaUpdateInfo {
   readonly state: LocalOllamaUpdateState
 }
 
+/** Lo que cambia la versión nueva de la app para las funciones locales. */
+export interface LocalAppUpdateNotes {
+  readonly version: string
+  readonly level: 'green' | 'amber' | 'red'
+  readonly headline: string
+  readonly detail: string
+}
+
 /** Llamadas al Host. */
 export interface LocalOllamaUpdater {
   info: (force: boolean) => Promise<LocalOllamaUpdateInfo>
   start: () => Promise<{ readonly started: boolean }>
+  /** Novedades de la versión nueva de la app (null si no se pueden leer). */
+  appNotes: (version: string) => Promise<LocalAppUpdateNotes | null>
 }
 
 interface Bridge {

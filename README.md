@@ -45,8 +45,9 @@ No hay que hacer nada:
 
 ### Aviso antes de instalar
 
-Antes de «Install and Restart», la app te dice qué cambia para las funciones de
-esta versión local, con un semáforo:
+El semáforo ya se ve en el panel de **Update** (abajo a la izquierda) y, antes de
+«Install and Restart», la app te dice qué cambia para las funciones de
+esta versión local:
 
 - 🟢 **verde:** nada de lo nuestro se ve afectado;
 - 🟡 **ámbar:** DeepSeek ha cambiado código que usa alguna función nuestra (se ha
@@ -283,11 +284,12 @@ Cómo funciona:
 
 ## Actualizar Ollama desde la app
 
-Cuando sale una versión nueva de Ollama, aparece el botón **Update** de abajo a la
-izquierda (el mismo que avisa de las actualizaciones de la app). Abre un panel con
-una fila por actualización: la de la app (su camino de siempre, con el aviso antes de
-instalar) y la de Ollama, con sus novedades en «What's new». Si hay de las dos, el
-botón lleva un «2». Sin actualización de Ollama, el botón es el oficial tal cual.
+Las actualizaciones de la app y de Ollama comparten un solo botón, **Update**, abajo a
+la izquierda: sale cuando hay alguna (con un «2» si hay de las dos) y abre un panel con
+una fila por actualización, cada una con su botón y sus novedades en «What's new».
+En la fila de la app, las novedades son el semáforo y el resumen de lo que la versión
+nueva cambia para las funciones locales, y su botón lleva a la confirmación de siempre
+(instalar y reiniciar, más tarde o saltar esa versión).
 **Update** en la fila de Ollama:
 
 1. espera a que terminen las respuestas en marcha (el instalador cierra Ollama);
