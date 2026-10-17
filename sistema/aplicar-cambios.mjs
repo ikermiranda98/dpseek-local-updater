@@ -2238,9 +2238,10 @@ optional('el subchat se abre al 40 % de la zona de chat', (tx) => {
 // Botón «Improve message» en la barra del cuadro de texto, junto al «+» y con su
 // mismo aspecto: el modelo del chat (en su misma variante de contexto, así Ollama no
 // lo recarga) reescribe el mensaje, o convierte un documento (PDF, DOCX o texto) en
-// un prompt, con los ficheros del proyecto a la vista para no inventar nombres y
-// preguntando si falta algo. La sugerencia sale editable encima del cuadro; «Use» la
-// pone en el cuadro, sin enviarla. Código: sistema/mejorar/.
+// un prompt (lo que hay que hacer con él, y el documento debajo palabra por palabra),
+// con los ficheros del proyecto a la vista para no inventar nombres y preguntando si
+// falta algo. La sugerencia sale editable encima del cuadro; «Use» la pone en el
+// cuadro, sin enviarla. Código: sistema/mejorar/.
 
 optional('mejorar un mensaje antes de enviarlo', (tx) => {
   const better = join(here, 'mejorar')
@@ -2272,6 +2273,12 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       '  readonly think?: boolean',
       '  /** Id chosen by the caller to follow (localImproveProgress) and cancel (localImproveCancel) this request. */',
       '  readonly jobId?: string',
+      "  /** What to do with the document: implement, review, plan, explain, or the user's own words. */",
+      '  readonly intent?: string',
+      '  /** Only copy the key passages of the document, word for word (no prompt). */',
+      '  readonly keyParts?: boolean',
+      '  /** Change the previous suggestion with one sentence from the user. */',
+      '  readonly refine?: { readonly previous: string; readonly request: string }',
       '}',
       '',
       '/** Local build: one improve request, by the id its caller chose. */',
@@ -2290,11 +2297,13 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       '  readonly cancelled: boolean',
       '}',
       '',
-      '/** Local build: the suggested prompt, questions when something is missing, a note and how long it took. */',
+      '/** Local build: the suggested prompt, questions when something is missing, a note, the document block and how long it took. */',
       'export interface SessionLocalImproveValue {',
       '  readonly text: string',
       '  readonly questions: readonly string[]',
       '  readonly note?: string',
+      '  /** How the document goes under the prompt: its headings and, when asked for, its key passages. */',
+      '  readonly document?: { readonly heading: string; readonly keyHeading: string; readonly key?: string }',
       '  readonly ms: number',
       '}',
       '',
@@ -2356,6 +2365,9 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       '        ...request.answers === undefined ? {} : { answers: request.answers },',
       '        ...request.style === undefined ? {} : { style: request.style },',
       '        ...request.think === undefined ? {} : { think: request.think },',
+      '        ...request.intent === undefined ? {} : { intent: request.intent },',
+      '        ...request.keyParts === undefined ? {} : { keyParts: request.keyParts },',
+      '        ...request.refine === undefined ? {} : { refine: request.refine },',
       '      }, jobSignal, progress))',
       '      return { ...result, ms: Date.now() - started }',
       '    } catch (error) {',
@@ -2400,11 +2412,19 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       + '      improve: async (sessionId, draft, options) => {\n'
       + '        const result = await ctx.remote.session.localImprovePrompt({\n'
       + '          sessionId: sessionId as SessionId, draft,\n'
-      + '          ...options?.document === undefined ? {} : { document: options.document },\n'
+      + '          ...options?.document === undefined ? {} : {\n'
+      + '            document: {\n'
+      + '              name: options.document.name, text: options.document.text,\n'
+      + '              ...options.document.pages === undefined ? {} : { pages: options.document.pages },\n'
+      + '            },\n'
+      + '          },\n'
       + '          ...options?.answers === undefined ? {} : { answers: options.answers },\n'
       + '          ...options?.style === undefined ? {} : { style: options.style },\n'
       + '          ...options?.think === undefined ? {} : { think: options.think },\n'
       + '          ...options?.jobId === undefined ? {} : { jobId: options.jobId },\n'
+      + '          ...options?.intent === undefined ? {} : { intent: options.intent },\n'
+      + '          ...options?.keyParts === undefined ? {} : { keyParts: options.keyParts },\n'
+      + '          ...options?.refine === undefined ? {} : { refine: options.refine },\n'
       + '        })\n'
       + '        if (!result.ok) throw new Error(result.error.message)\n'
       + '        return result.value\n'
@@ -2462,6 +2482,21 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       + '            <LocalImprove sessionId={sessionId} draft={draft} subagent={subagent !== null} className={css.add}\n'
       + "              disabled={locked} setDraft={(text) => { inputActions?.setDraft(text) }} />\n",
     '<LocalImprove sessionId={sessionId}')
+  // Encima del texto, el hueco de los documentos cargados para ✨ (píldoras, como los adjuntos).
+  tx.replace(inputBar, '        })}\n        {/* One scrollport, one text surface:',
+    '        })}\n'
+      + '        {/* Local build: documents loaded for «Improve message» (LocalImprove.tsx). */}\n'
+      + '        <div data-local-improve-docs />\n'
+      + '        {/* One scrollport, one text surface:',
+    'data-local-improve-docs')
+  // Al arrastrar un fichero, sin la capa a pantalla completa: la propia barra marca los dos destinos
+  // (soltar en la barra adjunta; en ✨, prompt). Se mantiene si no hay ✨ o si no se puede adjuntar.
+  const attachmentsView = join(repo, 'packages', 'client', 'ui-attachment', 'src', 'client', 'ComposerAttachments.tsx')
+  tx.replace(attachmentsView, '      {dragActive && (\n        <DropOverlay',
+    '      {/* Local build: with «Improve message» the composer shows the drop targets itself (LocalImprove.tsx). */}\n'
+      + "      {dragActive && (!canAcceptDrop || document.querySelector('[data-local-improve]') === null) && (\n"
+      + '        <DropOverlay',
+    "document.querySelector('[data-local-improve]')")
 })
 
 // ── 25. Chat más ligero: scroll fluido y mensajes antiguos sin pulsar ───────────

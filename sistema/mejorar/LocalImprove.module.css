@@ -1,17 +1,21 @@
-/* «Improve message» (dpseek-local-updater). El botón usa el estilo del «+» de la barra; esto es su animación, la tarjeta, el documento y las preguntas. */
+/* «Improve message» (dpseek-local-updater). El botón usa el estilo del «+» de la barra; esto es su
+   animación y sus avisos, la tarjeta (mínima: un botón y el resto enlaces), los documentos cargados
+   y los dos destinos al arrastrar ficheros. */
 
-/* Mientras escribe la sugerencia, el icono late. */
+/* Mientras trabaja, el icono late. */
 .busy {
   animation: pulse 1s ease-in-out infinite;
 }
 
 @keyframes pulse { 50% { opacity: 0.35; } }
 
-/* La tarjeta de la sugerencia, encima del cuadro de texto. */
+/* La tarjeta, encima del cuadro de texto y con su ancho. */
 .card {
   position: fixed;
   z-index: 1000;
   box-sizing: border-box;
+  display: grid;
+  gap: 8px;
   width: min(560px, calc(100vw - 24px));
   padding: 10px 12px;
   border-radius: var(--dsw-radius-md);
@@ -24,20 +28,68 @@
 
 .head {
   display: flex;
-  justify-content: space-between;
-  margin-bottom: 6px;
-  font-weight: 500;
+  gap: 10px;
+  align-items: center;
+  min-height: 20px;
+}
+
+.title {
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
 }
 
 .meta {
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
-  font-weight: 400;
+  white-space: nowrap;
+}
+
+.close {
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  cursor: default;
+}
+
+.close:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* Versiones: texto pequeño en una línea; la elegida, en color normal y subrayada. */
+.tabs {
+  display: flex;
+  gap: 12px;
+}
+
+.tab {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  cursor: default;
+}
+
+.tab:hover:not(:disabled) {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.tab[aria-selected="true"] {
+  color: var(--dsw-alias-label-primary);
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 
 .text {
   box-sizing: border-box;
   width: 100%;
+  margin: 0;
   padding: 8px 10px;
   border: 0.5px solid var(--dsw-alias-border-l1);
   border-radius: var(--dsw-radius-sm);
@@ -49,7 +101,8 @@
   resize: vertical;
 }
 
-.text:focus {
+.text:focus,
+.answer:focus {
   outline: none;
   border-color: var(--dsw-alias-state-business-primary);
 }
@@ -59,76 +112,9 @@
   color: var(--dsw-alias-state-error-primary);
 }
 
-.actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  margin-top: 8px;
-}
-
-.spacer {
-  flex: 1;
-}
-
-.use,
-.dismiss,
-.secondary {
-  height: 26px;
-  padding: 0 12px;
-  border-radius: var(--dsw-radius-sm);
-  font-size: 12px;
-  cursor: default;
-}
-
-.use {
-  border: 0;
-  background: var(--dsw-alias-state-business-primary);
-  color: #fff;
-}
-
-.dismiss,
-.secondary {
-  border: 0.5px solid var(--dsw-alias-border-l1);
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.secondary:disabled {
-  opacity: 0.5;
-}
-
-/* El documento adjunto. */
-.chip {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  max-width: 100%;
-  margin-bottom: 6px;
-  padding: 2px 4px 2px 8px;
-  border: 0.5px solid var(--dsw-alias-border-l1);
-  border-radius: var(--dsw-radius-sm);
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-}
-
-.chipName {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chipRemove {
-  padding: 0 4px;
-  border: 0;
-  background: none;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 11px;
-  cursor: default;
-}
-
 .status,
 .note {
-  margin: 0 0 6px;
+  margin: 0;
   color: var(--dsw-alias-label-tertiary);
   font-size: 12px;
 }
@@ -137,16 +123,78 @@
   animation: pulse 1.4s ease-in-out infinite;
 }
 
-/* Preguntas cuando falta algo: contestarlas rehace la sugerencia. */
+/* Un solo botón destacado; lo demás, enlaces. */
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  align-items: center;
+}
+
+.use {
+  height: 26px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-state-business-primary);
+  color: #fff;
+  font-size: 12px;
+  cursor: default;
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.link:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.link:disabled {
+  opacity: 0.5;
+}
+
+/* Qué hacer con los documentos: píldoras en una fila. */
+.intent {
+  display: grid;
+  gap: 6px;
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.choice {
+  height: 24px;
+  padding: 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  cursor: default;
+}
+
+.choice:hover,
+.choiceMain {
+  border-color: var(--dsw-alias-state-business-primary);
+  color: var(--dsw-alias-label-primary);
+}
+
+/* Preguntas cuando falta algo, y «Not quite?» para corregir con una frase. */
 .questions {
   display: grid;
   gap: 6px;
-  margin-top: 8px;
-}
-
-.questionsTitle {
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
 }
 
 .question {
@@ -166,38 +214,6 @@
   color: var(--dsw-alias-label-primary);
   font: inherit;
   font-size: 13px;
-}
-
-.answer:focus {
-  outline: none;
-  border-color: var(--dsw-alias-state-business-primary);
-}
-
-/* Versiones: sugerida, corta, detallada y en pasos. */
-.tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-
-.tab {
-  height: 24px;
-  padding: 0 10px;
-  border: 0.5px solid var(--dsw-alias-border-l1);
-  border-radius: 12px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 12px;
-  cursor: default;
-}
-
-.tab[aria-selected="true"] {
-  border-color: var(--dsw-alias-state-business-primary);
-  color: var(--dsw-alias-label-primary);
-}
-
-.tab:disabled {
-  opacity: 0.6;
 }
 
 /* Lo que el modelo lleva escrito (o pensado), mientras llega. */
@@ -222,7 +238,11 @@
   opacity: 0.8;
 }
 
-/* «Show changes»: el texto nuevo con lo añadido y lo quitado marcados. */
+.preview {
+  max-height: 200px;
+}
+
+/* «Changes»: el texto nuevo con lo añadido y lo quitado marcados. */
 .diff {
   box-sizing: border-box;
   overflow-y: auto;
@@ -247,7 +267,17 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* El botón avisa de un mensaje vago: color de acento, brillo suave y un punto. */
+/* Cómo van los documentos debajo del prompt: enteros o sus partes clave. */
+.attach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
+
+/* El botón avisa (mensaje vago o texto largo pegado): color de acento, brillo suave y un punto. */
 .hint {
   position: relative;
   color: var(--dsw-alias-brand-primary-new-colorprimary-new-color) !important;
@@ -271,4 +301,117 @@
 
 @media (prefers-reduced-motion: reduce) {
   .hint { animation: none; }
+}
+
+/* Con documentos cargados: el ✨ en color y cuántos hay. */
+.loaded {
+  position: relative;
+  color: var(--dsw-alias-state-business-primary) !important;
+}
+
+.count {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  box-sizing: border-box;
+  border-radius: 7px;
+  background: var(--dsw-alias-state-business-primary);
+  color: #fff;
+  font-size: 9px;
+  line-height: 13px;
+  text-align: center;
+}
+
+/* Los documentos cargados, encima del texto, como los adjuntos. */
+.docs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0 6px;
+}
+
+.pill {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  max-width: 260px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  border: 0.5px solid var(--dsw-alias-state-business-primary);
+  border-radius: 12px;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+}
+
+.pill > svg {
+  flex: none;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+.pillName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-primary);
+}
+
+.pillMeta {
+  flex: none;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.pillRemove {
+  flex: none;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  cursor: default;
+}
+
+/* Arrastrando ficheros: ✨ se convierte en un destino con su rótulo… */
+.target {
+  display: inline-flex !important;
+  flex-direction: row;
+  align-items: center;
+  width: auto !important;
+  height: 28px;
+  box-sizing: border-box;
+  gap: 5px;
+  padding: 0 10px !important;
+  border: 1.5px solid var(--dsw-alias-state-business-primary) !important;
+  border-radius: 14px !important;
+  background: var(--dsw-alias-bg-layer-2) !important;
+  color: var(--dsw-alias-state-business-primary) !important;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.target[data-over] {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, var(--dsw-alias-bg-layer-2)) !important;
+}
+
+.target > * {
+  pointer-events: none;
+}
+
+/* …y la barra entera, el destino para adjuntar (lo hace la app), con un borde y su rótulo. */
+:global([data-composer-card][data-local-drag]) {
+  position: relative;
+  outline: 1.5px dashed var(--dsw-alias-state-business-primary);
+  outline-offset: -1.5px;
+}
+
+:global([data-composer-card][data-local-drag])::after {
+  content: 'Drop to attach';
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 12px;
+  pointer-events: none;
 }

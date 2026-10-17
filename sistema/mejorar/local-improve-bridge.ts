@@ -23,16 +23,30 @@ export interface LocalImproveOptions {
   readonly think?: boolean
   /** Para seguirla (progress) y cancelarla (cancel). */
   readonly jobId?: string
+  /** Qué hacer con el documento: implement, review, plan, explain u otra cosa con tus palabras. */
+  readonly intent?: string
+  /** Solo copiar las partes clave del documento, literalmente. */
+  readonly keyParts?: boolean
+  /** Corregir la sugerencia anterior con una frase. */
+  readonly refine?: { readonly previous: string; readonly request: string }
 }
 
 /** Versiones además de la sugerida. */
 export type LocalImproveStyle = 'short' | 'detailed' | 'steps'
 
-/** La sugerencia: el prompt, las preguntas si falta algo, una nota sobre el documento y lo que tardó. */
+/** Cómo va el documento debajo del prompt: sus títulos y, si se pidieron, sus partes clave. */
+export interface LocalImproveDocumentBlock {
+  readonly heading: string
+  readonly keyHeading: string
+  readonly key?: string
+}
+
+/** La sugerencia: el prompt, las preguntas si falta algo, una nota, cómo va el documento y lo que tardó. */
 export interface LocalImproveSuggestion {
   readonly text: string
   readonly questions: readonly string[]
   readonly note?: string
+  readonly document?: LocalImproveDocumentBlock
   readonly ms: number
 }
 

@@ -195,8 +195,9 @@ Para tareas que ocuparían mucho del chat sin llenarlo:
 En la barra del cuadro de texto, junto al **+**, el botón ✨ (**Improve message**)
 reescribe tu mensaje para que la IA lo entienda sin ambigüedad (qué hacer, con qué
 ficheros o nombres y qué resultado esperas), sin cambiar lo que pides, sin responderlo
-y en tu idioma. La sugerencia sale encima del cuadro y se puede retocar: **Use** la
-pone en el cuadro (no la envía) y **Dismiss** deja lo tuyo.
+y en tu idioma. La sugerencia sale en una tarjeta pequeña encima del cuadro y se puede
+retocar: **Use** la pone en el cuadro (no la envía) y ✕ deja lo tuyo. La tarjeta es
+mínima: las versiones en una línea, el texto, un solo botón y lo demás como enlaces.
 
 - **No inventa nombres:** ve los últimos mensajes del chat y la lista de ficheros del
   proyecto (solo los nombres), así que «el archivo de la calculadora» pasa a ser
@@ -216,24 +217,46 @@ pone en el cuadro (no la envía) y **Dismiss** deja lo tuyo.
   Tarda unos minutos; la tarjeta dice qué ha corregido.
 - **Mientras escribe:** la tarjeta enseña el texto según llega (y, en los prompts largos,
   la fase: revisando o reescribiendo); **Cancel** corta la petición también en Ollama.
-- **Otras versiones:** pestañas **Suggested · Short · Detailed · Step by step**; cada una se
-  pide al pulsarla y se guarda, así cambiar entre ellas es inmediato.
+- **Otras versiones:** **Suggested · Short · Detailed · Step by step**, en una línea; cada una
+  se pide al pulsarla y se guarda, así cambiar entre ellas es inmediato.
+- **Corregir con una frase:** en **Not quite?** escribes lo que no te convence («más corto»,
+  «en Python», «no toques la parte de X») y la rehace a partir de la sugerencia, no desde cero.
+- **Volver:** después de **Use**, una flecha junto a ✨ devuelve tu texto de antes, con sus
+  documentos y la tarjeta como estaban (desaparece en cuanto cambias el texto).
+- **Cada chat guarda su tarjeta:** si cambias de chat a mitad, al volver la encuentras igual,
+  también si seguía trabajando.
 - **Think deeper:** repite la versión actual con el razonamiento del modelo activado; mejor
   para casos difíciles, pero tarda alrededor de un minuto (se ve el razonamiento mientras).
-- **Show changes:** marca palabra a palabra lo añadido (verde) y lo quitado (tachado)
+- **Changes:** marca palabra a palabra lo añadido (verde) y lo quitado (tachado)
   respecto a tu texto; los cambios solo de formato (viñetas, negritas) no cuentan.
 - **El botón avisa:** si lo que has escrito es vago («arregla eso», «no va», «hazlo como te
-  dije»), al dejar de escribir el ✨ se pone de color con un punto. No cambia nada solo.
-- **De un documento a un prompt:** con el cuadro vacío, ✨ pide un fichero (PDF, DOCX
-  o texto); con texto, suéltalo sobre ✨ o usa **Add file…** en la tarjeta, y tu
-  mensaje sirve de indicación. Se lee en tu equipo, sin internet (los PDF con el
-  mismo lector que las vistas previas). Un documento largo se resume antes por partes
-  (unos segundos por parte) y la tarjeta dice qué se ha leído; uno escaneado (solo
-  imagen) no tiene texto que leer y lo avisa.
+  dije») o acabas de pegar un texto largo que conviene reorganizar, el ✨ se pone de color con
+  un punto. No cambia nada solo.
+- **De documentos a un prompt:** con el cuadro vacío, ✨ pide los ficheros (PDF, DOCX o
+  texto; uno o varios). Al arrastrar ficheros ya no sale la capa a pantalla completa: la
+  barra se marca con un borde («Drop to attach») y ✨ se convierte en **Make prompt**.
+  Soltarlos en la barra los adjunta al mensaje, como siempre; soltarlos en ✨ los carga
+  para el prompt. Los documentos cargados se ven encima del texto como píldoras con ✨ (y
+  ✨ dice cuántos hay). Lo que escribas en el cuadro es la instrucción: pulsa ✨ y la usa;
+  con el cuadro vacío, la tarjeta ofrece **Implement**, **Review**, **Plan the tasks** o
+  **Explain** en una fila. Se leen en tu equipo, sin internet (los PDF con el mismo
+  lector que las vistas previas); la píldora dice páginas o palabras y avisa (⚠) si se
+  ha cortado o hay páginas sin texto (escaneadas).
+- **Los documentos van enteros, sin resumir:** el modelo escribe solo lo que hay que hacer
+  con ellos (objetivo, ficheros, restricciones, cuándo está hecho) y van debajo del prompt,
+  palabra por palabra, cada uno con su título. Si son largos (más de unas 10 páginas),
+  **Key parts** quita lo que la IA no necesita (portada, índice, agradecimientos,
+  narrativa, repeticiones) para gastar menos contexto del chat: el modelo solo dice qué
+  párrafos sobran y el resto se copia del original tal cual, sin cambiar una palabra; las
+  tablas, las reglas y las cifras se quedan siempre, y «[…]» marca lo quitado (alrededor de
+  un minuto por cada 45.000 caracteres). **Preview** enseña lo que irá debajo.
+- **Word bien leído:** títulos como «#» (con su numeración), listas numeradas o con
+  viñetas, tablas como tablas, notas al pie; sin el texto borrado del control de cambios,
+  sin el índice y sin los códigos de los campos.
 
 Lo escribe el **modelo del chat**, en su misma variante de contexto: Ollama no lo
 recarga y, medido, el siguiente mensaje tarda lo mismo que sin usar el botón (unos 2–5 s
-la sugerencia con Qwen3.6-35B; un PDF corto, unos 4 s).
+la sugerencia con Qwen3.6-35B; el prompt de un documento, unos 5–10 s).
 
 ## Contexto de cada chat
 

@@ -6,8 +6,9 @@
  * prompt claro para la IA: qué hacer, con qué ficheros o nombres y qué resultado se
  * espera, sin cambiar lo que pides, sin responderlo y en tu idioma. Para no inventar
  * nombres ve los últimos mensajes del chat y la lista de ficheros del proyecto; si
- * falta algo importante, pregunta en lugar de adivinar. Un documento largo se
- * resume antes por partes. Nada se envía solo.
+ * falta algo importante, pregunta en lugar de adivinar. Con un documento, el modelo
+ * escribe lo que hay que hacer con él y el documento va debajo, palabra por palabra
+ * (entero, o solo sus partes clave copiadas literalmente si se pide). Nada se envía solo.
  */
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -44,6 +45,18 @@ export interface LocalImproveInput {
   readonly style?: LocalImproveStyle
   /** Con el razonamiento del modelo (más lento, para casos difíciles). */
   readonly think?: boolean
+  /** Qué hacer con el documento: implement, review, plan, explain u otra cosa con tus palabras. */
+  readonly intent?: string
+  /** Solo copiar las partes clave del documento, literalmente (sin escribir el prompt). */
+  readonly keyParts?: boolean
+  /** Corregir la sugerencia anterior con una frase («más corto», «no toques X»). */
+  readonly refine?: LocalImproveRefine
+}
+
+/** La sugerencia anterior y lo que el usuario quiere cambiar de ella. */
+export interface LocalImproveRefine {
+  readonly previous: string
+  readonly request: string
 }
 
 /** Versiones que se pueden pedir además de la sugerida. */
@@ -52,11 +65,19 @@ export type LocalImproveStyle = 'short' | 'detailed' | 'steps'
 /** Cómo va una petición: la fase y lo que el modelo lleva escrito (o pensado). */
 export type LocalImproveProgress = (phase: string, text: string) => void
 
-/** El prompt sugerido, las preguntas (si falta algo) y una nota sobre el documento. */
+/** Cómo va el documento debajo del prompt: sus títulos (en el idioma del prompt) y, si se pidieron, sus partes clave. */
+export interface LocalImproveDocumentBlock {
+  readonly heading: string
+  readonly keyHeading: string
+  readonly key?: string
+}
+
+/** El prompt sugerido, las preguntas (si falta algo), una nota y cómo va el documento. */
 export interface LocalImproveResult {
   readonly text: string
   readonly questions: readonly string[]
   readonly note?: string
+  readonly document?: LocalImproveDocumentBlock
 }
 
 /** Cuánto contexto del chat se le pasa: lo justo para entender las referencias. */
@@ -72,19 +93,31 @@ const SKIPPED_DIRS = new Set([
   '.ruff_cache', '.tox', 'dist', 'build', 'out', 'target', '.next', '.nuxt', '.cache', '.idea', '.vscode', 'coverage',
 ])
 
-/** Un documento hasta este tamaño va entero; uno mayor se resume antes por partes. */
-const DIRECT_CHARS = 20_000
-const PART_CHARS = 12_000
-/** Más allá, solo el principio: resumir cientos de páginas tardaría minutos. */
+/** Lo que lee el modelo para escribir el prompt: hasta aquí entero; de un documento mayor, el principio y sus títulos. */
+const HEADER_CHARS = 40_000
+const OUTLINE_CHARS = 4000
+/** Las partes clave se eligen por trozos de este tamaño (el modelo solo contesta números: pueden ser grandes). */
+const PART_CHARS = 24_000
+/** Lo que cabe en el mensaje (el lector de documentos ya corta ahí). */
 const DOCUMENT_CHARS = 240_000
+
+/** Qué hacer con el documento, si el usuario elige uno de los botones de la tarjeta. */
+const INTENTS: Readonly<Record<string, string>> = {
+  implement: 'Implement in the project what the document describes.',
+  review: 'Review the document itself before anything is built: find gaps, contradictions, ambiguities, risks and'
+    + ' missing acceptance criteria, and propose fixes. Do not write code.',
+  plan: 'Turn the document into an ordered plan of small tasks, each with how to check it is done. Do not implement'
+    + ' anything yet.',
+  explain: 'Explain the document in plain words: its purpose, its main parts and the decisions it asks for.',
+}
 
 const INSTRUCTIONS = [
   'You turn what the user wrote (a draft message, a document, or both) into a clear prompt for an AI coding assistant',
   'that works in the user\'s project.',
   'Rules:',
   '- Keep the user\'s intent and add no requirements of your own: no tests, refactors, files or details (numbers,',
-  '  limits, names) the user did not ask for. When a document is given, carry over its goals, requirements and',
-  '  constraints faithfully, and nothing else. The examples only show the format: never take details from them.',
+  '  limits, names) the user did not ask for. When a document is given, keep to what it and the user ask for.',
+  '  The examples only show the format: never take details from them.',
   '- Use only names (files, folders, functions, values) that appear in the draft, the recent conversation, the project',
   '  files or the document. Never invent or rename one. If the user refers to a file loosely and the project files',
   '  contain a clear match, write its exact path; otherwise keep the user\'s words. Name only the files the request',
@@ -171,11 +204,30 @@ const REVIEW_INSTRUCTIONS = [
   'If there is nothing to fix, reply "-".',
 ].join('\n')
 
-const SUMMARY_INSTRUCTIONS = [
-  'You read one part of a document that a user wants to turn into a task for an AI coding assistant.',
-  'Extract everything relevant for that task: goals, requirements, constraints, names (files, functions, fields, values),',
-  'expected results and acceptance criteria. Keep the page markers like [p. 3] next to what they refer to. Be concise:',
-  'short bullet points, in the language of the document, no commentary. If the part has nothing relevant, reply "-".',
+/** Con un documento, el prompt va delante de él: no lo repite. */
+const DOCUMENT_RULES = [
+  'About the document: it is attached word for word right after your prompt, so the assistant will read all of it there.',
+  'Your prompt goes before it and only frames the work: what to do with the document (the user\'s intent), which project',
+  'files are involved, the user\'s own constraints and how to check that it is done. Refer to it as "the document below".',
+  'Do not restate its requirements, values or steps (write, for example, "Requirements: those in the document below"),',
+  'do not list the document itself as a project file, and do not add instructions about how you wrote the prompt.',
+  'Name project files only when the document or the user names them or they clearly match what it describes;',
+  'otherwise leave the files out.',
+].join(' ')
+
+/**
+ * Partes clave de un documento largo: el modelo solo dice qué bloques (párrafos, listas, tablas)
+ * sobran, por su número, y el resto se copia del original tal cual. Así no se puede cambiar ni una
+ * palabra y es rápido (apenas escribe). Se le pregunta qué sobra, no qué se queda: ante la duda, se queda.
+ */
+const KEY_INSTRUCTIONS = [
+  'You trim one part of a document that a user will give to an AI assistant, to save space. Each block starts with',
+  'its number in brackets, like [12]. List only the blocks the assistant clearly does not need: cover and title-page',
+  'text, table of contents, acknowledgements, background or narrative with no instruction or fact to act on,',
+  'passages that repeat an earlier block, and legal boilerplate. Never list a block that states a goal, requirement,',
+  'rule, criterion, constraint, value, threshold, name (files, functions, fields), command, interface, step or result,',
+  'and never list a table. Headings are handled for you: do not list them. When unsure, do not list a block.',
+  'Reply only with the numbers of the blocks to leave out, as ranges like "3, 7-9", or "-" if every block is needed.',
 ].join(' ')
 
 function ollamaUrl(): string {
@@ -350,63 +402,151 @@ const reporter = (progress: LocalImproveProgress | undefined, phase: string) =>
     else progress(phase, text)
   }
 
-/** Resúmenes ya hechos, por documento: al responder a las preguntas no se vuelve a leer entero. */
-const summaries = new Map<string, { text: string; note?: string }>()
+/** Partes clave ya elegidas, por documento: cambiar de versión no las vuelve a pedir. */
+const keyCache = new Map<string, { key: string; note: string }>()
 
-/** Trozos de como mucho `size` caracteres, cortando por párrafos cuando se puede. */
-function parts(text: string, size: number): string[] {
+const words = (text: string): number => text.split(/\s+/).filter((word) => word !== '').length
+
+/** Un bloque más largo que esto (una lista larga) se parte por sus elementos para poder quedarse con parte. */
+const BLOCK_CHARS = 1200
+
+/**
+ * Los bloques del documento: lo que va entre líneas en blanco (un párrafo, una lista, una tabla),
+ * cada título aparte y las listas largas por elementos (con sus subelementos).
+ */
+function blocks(text: string): string[] {
   const result: string[] = []
-  let rest = text
-  while (rest.length > size) {
-    const cut = rest.lastIndexOf('\n\n', size)
-    const at = cut > size / 2 ? cut : (rest.lastIndexOf('\n', size) > size / 2 ? rest.lastIndexOf('\n', size) : size)
-    result.push(rest.slice(0, at))
-    rest = rest.slice(at)
+  for (const block of text.replace(/\r\n?/g, '\n').split(/\n[ \t]*\n/)) {
+    let current: string[] = []
+    const flush = (): void => {
+      const value = current.join('\n').replace(/\s+$/, '')
+      if (value.trim() !== '') result.push(value)
+      current = []
+    }
+    const lines = block.split('\n')
+    const long = block.length > BLOCK_CHARS && !lines.every((line) => line.trimStart().startsWith('|'))
+    for (const line of lines) {
+      const heading = /^#{1,6} /.test(line)
+      if (heading || (long && current.length > 0 && /^(?:[-*•+]|\d+[.)])\s/.test(line))) flush()
+      current.push(line)
+      if (heading) flush()
+    }
+    flush()
   }
-  if (rest.trim() !== '') result.push(rest)
   return result
 }
 
-/** Última página citada en un texto con marcas «[p. N]». */
-function lastPage(text: string): number | undefined {
-  const pages = [...text.matchAll(/\[p\. (\d+)\]/g)].map((match) => Number(match[1]))
-  return pages.length === 0 ? undefined : Math.max(...pages)
+/** Los bloques en grupos de como mucho `size` caracteres, sin partir ninguno. */
+function groups(list: readonly string[], size: number): { first: number; blocks: string[] }[] {
+  const result: { first: number; blocks: string[] }[] = []
+  let current: { first: number; blocks: string[] } | null = null
+  let length = 0
+  for (const [index, block] of list.entries()) {
+    if (current === null || (length + block.length > size && current.blocks.length > 0)) {
+      current = { first: index, blocks: [] }
+      result.push(current)
+      length = 0
+    }
+    current.blocks.push(block)
+    length += block.length + 8
+  }
+  return result
+}
+
+/** @returns los números de «1-4, 7, 9-12», o null si la respuesta no trae ninguno. */
+function ranges(reply: string): Set<number> | null {
+  const found = new Set<number>()
+  for (const match of reply.matchAll(/(\d+)\s*(?:[-–—]|to|a)\s*(\d+)|(\d+)/g)) {
+    const from = Number(match[1] ?? match[3])
+    const to = Number(match[2] ?? match[3])
+    for (let value = from; value <= Math.min(to, from + 5000); value++) found.add(value)
+  }
+  return found.size === 0 ? null : found
 }
 
 /**
- * El documento listo para el prompt: entero si es corto; si no, resumido por partes.
- * @returns el texto que ve el modelo y, si se ha resumido o recortado, una nota para el usuario.
+ * Las partes clave de un documento: el modelo elige los bloques por su número y se copian del
+ * original tal cual, en su orden, con el título de su sección y «[…]» donde se ha quitado algo.
+ * @returns el texto y una nota con cuánto se ha quedado.
  */
-async function documentText(model: string, document: LocalImproveDocument, signal: AbortSignal,
-  progress?: LocalImproveProgress): Promise<{ text: string; note?: string }> {
-  if (document.text.length <= DIRECT_CHARS) return { text: document.text }
-  const key = createHash('sha256').update(model).update('\0').update(document.text).digest('hex')
-  const known = summaries.get(key)
+async function keyParts(model: string, document: LocalImproveDocument, signal: AbortSignal,
+  progress?: LocalImproveProgress): Promise<{ key: string; note: string }> {
+  const hash = createHash('sha256').update(model).update('\0').update(document.text).digest('hex')
+  const known = keyCache.get(hash)
   if (known !== undefined) return known
-  const cut = document.text.length > DOCUMENT_CHARS
-  const used = cut ? document.text.slice(0, DOCUMENT_CHARS) : document.text
-  const pieces = parts(used, PART_CHARS)
-  const notes: string[] = []
-  for (const [index, piece] of pieces.entries()) {
-    const summary = await chat(model, [
-      { role: 'system', content: SUMMARY_INSTRUCTIONS },
-      { role: 'user', content: `Part ${String(index + 1)} of ${String(pieces.length)} of "${document.name}":\n\n${piece}` },
-    ], 600, signal, { onText: reporter(progress, `reading part ${String(index + 1)} of ${String(pieces.length)}`) })
-    if (summary !== '' && summary !== '-') notes.push(summary)
+  const list = blocks(document.text.slice(0, DOCUMENT_CHARS))
+  const chunks = groups(list, PART_CHARS)
+  const keep = new Set<number>()
+  let unsure = 0
+  for (const [index, chunk] of chunks.entries()) {
+    const numbered = chunk.blocks.map((block, offset) => `[${String(chunk.first + offset + 1)}] ${block}`).join('\n\n')
+    const reply = await chat(model, [
+      { role: 'system', content: KEY_INSTRUCTIONS },
+      { role: 'user', content: `Part ${String(index + 1)} of ${String(chunks.length)} of "${document.name}" (blocks ${String(chunk.first + 1)}–${String(chunk.first + chunk.blocks.length)}):\n\n${numbered}` },
+    ], 400, signal, {
+      timeoutMs: 300_000,
+      onText: reporter(progress, `choosing the key parts (part ${String(index + 1)} of ${String(chunks.length)})`),
+    })
+    const dropped = reply.trim() === '-' ? new Set<number>() : ranges(reply)
+    // Sin una respuesta que se entienda, el trozo se queda entero: nunca se pierde nada por un fallo.
+    if (dropped === null) unsure++
+    for (let offset = 0; offset < chunk.blocks.length; offset++) {
+      const number = chunk.first + offset + 1
+      const block = chunk.blocks[offset] ?? ''
+      // Los títulos, no: se quedan solo si queda algo de su sección (abajo).
+      if (/^#{1,6} /.test(block)) continue
+      // Las tablas, aunque el modelo las quite: son datos que el prompt no puede recuperar de otro sitio.
+      if (dropped === null || !dropped.has(number) || block.trimStart().startsWith('|')) keep.add(number - 1)
+    }
   }
-  const until = cut ? lastPage(used) : undefined
-  const scope = cut
-    ? (until !== undefined && document.pages !== undefined
-      ? `pages 1–${String(until)} of ${String(document.pages)}`
-      : `the first ${String(Math.round(DOCUMENT_CHARS / 1000))}k characters`)
-    : 'the whole document'
+  if (keep.size === 0) throw new Error('the model found no key parts in the document')
+  // Cada bloque que se queda lleva los títulos de sus secciones (el suyo y los de encima).
+  const open: number[] = []
+  for (const [index, block] of list.entries()) {
+    const level = /^(#{1,6}) /.exec(block)?.[1]?.length
+    if (level !== undefined) {
+      open.length = Math.min(open.length, level - 1)
+      open[level - 1] = index
+    } else if (keep.has(index)) {
+      for (const heading of open) if (heading !== undefined) keep.add(heading)
+    }
+  }
+  const out: string[] = []
+  let previous = -1
+  for (const index of [...keep].sort((a, b) => a - b)) {
+    if (index > previous + 1) out.push('[…]')
+    out.push(list[index] ?? '')
+    previous = index
+  }
+  if (previous < list.length - 1) out.push('[…]')
+  const key = out.join('\n\n')
+  const share = Math.round(words(key) / Math.max(1, words(document.text)) * 100)
   const result = {
-    text: `(Summary of ${scope}, made part by part.)\n\n${notes.join('\n\n')}`,
-    note: `Long document: read ${scope}, summarised in ${String(pieces.length)} parts.`,
+    key,
+    note: `Key parts: ${String(share)}% of the document, copied as they are (${String(keep.size)} of ${String(list.length)} blocks).`
+      + (unsure > 0 ? ` ${String(unsure)} part${unsure === 1 ? '' : 's'} kept whole: the model's choice was unclear.` : ''),
   }
-  summaries.set(key, result)
-  if (summaries.size > 5) summaries.delete(summaries.keys().next().value as string)
+  keyCache.set(hash, result)
+  if (keyCache.size > 5) keyCache.delete(keyCache.keys().next().value as string)
   return result
+}
+
+/** Lo que lee el modelo del documento para escribir el prompt: entero, o el principio y los títulos del resto. */
+function documentForPrompt(document: LocalImproveDocument): string {
+  if (document.text.length <= HEADER_CHARS) return document.text
+  const at = document.text.lastIndexOf('\n', HEADER_CHARS)
+  const cut = at > HEADER_CHARS / 2 ? at : HEADER_CHARS
+  let outline = document.text.slice(cut).split('\n').filter((line) => /^#{1,6} /.test(line)).join('\n')
+  if (outline.length > OUTLINE_CHARS) outline = `${outline.slice(0, outline.lastIndexOf('\n', OUTLINE_CHARS))}\n…`
+  return `${document.text.slice(0, cut)}\n\n[… the document goes on${outline === '' ? '' : `; headings of the rest:\n${outline}`}]`
+}
+
+/** Los títulos con los que va el documento debajo del prompt, en su idioma. */
+function documentBlock(document: LocalImproveDocument, spanish: boolean): LocalImproveDocumentBlock {
+  const count = document.pages === undefined ? '' : ` (${String(document.pages)} ${spanish ? 'páginas' : 'pages'})`
+  return spanish
+    ? { heading: `Documento: ${document.name}${count}`, keyHeading: `Documento: ${document.name}, partes clave copiadas literalmente` }
+    : { heading: `Document: ${document.name}${count}`, keyHeading: `Document: ${document.name}, key passages copied word for word` }
 }
 
 /** Lo que pide cada versión además de las reglas de siempre. */
@@ -422,39 +562,62 @@ const STYLES: Readonly<Record<LocalImproveStyle, string>> = {
 }
 
 /** El mensaje para el modelo con todo lo que tiene que ver. */
-function userMessage(input: LocalImproveInput, document?: { name: string; text: string }): string {
+function userMessage(input: LocalImproveInput): string {
   const conversation = input.recent.length === 0 ? '(no earlier messages)'
     : input.recent.map((turn) => `${turn.role === 'user' ? 'User' : 'Assistant'}: ${turn.text}`).join('\n\n')
   const files = input.files.length === 0 ? '(none listed)' : input.files.join('\n')
   const draft = input.draft.trim()
+  const document = input.document
+  const intent = input.intent === undefined || input.intent.trim() === '' ? undefined
+    : INTENTS[input.intent] ?? `In the user's words: "${input.intent.trim()}"`
+  const spanish = isSpanish(input)
   const sections = [
     `Recent conversation:\n${conversation}`,
     `Project files:\n${files}`,
-    ...document === undefined ? [] : [`Document "${document.name}":\n${document.text}`],
-    draft === '' ? 'Draft: (empty: turn the document into the prompt)' : `Draft to improve:\n${draft}`,
+    ...document === undefined ? [] : [
+      `Document "${document.name}" (attached after your prompt under the heading "${documentBlock(document, spanish).heading}"):\n`
+        + documentForPrompt(document),
+      DOCUMENT_RULES,
+    ],
+    ...intent === undefined ? [] : [`What the user wants to do with the document: ${intent}`],
+    draft !== '' ? `Draft to improve:\n${draft}`
+      : document === undefined ? 'Draft: (empty)' : 'Draft: (empty: write the prompt from the user\'s intent and the document)',
     ...input.answers === undefined || input.answers.length === 0 ? [] : [
       'The user answered your questions (use the answers and do not ask them again):\n'
         + input.answers.map((item) => `- ${item.question} → ${item.answer}`).join('\n'),
     ],
     ...input.style === undefined ? [] : [STYLES[input.style]],
   ]
-  const source = draft !== '' ? draft : document?.text ?? ''
-  if (looksSpanish(source)) sections.push('Write the prompt in Spanish.')
+  if (spanish) sections.push('Write the prompt in Spanish.')
   return sections.join('\n\n')
+}
+
+/** El idioma del prompt: el del borrador, el de lo que pidió con sus palabras o el del documento. */
+function isSpanish(input: LocalImproveInput): boolean {
+  const own = input.intent !== undefined && INTENTS[input.intent] === undefined ? input.intent.trim() : ''
+  const source = input.draft.trim() || own || input.document?.text.slice(0, 20_000) || ''
+  return looksSpanish(source)
 }
 
 /**
  * Pide el prompt mejorado.
  * @param model - modelo de Ollama (si es el del chat, conviene su variante de contexto para no recargarlo).
- * @param input - borrador, mensajes recientes, ficheros del proyecto, documento, respuestas, versión y razonamiento.
+ * @param input - borrador, mensajes recientes, ficheros del proyecto, documento, qué hacer con él, respuestas,
+ *   versión y razonamiento.
  * @param signal - cancelación.
  * @param progress - avisa de la fase y de lo que lleva escrito (la tarjeta lo enseña mientras llega).
- * @returns el prompt, las preguntas que hagan falta y una nota si el documento se resumió.
+ * @returns el prompt, las preguntas que hagan falta y, con un documento, cómo va debajo del prompt.
  */
 export async function localImprovePrompt(model: string, input: LocalImproveInput, signal: AbortSignal,
   progress?: LocalImproveProgress): Promise<LocalImproveResult> {
-  if (input.document === undefined && localIsLongPrompt(input.draft)) return restructure(model, input, signal, progress)
-  const document = input.document === undefined ? undefined : await documentText(model, input.document, signal, progress)
+  const document = input.document
+  if (input.refine !== undefined) return refine(model, input, input.refine, signal, progress)
+  if (document === undefined && localIsLongPrompt(input.draft)) return restructure(model, input, signal, progress)
+  const block = document === undefined ? undefined : documentBlock(document, isSpanish(input))
+  if (input.keyParts === true && document !== undefined && block !== undefined) {
+    const { key, note } = await keyParts(model, document, signal, progress)
+    return { text: '', questions: [], note, document: { ...block, key } }
+  }
   const text = await chat(model, [
     { role: 'system', content: INSTRUCTIONS },
     // Con razonamiento, sin los ejemplos: respuestas resueltas sin pensar le enseñan a no pensar.
@@ -462,12 +625,14 @@ export async function localImprovePrompt(model: string, input: LocalImproveInput
       { role: 'user', content: userMessage(example.input) },
       { role: 'assistant', content: example.answer },
     ]),
-    { role: 'user', content: userMessage(input, document === undefined || input.document === undefined
-      ? undefined : { name: input.document.name, text: document.text }) },
-  ], input.document === undefined && input.style !== 'detailed' ? 500 : 900, signal,
-  { think: input.think === true, onText: reporter(progress, 'writing') })
+    { role: 'user', content: userMessage(input) },
+  ], input.style === 'detailed' || (document !== undefined && input.style !== 'short') ? 900 : 500, signal, {
+    think: input.think === true, onText: reporter(progress, 'writing'),
+    // Leer un documento largo antes de escribir lleva su tiempo.
+    ...document === undefined ? {} : { timeoutMs: 300_000 },
+  })
   const answer = splitAnswer(text)
-  return { text: answer.body, questions: answer.questions, ...document?.note === undefined ? {} : { note: document.note } }
+  return { text: answer.body, questions: answer.questions, ...block === undefined ? {} : { document: block } }
 }
 
 /** Lo que escribe el modelo, sin cabeceras ni comillas, separado de sus preguntas y notas. */
@@ -485,6 +650,32 @@ function splitAnswer(text: string): { body: string; questions: string[]; notes: 
       .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter((line) => line !== '')
   }
   return { body, questions: lines(QUESTIONS.exec(clean)).slice(0, 2), notes: lines(NOTES.exec(clean)).slice(0, 3) }
+}
+
+/**
+ * Corrige la sugerencia anterior con lo que pide el usuario y deja el resto igual. Si es un
+ * prompt largo, con las reglas de reorganizar (sin perder nada).
+ */
+async function refine(model: string, input: LocalImproveInput, change: LocalImproveRefine, signal: AbortSignal,
+  progress?: LocalImproveProgress): Promise<LocalImproveResult> {
+  const long = input.document === undefined && localIsLongPrompt(change.previous)
+  const predict = long ? Math.min(16_000, Math.ceil(change.previous.length / 2.5) + 800) : 900
+  const context = long ? `Original prompt:\n\n${input.draft.trim()}` : userMessage({ ...input, think: false })
+  const text = await chat(model, [
+    { role: 'system', content: long ? RESTRUCTURE_INSTRUCTIONS : INSTRUCTIONS },
+    {
+      role: 'user',
+      content: `${context}\n\nYour previous version:\n\n${change.previous}\n\nThe user wants this changed: ${change.request}\n\n`
+        + 'Rewrite your previous version applying only that change; keep everything else exactly as it is. Reply with the'
+        + ' whole new version only.' + (looksSpanish(change.previous) ? ' Write it in Spanish.' : ''),
+    },
+  ], predict, signal, {
+    think: input.think === true, onText: reporter(progress, 'writing'),
+    timeoutMs: Math.max(180_000, predict * 60),
+  })
+  const answer = splitAnswer(text)
+  const block = input.document === undefined ? undefined : documentBlock(input.document, isSpanish(input))
+  return { text: answer.body, questions: answer.questions, ...block === undefined ? {} : { document: block } }
 }
 
 /**
