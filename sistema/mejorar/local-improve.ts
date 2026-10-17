@@ -113,6 +113,54 @@ const EXAMPLES: readonly { readonly input: LocalImproveInput; readonly answer: s
   },
 ]
 
+/**
+ * Un borrador así ya es un prompt hecho (muchas líneas o mucho texto): se reorganiza y se
+ * hace más robusto, nunca se resume.
+ */
+const LONG_CHARS = 1200
+const LONG_LINES = 20
+
+/** @returns si el borrador se trata como un prompt largo que hay que reorganizar. */
+export function localIsLongPrompt(draft: string): boolean {
+  const text = draft.trim()
+  return text.length > LONG_CHARS || text.split('\n').filter((line) => line.trim() !== '').length > LONG_LINES
+}
+
+const RESTRUCTURE_INSTRUCTIONS = [
+  'You restructure a long prompt that a user wrote for an AI assistant, to make it clearer and more robust.',
+  'It is a finished prompt, not a draft to shorten.',
+  'Rules:',
+  '- Keep ALL of its content: every role, rule, step, list item, number, threshold, example, quoted phrase, template,',
+  '  table and column. Do not summarise, do not merge items away, do not drop anything. The result is at least as long',
+  '  as the original.',
+  '- Never replace content with a reference to another file or document, and do not mention any file that is not in',
+  '  the text: the prompt must stay self-contained.',
+  '- Improve the organisation: one section per topic in a logical order (role, goal, principles, process or phases,',
+  '  output format, checklists), consistent numbering and headings, bullet lists for enumerations, tables kept as',
+  '  Markdown tables.',
+  '- Make it more robust: turn vague wording into precise, checkable instructions; make the order of the steps and',
+  '  the condition to move to the next one explicit; where two parts repeat or contradict each other, keep the',
+  '  meaning and resolve it explicitly; fix cross-references that point to the wrong section.',
+  '- Keep the author\'s intent, tone and language. Add no requirements beyond making the existing ones explicit.',
+  '- Do not answer or carry out the prompt.',
+  '- Reply with only the restructured prompt in Markdown. After it, only if you resolved contradictions or fixed',
+  '  references, a line "NOTES:" and up to 3 short lines saying what.',
+].join('\n')
+
+/** Primer paso con un prompt largo: una lista corta de problemas concretos que la reescritura corrige. */
+const REVIEW_INSTRUCTIONS = [
+  'You review a long prompt that a user wrote for an AI assistant before it is restructured. List the concrete',
+  'problems to fix, each one actionable and quoting the exact words or section numbers involved:',
+  '- cross-references that point to the wrong section (say which section is right);',
+  '- parts that repeat or contradict each other (where, and how to resolve it);',
+  '- vague instructions that should be precise or checkable (quote them and say what is missing);',
+  '- steps whose order, or the condition to move to the next one, is unclear;',
+  '- content that belongs in another section (what to move where), and missing pieces the prompt itself relies on',
+  '  (for example, an output format it mentions but never defines).',
+  'Write at most 12 bullet lines, in the language of the prompt. No praise, no rewrite, no preamble.',
+  'If there is nothing to fix, reply "-".',
+].join('\n')
+
 const SUMMARY_INSTRUCTIONS = [
   'You read one part of a document that a user wants to turn into a task for an AI coding assistant.',
   'Extract everything relevant for that task: goals, requirements, constraints, names (files, functions, fields, values),',
@@ -200,13 +248,14 @@ function looksSpanish(text: string): boolean {
 /** Cabeceras que algunos modelos añaden aunque se les pida que no. */
 const PREAMBLE = /^(improved|rewritten|improve the|here is|aquí tienes|mensaje mejorado|versión mejorada|prompt mejorado|prompt)[^\n]*:\s*\n?/i
 const QUESTIONS = /^\s*\**\s*(QUESTIONS|PREGUNTAS)\s*\**\s*:\s*$/im
+const NOTES = /^\s*\**\s*(NOTES|NOTAS)\s*\**\s*:\s*$/im
 
 async function chat(model: string, messages: readonly { role: string; content: string }[], predict: number,
-  signal: AbortSignal): Promise<string> {
+  signal: AbortSignal, timeoutMs = 180_000): Promise<string> {
   const response = await fetch(`${ollamaUrl()}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    signal: AbortSignal.any([signal, AbortSignal.timeout(180_000)]),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
     body: JSON.stringify({ model, stream: false, think: false, options: { num_predict: predict, temperature: 0 }, messages }),
   })
   if (!response.ok) throw new Error(`Ollama answered ${String(response.status)}: ${(await response.text()).slice(0, 200)}`)
@@ -301,6 +350,7 @@ function userMessage(input: LocalImproveInput, document?: { name: string; text: 
  * @returns el prompt, las preguntas que hagan falta y una nota si el documento se resumió.
  */
 export async function localImprovePrompt(model: string, input: LocalImproveInput, signal: AbortSignal): Promise<LocalImproveResult> {
+  if (input.document === undefined && localIsLongPrompt(input.draft)) return restructure(model, input, signal)
   const document = input.document === undefined ? undefined : await documentText(model, input.document, signal)
   const text = await chat(model, [
     { role: 'system', content: INSTRUCTIONS },
@@ -319,4 +369,67 @@ export async function localImprovePrompt(model: string, input: LocalImproveInput
   const questions = split === null ? [] : clean.slice(split.index + split[0].length).split('\n')
     .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter((line) => line !== '').slice(0, 2)
   return { text: prompt, questions, ...document?.note === undefined ? {} : { note: document.note } }
+}
+
+/** Lo que escribe el modelo, sin cabeceras ni comillas, separado de sus preguntas y notas. */
+function splitAnswer(text: string): { body: string; questions: string[]; notes: string[] } {
+  const clean = text.replace(PREAMBLE, '').trim()
+  const marks = [QUESTIONS.exec(clean), NOTES.exec(clean)]
+    .filter((mark): mark is RegExpExecArray => mark !== null).sort((a, b) => a.index - b.index)
+  const first = marks[0]
+  const body = (first === undefined ? clean : clean.slice(0, first.index)).trim().replace(/^["“«](.*)["”»]$/s, '$1').trim()
+  const lines = (mark: RegExpExecArray | null): string[] => {
+    if (mark === null) return []
+    const next = marks.find((other) => other.index > mark.index)
+    return clean.slice(mark.index + mark[0].length, next?.index).split('\n')
+      .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter((line) => line !== '')
+  }
+  return { body, questions: lines(QUESTIONS.exec(clean)).slice(0, 2), notes: lines(NOTES.exec(clean)).slice(0, 3) }
+}
+
+/**
+ * Un prompt largo: se reorganiza entero, nunca se resume. Si el modelo devuelve mucho menos
+ * texto que el original, se le pide otra vez; si sigue corto, se avisa en la nota.
+ */
+async function restructure(model: string, input: LocalImproveInput, signal: AbortSignal): Promise<LocalImproveResult> {
+  const draft = input.draft.trim()
+  // Unos 3,5 caracteres por token en español: margen de sobra para no cortar la respuesta.
+  const predict = Math.min(16_000, Math.ceil(draft.length / 2.5) + 800)
+  const timeout = Math.max(180_000, predict * 60)
+  const language = looksSpanish(draft) ? '\n\nWrite it in Spanish, like the original.' : ''
+  // Primero, qué hay que corregir (rápido: poca salida); después, la reescritura entera aplicándolo.
+  const review = (await chat(model, [
+    { role: 'system', content: REVIEW_INSTRUCTIONS },
+    { role: 'user', content: `Prompt to review:\n\n${draft}${looksSpanish(draft) ? '\n\nWrite the list in Spanish.' : ''}` },
+  ], 900, signal)).trim()
+  const fixes = review === '-' ? [] : review.split('\n').map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
+    .filter((line) => line !== '')
+  const messages: { role: string; content: string }[] = [
+    { role: 'system', content: RESTRUCTURE_INSTRUCTIONS },
+    {
+      role: 'user',
+      content: `Prompt to restructure (${String(draft.length)} characters):\n\n${draft}`
+        + (fixes.length === 0 ? '' : `\n\nApply these fixes while restructuring:\n${fixes.map((fix) => `- ${fix}`).join('\n')}`)
+        + language,
+    },
+  ]
+  let answer = splitAnswer(await chat(model, messages, predict, signal, timeout))
+  if (answer.body.length < draft.length * 0.8) {
+    messages.push({ role: 'assistant', content: answer.body }, {
+      role: 'user',
+      content: `Your version has ${String(answer.body.length)} characters and the original ${String(draft.length)}: you dropped content. `
+        + 'Restructure it again keeping every rule, list item, number, template and table of the original.',
+    })
+    const retry = splitAnswer(await chat(model, messages, predict, signal, timeout))
+    if (retry.body.length > answer.body.length) answer = retry
+  }
+  const ratio = answer.body.length / draft.length
+  const short = ratio < 0.8
+    ? [`Shorter than your prompt (${String(Math.round(ratio * 100))}% of its length): check nothing important is missing.`] : []
+  // En la tarjeta: si ha quedado corto y qué se ha corregido (la revisión, o las notas del modelo).
+  const changed = fixes.length > 0
+    ? [`Fixed ${String(fixes.length)} issue${fixes.length === 1 ? '' : 's'}: ${fixes.slice(0, 3).join(' · ')}${fixes.length > 3 ? ' …' : ''}`]
+    : answer.notes
+  const note = [...short, ...changed].join(' ')
+  return { text: answer.body, questions: answer.questions, ...note === '' ? {} : { note } }
 }

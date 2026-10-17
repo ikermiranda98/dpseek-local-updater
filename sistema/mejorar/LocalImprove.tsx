@@ -15,7 +15,7 @@ import { createPortal } from 'react-dom'
 import { IconSparkleMedium, Tooltip, useAnchoredPosition } from '@deepseek-ai/dsh-client-ui-primitives'
 import { DOCUMENT_ACCEPT, localDocumentText } from './local-document-text.ts'
 import {
-  improver, subscribeImprover, type LocalImproveDocument, type LocalImproveOptions, type LocalImproveSuggestion,
+  improver, isLongPrompt, subscribeImprover, type LocalImproveDocument, type LocalImproveOptions, type LocalImproveSuggestion,
 } from './local-improve-bridge.ts'
 import css from './LocalImprove.module.css'
 
@@ -38,6 +38,8 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
   const [suggestion, setSuggestion] = useState<LocalImproveSuggestion | null>(null)
   const [answers, setAnswers] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
+  // Un prompt largo se reorganiza entero en el Host y tarda minutos: tarjeta abierta con el progreso.
+  const [slow, setSlow] = useState(false)
   const button = useRef<HTMLButtonElement | null>(null)
   const picker = useRef<HTMLInputElement | null>(null)
   const card = useRef<HTMLDivElement | null>(null)
@@ -48,7 +50,7 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
   composer.current = button.current?.closest<HTMLElement>('[data-composer-dock]')?.parentElement
     ?? button.current?.parentElement?.parentElement?.parentElement ?? null
   // Con un documento, la lectura puede tardar: la tarjeta se abre ya con el progreso.
-  const open = suggestion !== null || error !== null || (busy !== null && document !== null)
+  const open = suggestion !== null || error !== null || (busy !== null && (document !== null || slow))
   const position = useAnchoredPosition({ open, anchorRef: composer, panelRef: card, side: 'top', align: 'start', gap: 8, margin: 12 })
   const width = composer.current?.getBoundingClientRect().width
   if (host === undefined || sessionId === undefined || subagent) return null
@@ -90,7 +92,11 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
   const click = (): void => {
     if (busy !== null) return
     if (empty && document === null) pick()
-    else run(document === null ? {} : { document }, 'Improving message…')
+    else {
+      const long = document === null && isLongPrompt(draft)
+      setSlow(long)
+      run(document === null ? {} : { document }, long ? 'Reorganizing a long prompt, keeping all of it… (a few minutes)' : 'Improving message…')
+    }
   }
   const close = (): void => {
     generation.current++
@@ -99,6 +105,7 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
     setError(null)
     setDocument(null)
     setAnswers([])
+    setSlow(false)
   }
   const answered = suggestion === null ? [] : suggestion.questions
     .map((question, index) => ({ question, answer: (answers[index] ?? '').trim() }))
@@ -132,7 +139,7 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
         <div ref={card} className={css.card} role="dialog" aria-label="Suggested message" data-local-improve-card
           style={{ ...position ?? { visibility: 'hidden', left: 0, top: 0 }, ...width === undefined ? {} : { width } }}>
           <div className={css.head}>
-            <span>{document === null ? 'Suggested message' : 'Suggested prompt'}</span>
+            <span>{slow ? 'Reorganized prompt' : document === null ? 'Suggested message' : 'Suggested prompt'}</span>
             {suggestion !== null && busy === null && <span className={css.meta}>{(suggestion.ms / 1000).toFixed(1)} s</span>}
           </div>
           {document !== null && (
@@ -152,7 +159,7 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
           {suggestion !== null && busy === null && error === null && <>
             {suggestion.note !== undefined && <p className={css.note}>{suggestion.note}</p>}
             <textarea className={css.text} value={suggestion.text}
-              rows={Math.min(12, Math.max(3, suggestion.text.split('\n').length + 1))}
+              rows={Math.min(slow ? 22 : 12, Math.max(3, suggestion.text.split('\n').length + 1))}
               onChange={(event) => { setSuggestion({ ...suggestion, text: event.target.value }) }} />
             {suggestion.questions.length > 0 && (
               <div className={css.questions} data-local-improve-questions>

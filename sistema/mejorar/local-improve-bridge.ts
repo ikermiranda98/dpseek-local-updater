@@ -27,6 +27,15 @@ export interface LocalImproveSuggestion {
   readonly ms: number
 }
 
+/**
+ * Prompt largo (el Host lo reorganiza entero en dos pasos y tarda minutos): el mismo criterio
+ * que localIsLongPrompt en local-improve.ts.
+ */
+export function isLongPrompt(draft: string): boolean {
+  const text = draft.trim()
+  return text.length > 1200 || text.split('\n').filter((line) => line.trim() !== '').length > 20
+}
+
 /** Llamadas al Host. */
 export interface LocalImprover {
   /** El prompt mejorado (con el modelo del chat). */

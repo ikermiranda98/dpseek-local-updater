@@ -207,6 +207,13 @@ pone en el cuadro (no la envía) y **Dismiss** deja lo tuyo.
 - **Según el tamaño:** una petición sencilla queda en una o dos frases; una tarea
   grande, en apartados cortos (objetivo, ficheros, requisitos, restricciones y cuándo
   está hecha).
+- **Prompts largos, reorganizados y sin perder nada:** si lo que has escrito ya es un
+  prompt largo (más de unas 1.200 letras o 20 líneas), ✨ no lo resume: primero lista sus
+  problemas concretos (referencias a la sección equivocada, duplicados, contradicciones,
+  instrucciones vagas, pasos sin orden claro) y después lo reescribe entero, ordenado en
+  secciones, con todas sus reglas, cifras, tablas y plantillas, corrigiendo esos problemas.
+  Si la versión nueva sale mucho más corta que la tuya, lo repite y, si sigue corta, avisa.
+  Tarda unos minutos; la tarjeta dice qué ha corregido.
 - **De un documento a un prompt:** con el cuadro vacío, ✨ pide un fichero (PDF, DOCX
   o texto); con texto, suéltalo sobre ✨ o usa **Add file…** en la tarjeta, y tu
   mensaje sirve de indicación. Se lee en tu equipo, sin internet (los PDF con el
@@ -362,6 +369,17 @@ repetirlo en [`sistema/rendimiento/`](sistema/rendimiento)):
 - **Mensajes antiguos:** se cargan solos al subir, en páginas más grandes. Llegar al
   principio de un chat de 400 turnos pasa de 27 clics y 5,7 s a hacerlo con la rueda en
   3,8 s (o 2,2 s pulsando «Load earlier»).
+- **Sin pantalla en blanco al abrir:** desde el primer instante se ve el esqueleto de la
+  interfaz (barra lateral, panel y cuadro de texto) con tu tema claro u oscuro, en vez de
+  la pantalla de carga sobre fondo blanco y el destello al pasar a oscuro.
+
+## Otras mejoras pequeñas
+
+- **Aviso si Ollama no responde:** encima del cuadro de texto, «Ollama isn't running, so
+  the AI can't answer», con **Open Ollama** (abre su aplicación) y **Check again**. Se
+  quita solo cuando Ollama vuelve.
+- **«Show N more sessions» despliega todos los chats** del proyecto de una vez (antes, de
+  5 en 5); **Show less** los vuelve a recoger.
 
 ## Qué cambia respecto a la versión oficial
 
@@ -398,6 +416,9 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |
 | Arranque: la lista de modelos de Ollama, una vez por proceso | `packages/bundle/base/cordis.patch.yml` |
 | Chat más ligero: `content-visibility`, «Load earlier» que carga solo y páginas más grandes (opcional) | `packages/client/ui-chat` (`ChatView.module.css`, `LocalOlderButton.tsx`) + `packages/api/session-controller` (`session.ts`) |
+| Esqueleto de la interfaz al arrancar, con el tema de la última vez (opcional) | `apps/web/index.html`; código en [`sistema/esqueleto/`](sistema/esqueleto) |
+| Aviso si Ollama no responde, con «Open Ollama» (opcional) | `packages/client/ui-conversation` (`LocalOllamaBanner.tsx`) + `packages/api/session-controller` (`localOllamaStatus`) |
+| «Show N more sessions» despliega todos los chats (opcional) | `packages/client/ui-workspace` (`WorkspaceBrowser.tsx`) |
 | Prueba de arranque antes de publicar | [`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs) en el workflow |
 
 La app va en inglés (o en chino), como la oficial: no se añade ningún idioma.

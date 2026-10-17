@@ -39,6 +39,10 @@ export interface LocalOllamaUpdater {
   start: () => Promise<{ readonly started: boolean }>
   /** Novedades de la versión nueva de la app (null si no se pueden leer). */
   appNotes: (version: string) => Promise<LocalAppUpdateNotes | null>
+  /** Si Ollama responde y si está instalado (aviso «Ollama no responde»; opcional: lo añade su propia función). */
+  status?: () => Promise<{ readonly running: boolean; readonly installed: boolean }>
+  /** Abre la aplicación de Ollama. */
+  open?: () => Promise<{ readonly opened: boolean }>
 }
 
 interface Bridge {

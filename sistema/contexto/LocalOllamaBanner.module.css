@@ -1,0 +1,49 @@
+/* Aviso «Ollama no responde» encima del cuadro de texto (dpseek-local-updater), con el ancho del cuadro. */
+.banner {
+  box-sizing: border-box;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  max-width: var(--dsh-composer-card-max-width);
+  margin-bottom: 6px;
+  padding: 6px 8px 6px 10px;
+  border-radius: var(--dsw-radius-md);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 12%, transparent);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.icon {
+  flex: none;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+}
+
+.primary,
+.secondary {
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--dsw-radius-sm);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.primary {
+  border: 0;
+  background: var(--dsw-alias-brand-primary-new-colorprimary-new-color);
+  color: #fff;
+}
+
+.secondary {
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+}

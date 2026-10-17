@@ -2030,7 +2030,7 @@ optional('subchats', (tx) => {
 // Ollama y mide el modelo por defecto para la versión nueva. Código:
 // sistema/contexto/local-ollama-update.ts, local-ollama-bridge.ts y LocalUpdatesIndicator.tsx.
 
-optional('actualizar Ollama desde la app', (tx) => {
+const ollamaUpdateApplied = optional('actualizar Ollama desde la app', (tx) => {
   if (!toolsApplied) skip('necesita «herramientas de modelos en el selector»')
   const selectionDir = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client')
   const selectionIndex = join(selectionDir, 'index.ts')
@@ -2465,6 +2465,132 @@ optional('chat más ligero (scroll fluido y mensajes antiguos sin pulsar)', (tx)
     '        beforeSeq: this.baseSeq,\n        ...HISTORY_PAGE_OPTIONS,\n',
     '        beforeSeq: this.baseSeq,\n        ...LOCAL_OLDER_PAGE_OPTIONS,\n',
     '...LOCAL_OLDER_PAGE_OPTIONS,\n')
+})
+
+// ── 26. Arranque: la interfaz se ve desde el primer momento ─────────────────────
+// La ventana aparece a los ~0,2 s, pero hasta que el Host responde (~2,5 s) solo había
+// la pantalla de carga sobre fondo blanco, y con tema oscuro un destello al cambiar.
+// Ahora index.html trae un esqueleto de la interfaz (barra lateral, panel y cuadro de
+// texto) con el tema de la última vez desde el primer frame; la pantalla de carga oficial
+// sigue encima (con su progreso y, si algo falla, su informe) y el esqueleto se retira
+// en cuanto la app monta la interfaz. Código: sistema/esqueleto/.
+
+optional('la interfaz se ve desde el primer momento al arrancar', (tx) => {
+  const index = join(repo, 'apps', 'web', 'index.html')
+  let html = tx.read(index)
+  if (html.includes('dsk-side')) return
+  const skeleton = join(here, 'esqueleto')
+  const style = readFileSync(join(skeleton, 'esqueleto.css'), 'utf8').trim()
+  const markup = readFileSync(join(skeleton, 'esqueleto.html'), 'utf8').trim()
+  const script = readFileSync(join(skeleton, 'esqueleto.js'), 'utf8').trim()
+  if (!html.includes('<div id="root"></div>') || !html.includes('</head>')) skip(`no se encuentra #root o </head> en ${rel(index)}`)
+  html = html.replace('</head>', `    <style id="dsh-local-skeleton-style">\n${style}\n    </style>\n  </head>`)
+  // Fuera de #root: React lo hidrata esperando solo la pantalla de carga oficial.
+  html = html.replace('<div id="root"></div>', `${markup}\n    <div id="root"></div>\n    <script>\n${script}\n    </script>`)
+  tx.write(index, html)
+})
+
+// ── 27. Aviso claro si Ollama no responde ───────────────────────────────────────
+// Sin Ollama la IA no contesta, y solo se notaba en el nombre del modelo («Ollama not
+// responding») o al enviar. Encima del cuadro de texto sale un aviso con «Open Ollama»
+// (abre su aplicación) y «Check again». Una comprobación compartida cada 15 s, por el
+// puente de la sección 21. Código: sistema/contexto/LocalOllamaBanner.tsx.
+
+optional('aviso claro si Ollama no responde', (tx) => {
+  if (!ollamaUpdateApplied) skip('necesita «actualizar Ollama desde la app»')
+  const hostIndex = join(hostDir, 'index.ts')
+  const hostTypes = join(hostDir, 'types.ts')
+  let types = tx.read(hostTypes)
+  if (!types.includes('interface SessionLocalOllamaStatus')) {
+    types = types.trimEnd() + '\n\n' + [
+      '/** Local build: whether Ollama answers and whether its app is installed. */',
+      'export interface SessionLocalOllamaStatus {',
+      '  readonly running: boolean',
+      '  readonly installed: boolean',
+      '}',
+      '',
+      '/** Local build: whether the Ollama app was launched. */',
+      'export interface SessionLocalOllamaOpenValue {',
+      '  readonly opened: boolean',
+      '}',
+    ].join('\n')
+    tx.write(hostTypes, types)
+  }
+  tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n",
+    "import { ApiSessionList } from './list.ts'\n"
+      + "import { localOllamaOpen, localOllamaStatus } from './local-ollama-update.ts'\n"
+      + "import type { SessionLocalOllamaOpenValue, SessionLocalOllamaStatus } from './types.ts'\n",
+    'SessionLocalOllamaOpenValue, SessionLocalOllamaStatus }')
+  let host = tx.read(hostIndex)
+  if (!host.includes("@Remote('localOllamaStatus')")) {
+    const at = host.indexOf("  @Remote('list')")
+    const doc = at < 0 ? -1 : host.lastIndexOf('  /**', at)
+    if (doc < 0) skip(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
+    host = host.slice(0, doc) + [
+      '  /**',
+      '   * Local build: whether Ollama answers now and whether its app can be opened from here.',
+      '   * @param _request - no fields are required.',
+      '   * @returns running and installed.',
+      '   */',
+      "  @Remote('localOllamaStatus')",
+      '  async localOllamaStatus(_request: SessionLocalEmptyRequest): Promise<SessionLocalOllamaStatus> {',
+      '    return localOllamaStatus()',
+      '  }',
+      '',
+      '  /**',
+      '   * Local build: launch the Ollama app (it keeps starting on its own).',
+      '   * @param _request - no fields are required.',
+      '   * @returns whether it was launched.',
+      '   */',
+      "  @Remote('localOllamaOpen')",
+      '  localOllamaOpen(_request: SessionLocalEmptyRequest): SessionLocalOllamaOpenValue {',
+      '    return localOllamaOpen()',
+      '  }',
+      '',
+    ].join('\n') + host.slice(doc)
+    tx.write(hostIndex, host)
+  }
+
+  // El selector de modelos (con acceso al Host) añade las dos llamadas al puente.
+  const selectionIndex = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client', 'index.ts')
+  let selection = tx.read(selectionIndex)
+  if (!selection.includes('localOllamaStatus({})')) {
+    const anchor = '      appNotes: async version => unwrap(await ctx.remote.session.localAppUpdateNotes({ version })).notes,\n'
+    if (!selection.includes(anchor)) skip(`no se encuentra el puente de Ollama en ${rel(selectionIndex)}`)
+    selection = selection.replace(anchor, anchor
+      + '      status: async () => unwrap(await ctx.remote.session.localOllamaStatus({})),\n'
+      + '      open: async () => unwrap(await ctx.remote.session.localOllamaOpen({})),\n')
+    tx.write(selectionIndex, selection)
+  }
+
+  // ui-conversation: el aviso encima del cuadro de texto.
+  const skeletonDir = join(repo, 'packages', 'client', 'ui-conversation', 'src', 'client', 'skeleton')
+  for (const file of ['local-ollama-bridge.ts', 'LocalOllamaBanner.tsx', 'LocalOllamaBanner.module.css']) {
+    tx.copy(join(here, 'contexto', file), join(skeletonDir, file))
+  }
+  const inputBar = join(skeletonDir, 'InputBar.tsx')
+  tx.replace(inputBar, "import { ContextMeter } from './ContextMeter.tsx'\n",
+    "import { ContextMeter } from './ContextMeter.tsx'\nimport { LocalOllamaBanner } from './LocalOllamaBanner.tsx'\n",
+    "import { LocalOllamaBanner } from './LocalOllamaBanner.tsx'")
+  tx.replace(inputBar, '      {/* Trigger clicks land on the card, not the editor: the toolbar row\'s\n',
+    '      {/* Local build: «Ollama isn\'t running» notice (LocalOllamaBanner.tsx). */}\n'
+      + '      <LocalOllamaBanner />\n'
+      + '      {/* Trigger clicks land on the card, not the editor: the toolbar row\'s\n',
+    '<LocalOllamaBanner />')
+})
+
+// ── 28. «Show N more sessions» despliega todos los chats ─────────────────────────
+// Cada proyecto enseña sus 5 chats más recientes y el botón añadía solo 5 más por clic:
+// con 40 chats, 7 clics para llegar a uno antiguo. Ahora despliega todos de una vez (el
+// texto ya dice cuántos) y «Show less» los vuelve a recoger, como antes.
+
+optional('«Show N more sessions» despliega todos los chats', (tx) => {
+  const browser = join(repo, 'packages', 'client', 'ui-workspace', 'src', 'client', 'rows', 'WorkspaceBrowser.tsx')
+  tx.replace(browser,
+    '                [group.key]: visible.hiddenCount <= SESSION_WATERMARK_BASE ? Infinity : watermark + SESSION_WATERMARK_BASE,\n',
+    '                // Local build: all of them at once (the label already says how many).\n'
+      + '                [group.key]: Infinity,\n',
+    '// Local build: all of them at once')
 })
 
 console.log('\nCambios aplicados:')

@@ -1,0 +1,126 @@
+/* Esqueleto de la interfaz mientras arranca el Host (dpseek-local-updater): misma
+   geometría y colores que la app (barra de título de 40px, barra lateral de 280px,
+   panel central con la esquina redondeada y el cuadro de texto). Va fuera de #root,
+   justo antes (React hidrata #root con la pantalla de carga oficial, que sigue encima
+   con fondo transparente), y se retira en cuanto la app monta su interfaz. Sin :has():
+   Chrome deja marcados html y body para revisar estilos en cada cambio del DOM, aunque
+   luego se quite la regla; en su lugar, la clase dsk-on en html (la pone y quita el script). */
+:root {
+  --dsk-frame: #f9fafb;
+  --dsk-main: #fff;
+  --dsk-card: #fff;
+  --dsk-card-edge: rgb(0 0 0 / 10%);
+  --dsk-bar: rgb(0 0 0 / 7%);
+  --dsk-button: rgb(0 0 0 / 6%);
+}
+
+html[data-dsk-dark] {
+  --dsk-frame: #1b1b1c;
+  --dsk-main: #151517;
+  --dsk-card: #2c2c2e;
+  --dsk-card-edge: rgb(255 255 255 / 12%);
+  --dsk-bar: rgb(255 255 255 / 7%);
+  --dsk-button: rgb(255 255 255 / 9%);
+}
+
+html.dsk-on {
+  color-scheme: light;
+  background: var(--dsk-frame);
+}
+
+html.dsk-on[data-dsk-dark] {
+  color-scheme: dark;
+}
+
+html.dsk-on body {
+  margin: 0;
+  background: var(--dsk-frame);
+}
+
+.dsk {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  grid-template-rows: 40px 1fr;
+  background: var(--dsk-frame);
+  pointer-events: none;
+}
+
+.dsk-side {
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 12px;
+}
+
+.dsk-logo {
+  width: 150px;
+  height: 22px;
+  margin: 2px 8px 6px;
+  border-radius: 6px;
+  background: var(--dsk-bar);
+}
+
+.dsk-button {
+  height: 38px;
+  border-radius: 12px;
+  background: var(--dsk-button);
+}
+
+.dsk-line {
+  height: 14px;
+  margin: 4px 8px;
+  border-radius: 7px;
+  background: var(--dsk-bar);
+}
+
+.dsk-line:nth-child(odd) { width: 62%; }
+.dsk-line:nth-child(even) { width: 78%; }
+.dsk-gap { height: 16px; }
+
+.dsk-main {
+  grid-row: 2;
+  position: relative;
+  border-radius: 16px 0 0;
+  background: var(--dsk-main);
+}
+
+.dsk-composer {
+  position: absolute;
+  left: 50%;
+  bottom: 30px;
+  width: min(712px, calc(100% - 64px));
+  height: 98px;
+  border-radius: 28px;
+  background: var(--dsk-card);
+  box-shadow: 0 0 0 0.5px var(--dsk-card-edge);
+  transform: translateX(-50%);
+}
+
+.dsk-side > *,
+.dsk-composer {
+  animation: dsk-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes dsk-pulse {
+  50% { opacity: 0.55; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dsk-side > *,
+  .dsk-composer { animation: none; }
+}
+
+/* La pantalla de carga oficial (logo, progreso y, si algo falla, el informe) sigue
+   visible encima, centrada en el panel central. */
+html.dsk-on #root > [data-dsh-boot] {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  height: 100vh;
+  padding-left: 280px;
+  background: transparent;
+}

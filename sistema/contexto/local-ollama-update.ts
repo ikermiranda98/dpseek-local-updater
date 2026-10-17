@@ -273,3 +273,25 @@ export async function localAppUpdateNotes(version: string): Promise<LocalAppUpda
     return null
   }
 }
+
+/** Dónde instala Ollama su aplicación en Windows. */
+const ollamaApp = (): string => join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'Programs', 'Ollama', 'ollama app.exe')
+
+/** Si Ollama responde y si su aplicación está instalada (para el aviso de encima del cuadro de texto). */
+export interface LocalOllamaStatus {
+  readonly running: boolean
+  readonly installed: boolean
+}
+
+/** @returns si Ollama responde ahora y si se puede abrir desde aquí. */
+export async function localOllamaStatus(): Promise<LocalOllamaStatus> {
+  return { running: (await installedVersion()) !== null, installed: process.platform === 'win32' && existsSync(ollamaApp()) }
+}
+
+/** @returns si se ha lanzado la aplicación de Ollama (sigue arrancando por su cuenta). */
+export function localOllamaOpen(): { readonly opened: boolean } {
+  const app = ollamaApp()
+  if (process.platform !== 'win32' || !existsSync(app)) return { opened: false }
+  spawn(app, [], { detached: true, stdio: 'ignore' }).unref()
+  return { opened: true }
+}
