@@ -214,6 +214,16 @@ pone en el cuadro (no la envía) y **Dismiss** deja lo tuyo.
   secciones, con todas sus reglas, cifras, tablas y plantillas, corrigiendo esos problemas.
   Si la versión nueva sale mucho más corta que la tuya, lo repite y, si sigue corta, avisa.
   Tarda unos minutos; la tarjeta dice qué ha corregido.
+- **Mientras escribe:** la tarjeta enseña el texto según llega (y, en los prompts largos,
+  la fase: revisando o reescribiendo); **Cancel** corta la petición también en Ollama.
+- **Otras versiones:** pestañas **Suggested · Short · Detailed · Step by step**; cada una se
+  pide al pulsarla y se guarda, así cambiar entre ellas es inmediato.
+- **Think deeper:** repite la versión actual con el razonamiento del modelo activado; mejor
+  para casos difíciles, pero tarda alrededor de un minuto (se ve el razonamiento mientras).
+- **Show changes:** marca palabra a palabra lo añadido (verde) y lo quitado (tachado)
+  respecto a tu texto; los cambios solo de formato (viñetas, negritas) no cuentan.
+- **El botón avisa:** si lo que has escrito es vago («arregla eso», «no va», «hazlo como te
+  dije»), al dejar de escribir el ✨ se pone de color con un punto. No cambia nada solo.
 - **De un documento a un prompt:** con el cuadro vacío, ✨ pide un fichero (PDF, DOCX
   o texto); con texto, suéltalo sobre ✨ o usa **Add file…** en la tarjeta, y tu
   mensaje sirve de indicación. Se lee en tu equipo, sin internet (los PDF con el

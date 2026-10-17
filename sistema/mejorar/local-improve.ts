@@ -40,7 +40,17 @@ export interface LocalImproveInput {
   readonly files: readonly string[]
   readonly document?: LocalImproveDocument
   readonly answers?: readonly LocalImproveAnswer[]
+  /** Otra versión: más corta, más detallada o en pasos (la sugerida si no se indica). */
+  readonly style?: LocalImproveStyle
+  /** Con el razonamiento del modelo (más lento, para casos difíciles). */
+  readonly think?: boolean
 }
+
+/** Versiones que se pueden pedir además de la sugerida. */
+export type LocalImproveStyle = 'short' | 'detailed' | 'steps'
+
+/** Cómo va una petición: la fase y lo que el modelo lleva escrito (o pensado). */
+export type LocalImproveProgress = (phase: string, text: string) => void
 
 /** El prompt sugerido, las preguntas (si falta algo) y una nota sobre el documento. */
 export interface LocalImproveResult {
@@ -250,18 +260,95 @@ const PREAMBLE = /^(improved|rewritten|improve the|here is|aquí tienes|mensaje 
 const QUESTIONS = /^\s*\**\s*(QUESTIONS|PREGUNTAS)\s*\**\s*:\s*$/im
 const NOTES = /^\s*\**\s*(NOTES|NOTAS)\s*\**\s*:\s*$/im
 
+/**
+ * Una petición a Ollama. Con `onText`, en streaming: avisa de lo que lleva escrito (o
+ * pensado, con `think`) para que la tarjeta lo enseñe mientras llega.
+ */
 async function chat(model: string, messages: readonly { role: string; content: string }[], predict: number,
-  signal: AbortSignal, timeoutMs = 180_000): Promise<string> {
+  signal: AbortSignal, options: { timeoutMs?: number; think?: boolean; onText?: (text: string, thinking: string) => void } = {}): Promise<string> {
+  const stream = options.onText !== undefined
   const response = await fetch(`${ollamaUrl()}/api/chat`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    signal: AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]),
-    body: JSON.stringify({ model, stream: false, think: false, options: { num_predict: predict, temperature: 0 }, messages }),
+    signal: AbortSignal.any([signal, AbortSignal.timeout(options.timeoutMs ?? 180_000)]),
+    body: JSON.stringify({
+      model, stream, think: options.think === true,
+      // El razonamiento también cuenta en num_predict: margen para él.
+      options: { num_predict: predict + (options.think === true ? 6000 : 0), temperature: 0 },
+      messages,
+    }),
   })
   if (!response.ok) throw new Error(`Ollama answered ${String(response.status)}: ${(await response.text()).slice(0, 200)}`)
-  const body = await response.json() as { message?: { content?: unknown } }
-  return typeof body.message?.content === 'string' ? body.message.content.trim() : ''
+  if (!stream || response.body === null) {
+    const body = await response.json() as { message?: { content?: unknown } }
+    return typeof body.message?.content === 'string' ? body.message.content.trim() : ''
+  }
+  // NDJSON: una línea por trozo, con message.content y, si piensa, message.thinking.
+  let text = ''
+  let thinking = ''
+  let pending = ''
+  const decoder = new TextDecoder()
+  for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+    pending += decoder.decode(chunk, { stream: true })
+    const lines = pending.split('\n')
+    pending = lines.pop() ?? ''
+    for (const line of lines) {
+      if (line.trim() === '') continue
+      const part = JSON.parse(line) as { message?: { content?: unknown; thinking?: unknown }; error?: unknown }
+      if (typeof part.error === 'string') throw new Error(part.error)
+      if (typeof part.message?.content === 'string') text += part.message.content
+      if (typeof part.message?.thinking === 'string') thinking += part.message.thinking
+    }
+    options.onText?.(text, thinking)
+  }
+  return text.trim()
 }
+
+/** Peticiones en curso, por id: su cancelación y lo que llevan escrito (para la tarjeta). */
+const jobs = new Map<string, { readonly controller: AbortController; phase: string; text: string }>()
+
+/**
+ * Ejecuta una petición con id: se puede seguir (localImproveJobProgress) y cancelar de
+ * verdad (localImproveJobCancel), lo que corta también la generación en Ollama.
+ * @param jobId - id que elige la tarjeta; sin él, sin seguimiento.
+ * @param signal - cancelación de quien llama.
+ * @param run - la petición, con su señal y su aviso de progreso.
+ */
+export async function localImproveJob<T>(jobId: string | undefined, signal: AbortSignal,
+  run: (signal: AbortSignal, progress: LocalImproveProgress) => Promise<T>): Promise<T> {
+  const controller = new AbortController()
+  const job = { controller, phase: '', text: '' }
+  if (jobId !== undefined) jobs.set(jobId, job)
+  try {
+    return await run(AbortSignal.any([signal, controller.signal]), (phase, text) => { job.phase = phase; job.text = text })
+  } finally {
+    // Un momento más, por si la tarjeta pregunta justo al terminar.
+    if (jobId !== undefined) setTimeout(() => { if (jobs.get(jobId) === job) jobs.delete(jobId) }, 5000)
+  }
+}
+
+/** @returns la fase y el texto que lleva la petición, o null si no existe (o ya acabó hace rato). */
+export function localImproveJobProgress(jobId: string): { readonly phase: string; readonly text: string } | null {
+  const job = jobs.get(jobId)
+  return job === undefined ? null : { phase: job.phase, text: job.text }
+}
+
+/** @returns si había una petición con ese id y se ha cortado. */
+export function localImproveJobCancel(jobId: string): boolean {
+  const job = jobs.get(jobId)
+  if (job === undefined) return false
+  job.controller.abort(new Error('cancelled'))
+  jobs.delete(jobId)
+  return true
+}
+
+/** Lo que se avisa mientras el modelo escribe: «pensando» hasta que empieza el texto. */
+const reporter = (progress: LocalImproveProgress | undefined, phase: string) =>
+  (text: string, thinking: string): void => {
+    if (progress === undefined) return
+    if (text === '' && thinking !== '') progress('thinking', thinking)
+    else progress(phase, text)
+  }
 
 /** Resúmenes ya hechos, por documento: al responder a las preguntas no se vuelve a leer entero. */
 const summaries = new Map<string, { text: string; note?: string }>()
@@ -290,7 +377,8 @@ function lastPage(text: string): number | undefined {
  * El documento listo para el prompt: entero si es corto; si no, resumido por partes.
  * @returns el texto que ve el modelo y, si se ha resumido o recortado, una nota para el usuario.
  */
-async function documentText(model: string, document: LocalImproveDocument, signal: AbortSignal): Promise<{ text: string; note?: string }> {
+async function documentText(model: string, document: LocalImproveDocument, signal: AbortSignal,
+  progress?: LocalImproveProgress): Promise<{ text: string; note?: string }> {
   if (document.text.length <= DIRECT_CHARS) return { text: document.text }
   const key = createHash('sha256').update(model).update('\0').update(document.text).digest('hex')
   const known = summaries.get(key)
@@ -303,7 +391,7 @@ async function documentText(model: string, document: LocalImproveDocument, signa
     const summary = await chat(model, [
       { role: 'system', content: SUMMARY_INSTRUCTIONS },
       { role: 'user', content: `Part ${String(index + 1)} of ${String(pieces.length)} of "${document.name}":\n\n${piece}` },
-    ], 600, signal)
+    ], 600, signal, { onText: reporter(progress, `reading part ${String(index + 1)} of ${String(pieces.length)}`) })
     if (summary !== '' && summary !== '-') notes.push(summary)
   }
   const until = cut ? lastPage(used) : undefined
@@ -321,6 +409,18 @@ async function documentText(model: string, document: LocalImproveDocument, signa
   return result
 }
 
+/** Lo que pide cada versión además de las reglas de siempre. */
+const STYLES: Readonly<Record<LocalImproveStyle, string>> = {
+  short: 'Version requested: SHORT. As few words as possible while keeping every essential detail (names, values,'
+    + ' expected result): one or two sentences, no sections.',
+  detailed: 'Version requested: DETAILED. Use short sections (goal, files, requirements, constraints, done when) with'
+    + ' their headings written in the language of the prompt, and spell out each requirement and how to check it.'
+    + ' Leave out any section with nothing real to say: never fill one with generic rules or with requirements the'
+    + ' user did not ask for.',
+  steps: 'Version requested: STEP BY STEP. Write it as numbered steps the assistant should follow in order, then a'
+    + ' last line saying how to check that it is done.',
+}
+
 /** El mensaje para el modelo con todo lo que tiene que ver. */
 function userMessage(input: LocalImproveInput, document?: { name: string; text: string }): string {
   const conversation = input.recent.length === 0 ? '(no earlier messages)'
@@ -336,6 +436,7 @@ function userMessage(input: LocalImproveInput, document?: { name: string; text: 
       'The user answered your questions (use the answers and do not ask them again):\n'
         + input.answers.map((item) => `- ${item.question} → ${item.answer}`).join('\n'),
     ],
+    ...input.style === undefined ? [] : [STYLES[input.style]],
   ]
   const source = draft !== '' ? draft : document?.text ?? ''
   if (looksSpanish(source)) sections.push('Write the prompt in Spanish.')
@@ -345,30 +446,28 @@ function userMessage(input: LocalImproveInput, document?: { name: string; text: 
 /**
  * Pide el prompt mejorado.
  * @param model - modelo de Ollama (si es el del chat, conviene su variante de contexto para no recargarlo).
- * @param input - borrador, mensajes recientes, ficheros del proyecto, documento y respuestas.
+ * @param input - borrador, mensajes recientes, ficheros del proyecto, documento, respuestas, versión y razonamiento.
  * @param signal - cancelación.
+ * @param progress - avisa de la fase y de lo que lleva escrito (la tarjeta lo enseña mientras llega).
  * @returns el prompt, las preguntas que hagan falta y una nota si el documento se resumió.
  */
-export async function localImprovePrompt(model: string, input: LocalImproveInput, signal: AbortSignal): Promise<LocalImproveResult> {
-  if (input.document === undefined && localIsLongPrompt(input.draft)) return restructure(model, input, signal)
-  const document = input.document === undefined ? undefined : await documentText(model, input.document, signal)
+export async function localImprovePrompt(model: string, input: LocalImproveInput, signal: AbortSignal,
+  progress?: LocalImproveProgress): Promise<LocalImproveResult> {
+  if (input.document === undefined && localIsLongPrompt(input.draft)) return restructure(model, input, signal, progress)
+  const document = input.document === undefined ? undefined : await documentText(model, input.document, signal, progress)
   const text = await chat(model, [
     { role: 'system', content: INSTRUCTIONS },
-    ...EXAMPLES.flatMap((example) => [
+    // Con razonamiento, sin los ejemplos: respuestas resueltas sin pensar le enseñan a no pensar.
+    ...input.think === true ? [] : EXAMPLES.flatMap((example) => [
       { role: 'user', content: userMessage(example.input) },
       { role: 'assistant', content: example.answer },
     ]),
     { role: 'user', content: userMessage(input, document === undefined || input.document === undefined
       ? undefined : { name: input.document.name, text: document.text }) },
-  ], input.document === undefined ? 500 : 900, signal)
-  const clean = text.replace(PREAMBLE, '').trim()
-  const split = QUESTIONS.exec(clean)
-  const prompt = (split === null ? clean : clean.slice(0, split.index)).trim()
-    // Algunos modelos envuelven la respuesta en comillas aunque se les pida que no.
-    .replace(/^["“«](.*)["”»]$/s, '$1').trim()
-  const questions = split === null ? [] : clean.slice(split.index + split[0].length).split('\n')
-    .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter((line) => line !== '').slice(0, 2)
-  return { text: prompt, questions, ...document?.note === undefined ? {} : { note: document.note } }
+  ], input.document === undefined && input.style !== 'detailed' ? 500 : 900, signal,
+  { think: input.think === true, onText: reporter(progress, 'writing') })
+  const answer = splitAnswer(text)
+  return { text: answer.body, questions: answer.questions, ...document?.note === undefined ? {} : { note: document.note } }
 }
 
 /** Lo que escribe el modelo, sin cabeceras ni comillas, separado de sus preguntas y notas. */
@@ -377,6 +476,7 @@ function splitAnswer(text: string): { body: string; questions: string[]; notes: 
   const marks = [QUESTIONS.exec(clean), NOTES.exec(clean)]
     .filter((mark): mark is RegExpExecArray => mark !== null).sort((a, b) => a.index - b.index)
   const first = marks[0]
+  // Algunos modelos envuelven la respuesta en comillas aunque se les pida que no.
   const body = (first === undefined ? clean : clean.slice(0, first.index)).trim().replace(/^["“«](.*)["”»]$/s, '$1').trim()
   const lines = (mark: RegExpExecArray | null): string[] => {
     if (mark === null) return []
@@ -391,17 +491,18 @@ function splitAnswer(text: string): { body: string; questions: string[]; notes: 
  * Un prompt largo: se reorganiza entero, nunca se resume. Si el modelo devuelve mucho menos
  * texto que el original, se le pide otra vez; si sigue corto, se avisa en la nota.
  */
-async function restructure(model: string, input: LocalImproveInput, signal: AbortSignal): Promise<LocalImproveResult> {
+async function restructure(model: string, input: LocalImproveInput, signal: AbortSignal,
+  progress?: LocalImproveProgress): Promise<LocalImproveResult> {
   const draft = input.draft.trim()
   // Unos 3,5 caracteres por token en español: margen de sobra para no cortar la respuesta.
   const predict = Math.min(16_000, Math.ceil(draft.length / 2.5) + 800)
-  const timeout = Math.max(180_000, predict * 60)
+  const timeoutMs = Math.max(180_000, predict * 60) * (input.think === true ? 2 : 1)
   const language = looksSpanish(draft) ? '\n\nWrite it in Spanish, like the original.' : ''
   // Primero, qué hay que corregir (rápido: poca salida); después, la reescritura entera aplicándolo.
   const review = (await chat(model, [
     { role: 'system', content: REVIEW_INSTRUCTIONS },
     { role: 'user', content: `Prompt to review:\n\n${draft}${looksSpanish(draft) ? '\n\nWrite the list in Spanish.' : ''}` },
-  ], 900, signal)).trim()
+  ], 900, signal, { think: input.think === true, onText: reporter(progress, 'reviewing') })).trim()
   const fixes = review === '-' ? [] : review.split('\n').map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
     .filter((line) => line !== '')
   const messages: { role: string; content: string }[] = [
@@ -413,14 +514,14 @@ async function restructure(model: string, input: LocalImproveInput, signal: Abor
         + language,
     },
   ]
-  let answer = splitAnswer(await chat(model, messages, predict, signal, timeout))
+  let answer = splitAnswer(await chat(model, messages, predict, signal, { timeoutMs, onText: reporter(progress, 'rewriting') }))
   if (answer.body.length < draft.length * 0.8) {
     messages.push({ role: 'assistant', content: answer.body }, {
       role: 'user',
       content: `Your version has ${String(answer.body.length)} characters and the original ${String(draft.length)}: you dropped content. `
         + 'Restructure it again keeping every rule, list item, number, template and table of the original.',
     })
-    const retry = splitAnswer(await chat(model, messages, predict, signal, timeout))
+    const retry = splitAnswer(await chat(model, messages, predict, signal, { timeoutMs, onText: reporter(progress, 'rewriting again (it came out short)') }))
     if (retry.body.length > answer.body.length) answer = retry
   }
   const ratio = answer.body.length / draft.length

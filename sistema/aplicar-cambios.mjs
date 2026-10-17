@@ -2266,6 +2266,28 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       '  readonly document?: { readonly name: string; readonly text: string; readonly pages?: number }',
       '  /** Answers to the questions of the previous suggestion. */',
       '  readonly answers?: readonly { readonly question: string; readonly answer: string }[]',
+      '  /** Another version: shorter, more detailed or as steps. */',
+      "  readonly style?: 'short' | 'detailed' | 'steps'",
+      "  /** With the model's reasoning (slower). */",
+      '  readonly think?: boolean',
+      '  /** Id chosen by the caller to follow (localImproveProgress) and cancel (localImproveCancel) this request. */',
+      '  readonly jobId?: string',
+      '}',
+      '',
+      '/** Local build: one improve request, by the id its caller chose. */',
+      'export interface SessionLocalImproveJobRequest {',
+      '  readonly jobId: string',
+      '}',
+      '',
+      '/** Local build: what an improve request has written so far (empty phase once finished or unknown). */',
+      'export interface SessionLocalImproveProgressValue {',
+      '  readonly phase: string',
+      '  readonly text: string',
+      '}',
+      '',
+      '/** Local build: whether an improve request was running and has been stopped. */',
+      'export interface SessionLocalImproveCancelValue {',
+      '  readonly cancelled: boolean',
       '}',
       '',
       '/** Local build: the suggested prompt, questions when something is missing, a note and how long it took. */',
@@ -2286,9 +2308,14 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
   }
   tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n",
     "import { ApiSessionList } from './list.ts'\n"
-      + "import { localImprovePrompt, localProjectFiles, localRecentTurns } from './local-improve.ts'\n"
-      + "import type { SessionLocalImproveRequest, SessionLocalImproveValue } from './types.ts'\n",
-    'SessionLocalImproveRequest, SessionLocalImproveValue }')
+      + 'import {\n'
+      + '  localImproveJob, localImproveJobCancel, localImproveJobProgress, localImprovePrompt, localProjectFiles, localRecentTurns,\n'
+      + "} from './local-improve.ts'\n"
+      + 'import type {\n'
+      + '  SessionLocalImproveCancelValue, SessionLocalImproveJobRequest, SessionLocalImproveProgressValue,\n'
+      + '  SessionLocalImproveRequest, SessionLocalImproveValue,\n'
+      + "} from './types.ts'\n",
+    'SessionLocalImproveCancelValue, SessionLocalImproveJobRequest')
   let host = tx.read(hostIndex)
   if (!host.includes("@Remote('localImprovePrompt')")) {
     const at = host.indexOf("  @Remote('list')")
@@ -2321,17 +2348,39 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       "      const chat = selection.provider === 'ollama' && typeof selection.model === 'string' ? selection.model : undefined",
       '      const model = request.model ?? chat',
       "      if (model === undefined) throw new Error('this chat does not use an Ollama model')",
-      '      const result = await localImprovePrompt(model, {',
+      '      const result = await localImproveJob(request.jobId, signal, (jobSignal, progress) => localImprovePrompt(model, {',
       '        draft: request.draft,',
       '        recent: localRecentTurns(events),',
       '        files: localProjectFiles(cwd),',
       '        ...request.document === undefined ? {} : { document: request.document },',
       '        ...request.answers === undefined ? {} : { answers: request.answers },',
-      '      }, signal)',
+      '        ...request.style === undefined ? {} : { style: request.style },',
+      '        ...request.think === undefined ? {} : { think: request.think },',
+      '      }, jobSignal, progress))',
       '      return { ...result, ms: Date.now() - started }',
       '    } catch (error) {',
       "      throw new RemoteError('session/local-improve-failed', error instanceof Error ? error.message : String(error), { sessionId: request.sessionId })",
       '    }',
+      '  }',
+      '',
+      '  /**',
+      '   * Local build: what an improve request has written so far, to show it while it arrives.',
+      '   * @param request - the id its caller chose.',
+      '   * @returns its phase and text (an empty phase when it has finished or is unknown).',
+      '   */',
+      "  @Remote('localImproveProgress')",
+      '  localImproveProgress(request: SessionLocalImproveJobRequest): SessionLocalImproveProgressValue {',
+      "    return localImproveJobProgress(request.jobId) ?? { phase: '', text: '' }",
+      '  }',
+      '',
+      '  /**',
+      '   * Local build: stop an improve request, including the generation in Ollama.',
+      '   * @param request - the id its caller chose.',
+      '   * @returns whether it was running.',
+      '   */',
+      "  @Remote('localImproveCancel')",
+      '  localImproveCancel(request: SessionLocalImproveJobRequest): SessionLocalImproveCancelValue {',
+      '    return { cancelled: localImproveJobCancel(request.jobId) }',
       '  }',
       '',
     ].join('\n') + host.slice(doc)
@@ -2353,9 +2402,19 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       + '          sessionId: sessionId as SessionId, draft,\n'
       + '          ...options?.document === undefined ? {} : { document: options.document },\n'
       + '          ...options?.answers === undefined ? {} : { answers: options.answers },\n'
+      + '          ...options?.style === undefined ? {} : { style: options.style },\n'
+      + '          ...options?.think === undefined ? {} : { think: options.think },\n'
+      + '          ...options?.jobId === undefined ? {} : { jobId: options.jobId },\n'
       + '        })\n'
       + '        if (!result.ok) throw new Error(result.error.message)\n'
       + '        return result.value\n'
+      + '      },\n'
+      + '      progress: async (jobId) => {\n'
+      + '        const result = await ctx.remote.session.localImproveProgress({ jobId })\n'
+      + "        return result.ok ? result.value : { phase: '', text: '' }\n"
+      + '      },\n'
+      + '      cancel: async (jobId) => {\n'
+      + '        await ctx.remote.session.localImproveCancel({ jobId })\n'
       + '      },\n'
       + '    })\n'
       + '    return () => { setImprover(undefined) }\n'
@@ -2390,7 +2449,7 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
   }
 
   // ui-conversation: el botón, en la barra del cuadro junto al «+» y con su mismo estilo.
-  for (const file of ['local-improve-bridge.ts', 'local-document-text.ts', 'LocalImprove.tsx', 'LocalImprove.module.css']) {
+  for (const file of ['local-improve-bridge.ts', 'local-improve-diff.ts', 'local-document-text.ts', 'LocalImprove.tsx', 'LocalImprove.module.css']) {
     tx.copy(join(better, file), join(conversationDir, 'skeleton', file))
   }
   const inputBar = join(conversationDir, 'skeleton', 'InputBar.tsx')
