@@ -173,8 +173,10 @@ async function download(url: string, file: string): Promise<void> {
 }
 
 function install(file: string, log: string): Promise<number> {
-  // Los mismos parámetros que usa el actualizador de Ollama para Windows.
-  const args = ['/CLOSEAPPLICATIONS', `/LOG=${log}`, '/FORCECLOSEAPPLICATIONS', '/SP', '/NOCANCEL', '/SILENT']
+  // Los parámetros del actualizador de Ollama para Windows, pero sin ninguna ventana: /SILENT
+  // enseña el progreso del instalador; /VERYSILENT y /SUPPRESSMSGBOXES no enseñan nada (el
+  // progreso ya se ve en el botón «Update» de la app).
+  const args = ['/CLOSEAPPLICATIONS', `/LOG=${log}`, '/FORCECLOSEAPPLICATIONS', '/SP', '/NOCANCEL', '/VERYSILENT', '/SUPPRESSMSGBOXES']
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, { stdio: 'ignore', windowsHide: true })
     child.once('error', reject)

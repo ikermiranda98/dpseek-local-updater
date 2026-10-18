@@ -350,8 +350,9 @@ nueva cambia para las funciones locales, y su botón lleva a la confirmación de
 **Update** en la fila de Ollama:
 
 1. espera a que terminen las respuestas en marcha (el instalador cierra Ollama);
-2. descarga `OllamaSetup.exe` del Release oficial y lo instala en silencio, con los
-   mismos parámetros que usa el actualizador del propio Ollama;
+2. descarga `OllamaSetup.exe` del Release oficial y lo instala sin ninguna ventana (los
+   parámetros del actualizador del propio Ollama, con `/VERYSILENT` en vez de `/SILENT`;
+   el progreso se ve en el botón **Update**);
 3. vuelve a abrir Ollama, refresca la lista de modelos y vuelve a medir el modelo por
    defecto para la versión nueva (los demás se miden solos al abrir la app).
 
