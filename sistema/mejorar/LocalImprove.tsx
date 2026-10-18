@@ -296,6 +296,28 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
   const page = !s.minimized && !reading && ((s.busy !== null && revealed) || (s.busy === null && (made(s) || s.error !== null)))
   // Con un resultado (o trabajando en uno), el ✨ es el interruptor de caras.
   const twoFaces = made(s) || s.error !== null || (s.busy !== null && !reading)
+  // El prompt nuevo crece con sus líneas reales (también las que salen al ajustar al ancho), como el editor de la
+  // barra; el tope de altura lo pone el CSS y a partir de ahí se desplaza.
+  const promptBox = useRef<HTMLTextAreaElement | null>(null)
+  const promptText = s.versions[s.active]?.text
+  useLayoutEffect(() => {
+    const box = promptBox.current
+    if (box === null) return undefined
+    const fit = (): void => {
+      box.style.height = 'auto'
+      box.style.height = `${String(box.scrollHeight)}px`
+    }
+    fit()
+    // Solo los cambios de ancho cambian el ajuste de líneas (los de alto los provoca el propio fit).
+    let width = box.clientWidth
+    const observer = new ResizeObserver(() => {
+      if (box.clientWidth === width) return
+      width = box.clientWidth
+      fit()
+    })
+    observer.observe(box.parentElement ?? box)
+    return () => { observer.disconnect() }
+  }, [promptText, page, s.showChanges])
 
   // El botón avisa de un mensaje vago cuando dejas de escribir (no mientras escribes).
   useEffect(() => {
@@ -667,7 +689,6 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
   const below = suggestion !== null && s.busy === null && s.error === null && s.documents.length > 0 && s.block !== null
   const allText = s.documents.reduce((sum, document) => sum + document.text.length, 0)
   const allWords = s.documents.reduce((sum, document) => sum + document.words, 0)
-  const lines = suggestion === null ? 1 : suggestion.text.split('\n').length
   // Las opciones que se pueden usar ahora (Changes solo si hay con qué comparar; Think deeper una vez por versión).
   const available = (key: OptionKey): boolean => key !== 'changes' || counts !== null
   const pressed = (key: OptionKey): boolean => (key === 'steps' || key === 'english' || key === 'grammar')
@@ -829,7 +850,7 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
                 </div>
               )
               : (
-                <textarea className={css.text} value={suggestion.text} rows={Math.min(14, Math.max(1, lines))} aria-label="New prompt"
+                <textarea ref={promptBox} className={css.text} value={suggestion.text} rows={1} aria-label="New prompt"
                   onChange={(event) => {
                     const text = event.target.value
                     write(sid, (state) => ({ ...state, versions: { ...state.versions, [state.active]: { ...suggestion, text } } }))

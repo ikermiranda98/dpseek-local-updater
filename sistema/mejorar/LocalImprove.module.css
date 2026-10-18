@@ -588,11 +588,15 @@
 /* La cara de Reprompt: la barra se tiñe un poco (la única señal) y tu texto se esconde. El tinte va en una
    variable para que la pestaña de opciones (y sus curvas de unión) sean exactamente la misma superficie. */
 :global([data-composer-card]) {
-  transition: background-color 200ms var(--ds-ease-in-out, ease);
+  transition: background-color 200ms var(--ds-ease-in-out, ease), margin-top 160ms var(--ds-ease-in-out, ease);
 }
 
+/* La pestaña de opciones tiene su propio hueco encima de la barra: lo que la app pone ahí (carpeta de trabajo
+   en un chat nuevo, To-dos, cola) sube en vez de quedar tapado. Se reserva desde que empieza a trabajar para
+   que la pestaña no empuje nada al aparecer. */
 :global([data-composer-card][data-local-reprompt]) {
   --local-reprompt-surface: color-mix(in srgb, var(--dsw-alias-state-business-primary) 7%, var(--dsw-specific-input-major));
+  margin-top: 32px;
   background: var(--local-reprompt-surface);
 }
 
@@ -796,6 +800,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  :global([data-composer-card]) {
+    transition: none;
+  }
+
   .notch {
     animation: none;
   }
