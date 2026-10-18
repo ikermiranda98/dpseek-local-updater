@@ -681,11 +681,12 @@ const deleteApplied = optional('opción «Eliminar sesión» en el menú de cada
   })
 })
 
-// ── 8. Barra de contexto en el selector de modelo ─────────────────────────────
-// El selector muestra una entrada por modelo y, debajo de «Modelo», una barra con
-// los tamaños de contexto (sistema/contexto/ContextSlider.tsx); «Recomendado» es
-// el óptimo medido para el equipo (variante automática). Sin la barra, el
-// selector sigue funcionando: muestra cada tamaño como una entrada aparte.
+// ── 8. Contexto en el selector de modelo ──────────────────────────────────────
+// El selector muestra una entrada por modelo y, al abrirlo, una tarjeta con el
+// nombre del modelo (abre la lista) y un botón por tamaño de contexto
+// (sistema/contexto/ContextSlider.tsx); un punto marca el recomendado, el óptimo
+// medido para el equipo (variante automática). Sin esto, el selector sigue
+// funcionando: muestra cada tamaño como una entrada aparte.
 
 optional('barra de contexto en el selector de modelo', (tx) => {
   const dir = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client')
@@ -702,32 +703,49 @@ optional('barra de contexto en el selector de modelo', (tx) => {
 
   tx.replace(select, "import { orderModelProviders } from './provider-order.ts'\n",
     "import { orderModelProviders } from './provider-order.ts'\n"
-      + "import { ContextSlider, contextListModels, contextTriggerName, sameContextModel } from './ContextSlider.tsx'\n",
+      + "import { ContextSlider, contextListModels, contextModelName, contextTriggerName, sameContextModel } from './ContextSlider.tsx'\n",
     "from './ContextSlider.tsx'")
   tx.replace(select, "models: rankByName(group.models, showSearch ? query.trim() : ''),",
     "models: rankByName(contextListModels(group.models), showSearch ? query.trim() : ''),")
   tx.replace(select, ': currentChoice?.model.name\n', ': contextTriggerName(currentChoice?.model.name)\n')
   tx.replace(select, 'const selected = state.current?.provider === group.id && state.current.model === model.id',
     'const selected = state.current?.provider === group.id && sameContextModel(state.current.model, model.id)')
+  tx.replace(select, "import css from './ModelSelect.module.css'\n",
+    "import css from './ModelSelect.module.css'\nimport contextCss from './ContextSlider.module.css'\n",
+    'import contextCss')
   let text = tx.read(select)
   if (!text.includes('<ContextSlider')) {
-    const re = /(<span className=\{css\.cellLabel\}>\{t\('menu\.model'\)\}<\/span>[\s\S]*?<\/button>\r?\n)/
-    if (!re.test(text)) skip(`no se encuentra la fila «Modelo» del menú en ${rel(select)}`)
-    text = text.replace(re, (row) => row + [
-      '              {/* Local build: context-size bar (see ContextSlider.tsx). */}',
-      '              <ContextSlider',
-      '                models={groups.find(group => group.id === state.current?.provider)?.models ?? []}',
-      '                current={state.current?.model}',
-      '                disabled={busy}',
-      '                onSelect={(modelId) => {',
-      '                  if (state.current === null) return',
-      '                  const { provider, reasoningEffort } = state.current',
-      '                  choose({ provider, model: modelId, ...reasoningEffort === undefined ? {} : { reasoningEffort } })',
-      '                }}',
-      '                t={t}',
-      '              />',
+    // La fila «Modelo» entera (del <button> a su cierre): pasa a ser la cabecera de una tarjeta con el contexto
+    // debajo; sin la etiqueta «Model», solo el nombre del modelo y la flecha que abre la lista.
+    const label = text.indexOf("<span className={css.cellLabel}>{t('menu.model')}</span>")
+    const start = label < 0 ? -1 : text.lastIndexOf('\n', text.lastIndexOf('<button', label)) + 1
+    const end = label < 0 ? -1 : text.indexOf('</button>', label)
+    if (start <= 0 || end < 0) skip(`no se encuentra la fila «Modelo» del menú en ${rel(select)}`)
+    const stop = text.indexOf('\n', end) + 1
+    const row = text.slice(start, stop)
+      .replace('className={css.cell}', 'className={clsx(css.cell, contextCss.cardModel)}')
+      .replace(/[ \t]*<span className=\{css\.cellLabel\}>\{t\('menu\.model'\)\}<\/span>\r?\n/, '')
+      .replace("renderModelLabel(currentChoice.group.provider, currentChoice.model, 'menu', true)",
+        "renderModelLabel(currentChoice.group.provider, { ...currentChoice.model, name: contextModelName(currentChoice.model.name) }, 'menu', true)")
+    const pad = /^[ \t]*/.exec(row)?.[0] ?? ''
+    text = text.slice(0, start) + [
+      `${pad}{/* Local build: the model and its context sizes in one card (see ContextSlider.tsx). */}`,
+      `${pad}<div className={contextCss.card}>`,
+      row.replace(/^/gm, '  ').replace(/ {2}$/, '').trimEnd(),
+      `${pad}  <ContextSlider`,
+      `${pad}    models={groups.find(group => group.id === state.current?.provider)?.models ?? []}`,
+      `${pad}    current={state.current?.model}`,
+      `${pad}    disabled={busy}`,
+      `${pad}    onSelect={(modelId) => {`,
+      `${pad}      if (state.current === null) return`,
+      `${pad}      const { provider, reasoningEffort } = state.current`,
+      `${pad}      choose({ provider, model: modelId, ...reasoningEffort === undefined ? {} : { reasoningEffort } })`,
+      `${pad}    }}`,
+      `${pad}    t={t}`,
+      `${pad}  />`,
+      `${pad}</div>`,
       '',
-    ].join('\n'))
+    ].join('\n') + text.slice(stop)
     tx.write(select, text)
   }
   addLocaleKeys(tx, locales, 'ModelKey', {
@@ -1065,8 +1083,8 @@ const skipApplied = optional('no volver a ofrecer una versión retirada', (tx) =
 // ── 14. Herramientas de modelos en el selector ────────────────────────────────
 // Junto a cada modelo de la lista: «Optimizar» (vuelve a medirlo en este equipo
 // con sistema/contexto/calibrar.cjs, con un anillo de progreso) y, si lleva 30
-// días sin usarse, lo que ocupa y un botón para borrarlo del disco. En el menú, el
-// interruptor «Limpieza automática de variantes»: en Ollama solo queda la variante
+// días sin usarse, lo que ocupa y un botón para borrarlo del disco. Al final de la
+// lista, el interruptor «Limpieza automática de variantes»: en Ollama solo queda la variante
 // recomendada; las demás se crean al usarlas (antes de cada mensaje) y se borran
 // tras 7 días sin uso. Host: sistema/contexto/local-optimize.ts. Interfaz:
 // LocalOptimizeButton.tsx.
@@ -1270,9 +1288,10 @@ const toolsApplied = optional('herramientas de modelos en el selector (optimizar
     text = text.replace(close, (all, end, pad, pad2) => `${end}${pad}  {/* Local build: model tools (LocalOptimizeButton.tsx). */}\n${pad}  <LocalModelExtras model={model.id} t={t} />\n${pad}</div>\n${pad})\n${pad2}})}`)
   }
   if (!text.includes('<LocalCleanupSwitch')) {
-    const effort = /^(\s*)\{reasoning !== undefined && \(\n/m
-    if (!effort.test(text)) skip(`no se encuentra la fila de razonamiento del menú en ${rel(select)}`)
-    text = text.replace(effort, (row, pad) => `${pad}{/* Local build: automatic variant cleanup switch. */}\n${pad}<LocalCleanupSwitch t={t} />\n${row}`)
+    // Al final de la lista de modelos: se configura una vez, así que no ocupa sitio en la tarjeta principal.
+    const empty = /^([ \t]*)\{state\.status === 'ready' && filteredGroups\.length === 0 && \([\s\S]*?\n\1\)\}\n/m
+    if (!empty.test(text)) skip(`no se encuentra el final de la lista de modelos en ${rel(select)}`)
+    text = text.replace(empty, (block, pad) => `${block}${pad}{/* Local build: automatic variant cleanup switch. */}\n${pad}<LocalCleanupSwitch t={t} />\n`)
   }
   tx.write(select, text)
   tx.replace(selectionIndex, 'ctx.plugin(ModelDirectoryResolver)\n', [
@@ -2760,6 +2779,66 @@ optional('con la ventana cerrada, la app no retiene el modelo', (tx) => {
       + '    // Local build: hidden or shown, for the model keeper (local-window-state.ts).\n'
       + '    localTrackWindow(window)\n',
     'localTrackWindow(window)')
+})
+
+// ── 31. El esfuerzo de razonamiento, un cerebro en la barra ──────────────────────
+// Antes había que abrir el selector de modelo, entrar en «Effort» y elegir. Ahora un
+// cerebro junto al selector cambia el modo con un clic: Pensar (lo de «Default»),
+// Pensar a fondo (nivel high) y Sin pensar (off). El menú del selector ya no tiene
+// la fila «Effort». Interfaz: sistema/contexto/LocalThinkButton.tsx.
+
+optional('el esfuerzo de razonamiento como un cerebro en la barra', (tx) => {
+  const dir = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client')
+  const select = join(dir, 'ModelSelect.tsx')
+  const locales = join(dir, 'locales.ts')
+  tx.copy(join(here, 'contexto', 'LocalThinkButton.tsx'), join(dir, 'LocalThinkButton.tsx'))
+  tx.copy(join(here, 'contexto', 'LocalThinkButton.module.css'), join(dir, 'LocalThinkButton.module.css'))
+  tx.replace(select, "import css from './ModelSelect.module.css'\n",
+    "import css from './ModelSelect.module.css'\n"
+      + "import { LocalThinkButton } from './LocalThinkButton.tsx'\n"
+      + "import localThinkCss from './LocalThinkButton.module.css'\n",
+    "from './LocalThinkButton.tsx'")
+  tx.replace(select, '      className={css.root}\n', '      className={clsx(css.root, localThinkCss.host)}\n', 'localThinkCss.host')
+  let text = tx.read(select)
+  if (!text.includes('<LocalThinkButton')) {
+    // Justo después del botón del selector, dentro de su raíz (el menú se cierra al hacer clic fuera de ella).
+    const trigger = text.indexOf('ref={triggerRef}')
+    const end = trigger < 0 ? -1 : text.indexOf('</button>\n', trigger)
+    if (end < 0) skip(`no se encuentra el botón del selector en ${rel(select)}`)
+    const at = end + '</button>\n'.length
+    const pad = /([ \t]*)<\/button>\n$/.exec(text.slice(0, at))?.[1] ?? '      '
+    text = text.slice(0, at) + [
+      `${pad}{/* Local build: reasoning effort as a brain next to the model (LocalThinkButton.tsx). */}`,
+      `${pad}<LocalThinkButton`,
+      `${pad}  efforts={reasoning?.efforts}`,
+      `${pad}  effort={state.current?.reasoningEffort}`,
+      `${pad}  disabled={locked || busy || state.current === null}`,
+      `${pad}  onChange={(effort) => {`,
+      `${pad}    if (state.current === null) return`,
+      `${pad}    const { provider, model } = state.current`,
+      `${pad}    lastActionRef.current = 'select'`,
+      `${pad}    void select({ provider, model, ...effort === undefined ? {} : { reasoningEffort: effort } }).then(settleSelection)`,
+      `${pad}  }}`,
+      `${pad}  t={t}`,
+      `${pad}/>`,
+      '',
+    ].join('\n') + text.slice(at)
+    // La fila «Effort» del menú y el nivel junto al nombre del botón: los dice el cerebro.
+    const row = /^([ \t]*)\{reasoning !== undefined && \(\n[\s\S]*?drill\('effort'\)[\s\S]*?\n\1\)\}\n/m
+    if (!row.test(text)) skip(`no se encuentra la fila «Effort» del menú en ${rel(select)}`)
+    text = text.replace(row, '')
+    text = text.replace(/^[ \t]*\{effortLabel !== undefined && <span className=\{css\.triggerEffort\}>\{effortLabel\}<\/span>\}\n/m, '')
+    tx.write(select, text)
+  }
+  addLocaleKeys(tx, locales, 'ModelKey', {
+    'local.think.off': '不思考',
+    'local.think.on': '思考',
+    'local.think.hard': '深度思考',
+  }, {
+    'local.think.off': 'No thinking',
+    'local.think.on': 'Think',
+    'local.think.hard': 'Think hard',
+  })
 })
 
 console.log('\nCambios aplicados:')

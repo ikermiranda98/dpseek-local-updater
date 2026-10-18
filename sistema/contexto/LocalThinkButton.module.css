@@ -1,0 +1,185 @@
+/* Cerebro junto al selector de modelo (dpseek-local-updater). El modo se ve por el fondo del botón, no solo por el
+   color de una línea fina: a 18px es lo único que se distingue de un vistazo. */
+
+/* El selector y el cerebro, uno al lado del otro con el hueco de la fila de la barra. */
+.host {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.button {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  corner-shape: round;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: default;
+  transition: background-color 250ms var(--ds-ease-in-out, ease), color 250ms var(--ds-ease-in-out, ease);
+}
+
+.button:hover:not(:disabled) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.button:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: 2px;
+}
+
+.button:disabled {
+  opacity: 0.5;
+}
+
+/* Pensar: círculo azul suave y cerebro azul. */
+.button[data-mode='1'],
+.button[data-mode='1']:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 16%, transparent);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+/* Pensar a fondo: círculo rosa sólido y cerebro blanco. */
+.button[data-mode='2'],
+.button[data-mode='2']:hover:not(:disabled) {
+  background: #d4537e;
+  color: #fff;
+}
+
+.icon {
+  display: block;
+  width: 19px;
+  height: 19px;
+  overflow: visible;
+}
+
+.line,
+.draw {
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.line {
+  stroke: currentColor;
+}
+
+/* Al pasar a «Pensar», el contorno se dibuja de punta a punta. */
+.draw {
+  stroke: currentColor;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  opacity: 0;
+}
+
+.button[data-anim='wake'] .draw {
+  opacity: 1;
+  animation: think-draw 500ms cubic-bezier(0.3, 0.7, 0.2, 1) forwards;
+}
+
+@keyframes think-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+.brain {
+  transform-box: fill-box;
+  transform-origin: 50% 55%;
+}
+
+.button[data-mode='2'] .brain {
+  animation: think-beat 1.4s ease-in-out infinite;
+}
+
+@keyframes think-beat {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+
+/* Al pasar a «Pensar a fondo», el botón da un salto. */
+.button[data-anim='pop'] {
+  animation: think-pop 500ms cubic-bezier(0.2, 1.8, 0.4, 1);
+}
+
+@keyframes think-pop {
+  from { transform: scale(0.7); }
+  to { transform: scale(1); }
+}
+
+.twinkles,
+.ring {
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.button[data-mode='1'] .twinkles,
+.button[data-mode='2'] .ring {
+  opacity: 1;
+}
+
+.twinkles .star {
+  fill: var(--dsw-alias-state-business-primary);
+}
+
+.ring .star {
+  fill: #d4537e;
+}
+
+.star {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: think-twinkle 1.6s ease-in-out infinite;
+}
+
+/* Las estrellas solo se mueven en el modo en que se ven. */
+.button:not([data-mode='1']) .twinkles .star,
+.button:not([data-mode='2']) .ring .star,
+.button:not([data-mode='2']) .spin {
+  animation-play-state: paused;
+}
+
+@keyframes think-twinkle {
+  0%, 100% { opacity: 0.5; transform: scale(0.3) rotate(0deg); }
+  50% { opacity: 1; transform: scale(1) rotate(45deg); }
+}
+
+.spin {
+  transform-box: view-box;
+  transform-origin: 12px 12px;
+  animation: think-spin 6s linear infinite;
+}
+
+@keyframes think-spin {
+  to { transform: rotate(360deg); }
+}
+
+.burst circle {
+  fill: #d4537e;
+  opacity: 0;
+}
+
+.button[data-anim='pop'] .burst circle {
+  animation: think-burst 700ms cubic-bezier(0.1, 0.7, 0.3, 1) forwards;
+}
+
+@keyframes think-burst {
+  from { opacity: 1; transform: translate(0, 0) scale(1); }
+  to { opacity: 0; transform: translate(var(--bx), var(--by)) scale(0.4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .button,
+  .button * {
+    animation: none !important;
+  }
+
+  .draw {
+    opacity: 0 !important;
+  }
+}

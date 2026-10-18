@@ -277,12 +277,31 @@ la sugerencia con Qwen3.6-35B; el prompt de un documento, unos 5–10 s).
 
 ## Contexto de cada chat
 
-En el selector de modelo de cada chat, debajo de «Model», hay una **barra de
-contexto**: a la izquierda «Faster», a la derecha «More context», un punto por
-tamaño (32K, 64K, 128K, 256K, hasta el máximo de cada modelo) y la marca
-**«Recommended»**, que es el mejor contexto para tu equipo, medido por la app. Los
+Al abrir el selector de modelo de cada chat sale una tarjeta con el **nombre del
+modelo** (al pulsarlo se abre la lista de modelos) y debajo **un botón por tamaño
+de contexto** (32K, 64K, 128K, 256K, hasta el máximo de cada modelo): el fondo se
+desliza al elegido y un **punto azul** marca el recomendado, el mejor contexto para
+tu equipo, medido por la app. También se cambia con las flechas del teclado. Los
 chats nuevos empiezan en el recomendado. Los tamaños se cambian en
 `config.json` → `contexto.tamanos`.
+
+### Pensar: el cerebro de la barra
+
+Junto al selector de modelo, un **cerebro** cambia cuánto razona el modelo con un
+clic, sin abrir nada (sustituye a la fila «Effort» del selector). Cada clic pasa al
+siguiente modo, y se distingue de un vistazo por el fondo del botón:
+
+- **Pensar** (azul, con destellos): lo que antes era «Default»; el modelo razona
+  como siempre. Es el modo con el que empieza cada chat.
+- **Pensar a fondo** (rosa, con un anillo de estrellas): nivel `high`. Medido con
+  Qwen3.6-35B en una pregunta de cálculo de horas: unas 2-3 veces más razonamiento
+  y más del doble de tiempo que «Pensar». Para problemas difíciles.
+- **Sin pensar** (gris): nivel `off`; responde enseguida, sin razonar (en esa misma
+  pregunta, en medio segundo pero con la respuesta equivocada).
+
+Si el modelo no razona, no hay cerebro; si no tiene alguno de esos niveles, ese
+modo no aparece. Con «reducir animaciones» de Windows, las estrellas se quedan
+quietas.
 
 Cómo funciona:
 
@@ -336,11 +355,11 @@ Cómo funciona:
   cargado) y, mientras la app sigue abierta, se mantiene cargado el que estés
   usando; al cerrarla se descarga y se libera la memoria. Se aparta mientras se
   mide el contexto.
-- **Automatic variant cleanup** (interruptor al final del menú del
+- **Automatic variant cleanup** (interruptor al final de la lista de modelos del
   selector; activado por defecto): solo se guarda en Ollama la variante
   recomendada (`dsh-ctx-auto`). Las demás se crean al enviar el primer mensaje con
   ese tamaño (unos segundos) y se borran al abrir la app si llevan **7 días** sin
-  usarse. Así puedes mover la barra cuando quieras sin que `ollama list` se llene
+  usarse. Así puedes cambiar de tamaño cuando quieras sin que `ollama list` se llene
   de variantes. Desactivado, se crean todas al abrir la app y no se borra ninguna.
 - **Modelos sin usar**: un modelo que no usas desde hace **30 días** (contando
   desde que lo descargaste o desde que la app empezó a anotar los usos, lo más
@@ -487,6 +506,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | «Show N more sessions» despliega todos los chats (opcional) | `packages/client/ui-workspace` (`WorkspaceBrowser.tsx`) |
 | Corrector ortográfico también en el idioma del sistema, sin descargar diccionarios (opcional) | `apps/desktop` (`main.ts`) |
 | Con la ventana cerrada, la app no retiene el modelo de Ollama (opcional) | `apps/desktop` (`local-window-state.ts`) + [`sistema/contexto/precarga.cjs`](sistema/contexto/precarga.cjs) |
+| El esfuerzo de razonamiento como un cerebro en la barra, sin la fila «Effort» del selector (opcional) | `packages/client/ui-model-selection` (`ModelSelect.tsx`) + [`sistema/contexto/LocalThinkButton.tsx`](sistema/contexto/LocalThinkButton.tsx) |
 | Prueba de arranque antes de publicar | [`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs) en el workflow |
 
 La app va en inglés (o en chino), como la oficial: no se añade ningún idioma.

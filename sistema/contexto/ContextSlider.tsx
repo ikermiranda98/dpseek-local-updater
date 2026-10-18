@@ -1,12 +1,12 @@
 /**
- * Barra de contexto del selector de modelo (añadido por dpseek-local-updater).
+ * Contexto del selector de modelo (añadido por dpseek-local-updater).
  *
  * Cada tamaño de contexto es una variante del modelo en Ollama
  * (`<modelo>:dsh-ctx-131072`, `<modelo>:dsh-ctx-auto`; ver
  * sistema/contexto/arranque.cjs). La lista de modelos muestra una sola entrada
- * por modelo (la automática) y esta barra cambia entre sus variantes: cada punto
- * es un tamaño y «Recomendado» marca el óptimo medido para el equipo, que
- * selecciona la variante automática.
+ * por modelo (la automática) y estos botones cambian entre sus variantes: uno por
+ * tamaño, con un punto en el recomendado (el óptimo medido para el equipo, que
+ * selecciona la variante automática).
  */
 import clsx from 'clsx'
 import type { CSSProperties, KeyboardEvent } from 'react'
@@ -53,6 +53,11 @@ export function contextTriggerName(name: string | undefined): string | undefined
   return name?.replace(AUTO_NAME, ' · $1')
 }
 
+/** Nombre del modelo sin «· Auto 128K»: en la tarjeta del menú el contexto ya lo dicen sus botones. */
+export function contextModelName(name: string): string {
+  return name.replace(AUTO_NAME, '')
+}
+
 /** Si dos ids son el mismo modelo (con cualquier contexto). */
 export function sameContextModel(a: string, b: string): boolean {
   if (a === b) return true
@@ -86,22 +91,11 @@ function stepsFor(models: readonly NamedModel[], current: string): Step[] {
   return steps.sort((a, b) => a.ctx - b.ctx)
 }
 
-/** Posición horizontal (en %) del paso `index` de `count`. */
-function at(index: number, count: number): string {
-  return count < 2 ? '50%' : `calc(14px + (100% - 28px) * ${String(index / (count - 1))})`
-}
-
-/** Posición de «Recomendado»: centrada en su punto, salvo en los extremos (no se sale de la tarjeta). */
-function edgeStyle(index: number, count: number): CSSProperties {
-  if (count >= 2 && index === 0) return { left: 0, transform: 'none' }
-  if (count >= 2 && index === count - 1) return { right: 0, transform: 'none' }
-  return { left: at(index, count) }
-}
-
 /**
- * Barra de contexto bajo la fila «Modelo».
+ * Contexto bajo el nombre del modelo: un botón por tamaño, con el fondo que se desliza al elegido y un punto en el
+ * recomendado (el óptimo medido para el equipo, que elige la variante automática).
  * @param props - modelos del proveedor actual, modelo elegido y la acción de elegir otro.
- * @returns la barra, o null si el modelo actual no tiene variantes de contexto.
+ * @returns los botones, o null si el modelo actual no tiene variantes de contexto.
  */
 export function ContextSlider({ models, current, disabled, onSelect, t }: {
   models: readonly NamedModel[]
@@ -114,7 +108,6 @@ export function ContextSlider({ models, current, disabled, onSelect, t }: {
   if (steps.length < 2) return null
   const value = contextOf(current)
   const index = Math.max(0, steps.findIndex(step => (value === 'auto' ? step.recommended : step.ctx === value)))
-  const recommended = steps.findIndex(step => step.recommended)
   const choose = (next: number): void => {
     const step = steps[next]
     if (step === undefined || disabled || next === index) return
@@ -123,50 +116,31 @@ export function ContextSlider({ models, current, disabled, onSelect, t }: {
   const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
     event.preventDefault()
+    // El menú también usa las flechas para moverse entre filas: aquí solo mueven el contexto.
+    event.stopPropagation()
     choose(index + (event.key === 'ArrowRight' ? 1 : -1))
   }
-  const selected = steps[index]
+  const style = { '--context-steps': String(steps.length), '--context-index': String(index) } as CSSProperties
   return (
-    <div className={css.root}>
-      <div className={css.head}>
-        <span>{t('local.context.label')}</span>
-        <span className={css.value}>
-          {selected === undefined ? '' : kilo(selected.ctx)}
-          {selected?.recommended === true && <span className={css.valueNote}> · {t('local.context.recommended')}</span>}
-        </span>
-      </div>
-      <div className={css.ends}>
-        <span>{t('local.context.faster')}</span>
-        <span>{t('local.context.more')}</span>
-      </div>
-      <div className={clsx(css.track, disabled && css.disabled)}>
-        {recommended >= 0 && recommended !== index && (
-          <span className={css.tick} style={{ left: at(recommended, steps.length) }} />
-        )}
-        {steps.map((step, i) => (
-          <button
-            key={step.id + String(step.ctx)}
-            type="button"
-            role="radio"
-            aria-checked={i === index}
-            aria-label={`${t('local.context.label')} ${kilo(step.ctx)}${step.recommended ? ` (${t('local.context.recommended')})` : ''}`}
-            tabIndex={i === index ? 0 : -1}
-            className={css.step}
-            style={{ left: at(i, steps.length) }}
-            disabled={disabled}
-            onClick={() => { choose(i) }}
-            onKeyDown={onKeyDown}
-          >
-            <span className={css.dot} />
-          </button>
-        ))}
-        <span className={css.thumb} style={{ left: at(index, steps.length) }} />
-      </div>
-      <div className={css.labels}>
-        {recommended >= 0 && (
-          <span className={css.recommended} style={edgeStyle(recommended, steps.length)}>{t('local.context.recommended')}</span>
-        )}
-      </div>
+    <div className={clsx(css.root, disabled && css.disabled)} role="radiogroup" aria-label={t('local.context.label')} style={style}>
+      <span className={css.thumb} aria-hidden="true" />
+      {steps.map((step, i) => (
+        <button
+          key={step.id + String(step.ctx)}
+          type="button"
+          role="radio"
+          aria-checked={i === index}
+          aria-label={`${t('local.context.label')} ${kilo(step.ctx)}${step.recommended ? ` (${t('local.context.recommended')})` : ''}`}
+          title={step.recommended ? t('local.context.recommended') : undefined}
+          tabIndex={i === index ? 0 : -1}
+          className={clsx(css.step, i === index && css.selected, step.recommended && css.recommended)}
+          disabled={disabled}
+          onClick={() => { choose(i) }}
+          onKeyDown={onKeyDown}
+        >
+          {kilo(step.ctx)}
+        </button>
+      ))}
     </div>
   )
 }

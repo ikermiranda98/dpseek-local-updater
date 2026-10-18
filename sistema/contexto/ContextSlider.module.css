@@ -1,126 +1,105 @@
-/* Barra de contexto (dpseek-local-updater). Mismo material que las filas del
-   menú del selector: 13/20 para el título, tonos de etiqueta de la app y el
-   fondo de hover como pista. */
-.root {
-  box-sizing: border-box;
-  min-width: 100%;
-  padding: 6px 8px 2px;
-  color: var(--dsw-alias-label-primary);
-  font-size: 13px;
-  line-height: 20px;
-}
+/* Contexto del selector (dpseek-local-updater): una tarjeta con el modelo y, debajo, un botón por tamaño. Mismos
+   tonos, radios y transiciones que el resto del menú. */
 
-.head {
+/* La tarjeta del menú: el nombre del modelo (abre la lista) y el contexto debajo. */
+.card {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.value {
-  color: var(--dsw-alias-label-tertiary);
-  white-space: nowrap;
-}
-
-.valueNote {
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.ends {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 6px;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.track {
-  position: relative;
-  height: 28px;
-  margin-top: 4px;
+  flex-direction: column;
+  gap: 8px;
+  margin: 2px;
+  padding: 8px;
   border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-interactive-bg-hover);
+}
+
+/* La fila «Modelo» del menú, sin su etiqueta: solo el nombre en negrita y la flecha. Doble clase para ganar a la
+   fila normal del menú, que va en otra hoja. */
+.cardModel.cardModel {
+  min-height: 24px;
+  height: auto;
+  padding: 0 2px;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+}
+
+.cardModel.cardModel > span:first-child {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+  text-align: left;
+}
+
+.root {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--context-steps), minmax(0, 1fr));
+  padding: 2px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-specific-menu);
 }
 
 .disabled {
   opacity: 0.6;
 }
 
-/* Zona de clic de cada paso: un botón invisible centrado en su punto. */
-.step {
+/* El fondo del elegido se desliza de un tamaño a otro. */
+.thumb {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0;
-  border: 0;
-  border-radius: var(--dsw-radius-sm);
-  background: transparent;
-  transform: translateX(-50%);
-  cursor: default;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc((100% - 4px) / var(--context-steps));
+  border-radius: 6px;
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+  transform: translateX(calc(100% * var(--context-index)));
+  transition: transform 200ms var(--ds-ease-in-out, ease);
+  pointer-events: none;
 }
 
-.step:disabled {
+.step {
+  position: relative;
+  z-index: 1;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 20px;
   cursor: default;
+  transition: color 100ms ease;
+}
+
+.step:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary);
 }
 
 .step:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -2px;
 }
 
-.dot {
+.selected {
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+/* El recomendado para este equipo: un punto, sin texto. */
+.recommended::after {
+  content: '';
+  position: absolute;
+  top: 5px;
+  right: 8px;
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: var(--dsw-alias-label-tertiary);
-  opacity: 0.7;
+  background: var(--dsw-alias-state-business-primary);
 }
 
-.step:hover:not(:disabled) .dot {
-  opacity: 1;
-}
-
-/* Marca del recomendado cuando el tirador está en otro punto. */
-.tick {
-  position: absolute;
-  top: 8px;
-  bottom: 8px;
-  width: 2px;
-  border-radius: 1px;
-  background: var(--dsw-alias-label-tertiary);
-  transform: translateX(-50%);
-  pointer-events: none;
-}
-
-.thumb {
-  position: absolute;
-  top: 3px;
-  bottom: 3px;
-  width: 22px;
-  border-radius: var(--dsw-radius-sm);
-  background: var(--dsw-alias-label-primary);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 25%);
-  transform: translateX(-50%);
-  transition: left 140ms ease;
-  pointer-events: none;
-}
-
-.labels {
-  position: relative;
-  height: 20px;
-}
-
-.recommended {
-  position: absolute;
-  top: 2px;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-  white-space: nowrap;
-  transform: translateX(-50%);
+@media (prefers-reduced-motion: reduce) {
+  .thumb {
+    transition: none;
+  }
 }
