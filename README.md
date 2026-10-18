@@ -195,24 +195,32 @@ Para tareas que ocuparían mucho del chat sin llenarlo:
 En la barra del cuadro de texto, junto al **+**, el botón ✨ (**Reprompt**)
 reescribe tu mensaje para que la IA lo entienda sin ambigüedad (qué hacer, con qué
 ficheros o nombres y qué resultado esperas), sin cambiar lo que pides, sin responderlo
-y en tu idioma. Todo pasa dentro de la propia barra, sin nada encima: el prompt nuevo ocupa el
-sitio de tu texto, con sus versiones en una línea, el texto editable, lo demás como enlaces y
-**Use** (lo pone en el cuadro para retocarlo). **‹** vuelve a tu texto original y **Reprompt ›**
-al nuevo: nunca se ven los dos a la vez. Con el prompt nuevo a la vista, el botón de enviar envía
-ese; ✕ lo descarta y deja lo tuyo.
+y en tu idioma. Todo pasa dentro de la propia barra, que tiene dos caras:
 
-- **Anillo de progreso:** mientras trabaja, un anillo alrededor de ✨ se va llenando (por
-  partes, o por lo escrito frente a lo esperado) o gira cuando no se sabe cuánto falta. Las
-  peticiones cortas dejan tu texto a la vista hasta tener el resultado; las largas enseñan el
-  texto en directo, y **‹** deja verlo trabajar desde tu texto: al terminar, ✨ pone su punto de
-  «listo» y **Reprompt ›** (o ✨) enseña el resultado.
+- **El ✨ es el interruptor.** Con un resultado, se convierte en **Your text | ✨ Reprompt**
+  (el fondo se desliza bajo la cara activa). En la cara de Reprompt el prompt nuevo ocupa el
+  sitio de tu texto y se edita ahí mismo; la única señal es un leve tinte de la barra, y el
+  botón de enviar lleva un ✨ pequeño arriba a la derecha porque envía ese prompt. Al enviarlo,
+  la barra vuelve a tu texto, vacía. No hay botón «Use»: lo que ves es lo que se envía.
+- **Cambiar de cara:** el interruptor, **Alt+←** / **Alt+→**, deslizar con dos dedos en el
+  panel táctil, y **Esc** vuelve a tu texto. Cada chat recuerda su cara y su resultado.
+- **Anillo de progreso** alrededor del ✨ mientras trabaja: se llena (por partes, o por lo
+  escrito frente a lo esperado) o gira cuando no se sabe cuánto falta. Las peticiones cortas
+  dejan tu texto a la vista hasta tener el resultado; las largas enseñan el texto en directo
+  en la cara de Reprompt. Con un resultado esperando y tu texto a la vista, «Reprompt» lleva
+  un punto.
+- **Opciones en una pestaña que sale del borde de arriba** de la barra, a la izquierda, con su
+  mismo color y borde, y solo con iconos (el nombre se despliega al pasar el ratón; mientras
+  trabaja, las opciones se atenúan): **Step by step**, **English** y **Fix grammar**
+  (interruptores: pulsado, ves esa versión; otra vez, vuelves a la sugerida), **Show changes**,
+  **Ask for a change**, **Reprompt again**, **Think deeper** y **Discard**. Se reordenan
+  arrastrándolas a izquierda o derecha, y el orden se guarda.
 
 - **No inventa nombres:** ve los últimos mensajes del chat y la lista de ficheros del
   proyecto (solo los nombres), así que «el archivo de la calculadora» pasa a ser
   `calculadora.py` si existe; si no, deja tus palabras.
 - **Pregunta en vez de adivinar:** si falta algo importante (qué lenguaje, qué
-  fichero…), la tarjeta trae una o dos preguntas; contéstalas y **Update with answers**
-  rehace la sugerencia.
+  fichero…), debajo del prompt salen una o dos preguntas; contéstalas (Enter) y lo rehace.
 - **Según el tamaño:** una petición sencilla queda en una o dos frases; una tarea
   grande, en apartados cortos (objetivo, ficheros, requisitos, restricciones y cuándo
   está hecha).
@@ -224,27 +232,18 @@ ese; ✕ lo descarta y deja lo tuyo.
   Si la versión nueva sale mucho más corta que la tuya, lo repite y, si sigue corta, avisa.
   Un prompt enorme (más de unas 18.000 letras) se reescribe por partes de unas 12.000 que se
   juntan en orden: de una vez, el modelo deja de escribir hacia las 23.000 y el resultado se
-  quedaba en un tercio. Tarda unos 85 caracteres por segundo (la tarjeta dice los minutos).
-- **Mientras escribe:** la tarjeta enseña el texto según llega (y, en los prompts largos,
-  la fase: revisando o reescribiendo); **Cancel** corta la petición también en Ollama.
-- **Versiones:** **Suggested · Step by step** (y **English** / **Grammar fixed** cuando existen)
-  en una línea, con flechas ‹ › para pasar de una a otra; desde la primera, ‹ lleva a tu texto.
-  **Step by step** se pide al pulsarla y todas se guardan.
-- **English y Fix grammar:** dos enlaces más. **English** traduce el texto que ves lo más fiel
-  posible (código, nombres y cifras tal cual); **Fix grammar** corrige faltas y gramática de
-  cada frase en su idioma y deja como están los términos técnicos en inglés dentro de un texto
-  en español. Si hay frases enteras en otro idioma, lo dice («Mixed languages: 2 sentences in
-  English») y **Translate them** las pasa al idioma principal. Salen como versiones nuevas.
-- **Corregir con una frase:** en **Not quite?** escribes lo que no te convence («más corto»,
-  «en Python», «no toques la parte de X») y la rehace a partir de la sugerencia, no desde cero.
-- **Volver:** después de **Use**, una flecha junto a ✨ devuelve tu texto de antes, con sus
-  documentos y la tarjeta como estaban (desaparece en cuanto cambias el texto).
-- **Cada chat guarda su tarjeta:** si cambias de chat a mitad, al volver la encuentras igual,
-  también si seguía trabajando.
-- **Think deeper:** repite la versión actual con el razonamiento del modelo activado; mejor
-  para casos difíciles, pero tarda alrededor de un minuto (se ve el razonamiento mientras).
-- **Changes:** marca palabra a palabra lo añadido (verde) y lo quitado (tachado)
-  respecto a tu texto; los cambios solo de formato (viñetas, negritas) no cuentan.
+  quedaba en un tercio. Tarda unos 85 caracteres por segundo (el aviso dice los minutos).
+- **English y Fix grammar:** **English** traduce lo más fiel posible (código, nombres y cifras
+  tal cual); **Fix grammar** corrige faltas y gramática de cada frase en su idioma y deja como
+  están los términos técnicos en inglés dentro de un texto en español. Si hay frases enteras en
+  otro idioma, lo dice («Mixed languages: 2 sentences in English») y **Translate them** las pasa
+  al idioma principal. La gramática solo se revisa cuando lo pides.
+- **Ask for a change:** abre una línea dentro de la barra; escribes lo que no te convence
+  («más corto», «en Python», «no toques la parte de X») y lo rehace a partir de lo que ves.
+- **Think deeper:** repite la versión con el razonamiento del modelo activado; mejor para casos
+  difíciles, pero tarda alrededor de un minuto (se ve el razonamiento mientras).
+- **Show changes:** marca palabra a palabra lo añadido (verde) y lo quitado (tachado) respecto a
+  tu texto; los cambios solo de formato (viñetas, negritas) no cuentan.
 - **El botón avisa:** si lo que has escrito es vago («arregla eso», «no va», «hazlo como te
   dije») o acabas de pegar un texto largo que conviene reorganizar, el ✨ se pone de color con
   un punto. No cambia nada solo, y la gramática solo se revisa cuando pulsas **Fix grammar**.
@@ -254,15 +253,15 @@ ese; ✕ lo descarta y deja lo tuyo.
   Soltarlos en la barra los adjunta al mensaje, como siempre; soltarlos en ✨ los carga
   para el prompt. Los documentos cargados se ven encima del texto como píldoras con ✨ (y
   ✨ dice cuántos hay). Lo que escribas en el cuadro es la instrucción: pulsa ✨ y la usa;
-  con el cuadro vacío, la tarjeta ofrece **Implement**, **Review**, **Plan the tasks** o
+  con el cuadro vacío, una fila encima del texto ofrece **Implement**, **Review**, **Plan the tasks** o
   **Explain** en una fila. Se leen en tu equipo, sin internet (los PDF con el mismo
   lector que las vistas previas); la píldora dice páginas o palabras y avisa (⚠) si se
   ha cortado o hay páginas sin texto (escaneadas).
 - **Los documentos van enteros, sin resumir:** el modelo escribe solo lo que hay que hacer
   con ellos (objetivo, ficheros, restricciones, cuándo está hecho) y van debajo del prompt,
-  palabra por palabra, cada uno con su título. **Use** pone solo el prompt en el cuadro: los
-  documentos se quedan como una píldora con un clip (📎) y se añaden debajo del mensaje al
-  enviarlo, así la barra no se llena de páginas (✕ en la píldora los quita). Si son largos (más de unas 10 páginas),
+  palabra por palabra, cada uno con su título: en la cara de Reprompt solo se ve el prompt
+  (y una línea «Below: …» con **Preview**), y los documentos se añaden debajo al enviarlo, así
+  la barra no se llena de páginas. Si son largos (más de unas 10 páginas),
   **Key parts** quita lo que la IA no necesita (portada, índice, agradecimientos,
   narrativa, repeticiones) para gastar menos contexto del chat: el modelo solo dice qué
   párrafos sobran y el resto se copia del original tal cual, sin cambiar una palabra; las
