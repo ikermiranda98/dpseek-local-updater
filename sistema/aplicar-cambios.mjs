@@ -2497,6 +2497,15 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       + "      {dragActive && (!canAcceptDrop || document.querySelector('[data-local-improve]') === null) && (\n"
       + '        <DropOverlay',
     "document.querySelector('[data-local-improve]')")
+  // Al enviar, los documentos que «Use» dejó adjuntos van debajo del mensaje (no se meten en el cuadro).
+  const hub = join(conversationDir, 'input', 'hub.ts')
+  tx.replace(hub, '    return this.conversation().sendSession(session, text, attachmentIds, mode, signal)\n',
+    '    // Local build: documents attached by «Improve message» go below the message (LocalImprove.tsx).\n'
+      + "    const localSend = (globalThis as Record<symbol, unknown>)[Symbol.for('dpseek-local-updater.before-send')] as\n"
+      + '      ((sessionId: string, text: string) => string) | undefined\n'
+      + '    const sent = localSend === undefined ? text : localSend(session.getSnapshot().sessionId, text)\n'
+      + '    return this.conversation().sendSession(session, sent, attachmentIds, mode, signal)\n',
+    'dpseek-local-updater.before-send')
 })
 
 // ── 25. Chat más ligero: scroll fluido y mensajes antiguos sin pulsar ───────────
@@ -2685,6 +2694,33 @@ optional('«Show N more sessions» despliega todos los chats', (tx) => {
     '                // Local build: all of them at once (the label already says how many).\n'
       + '                [group.key]: Infinity,\n',
     '// Local build: all of them at once')
+})
+
+// ── 29. Corrector ortográfico también en el idioma del sistema ───────────────────
+// El corrector solo usaba inglés: todo lo escrito en español salía subrayado en rojo.
+// Ahora usa el idioma de Windows y el inglés, con los diccionarios del propio Windows;
+// la dirección de descarga de diccionarios apunta a ninguna parte, así que nunca se
+// descarga nada (si Windows no tiene un idioma, ese idioma simplemente no se corrige).
+
+optional('corrector ortográfico también en el idioma del sistema', (tx) => {
+  const main = join(repo, 'apps', 'desktop', 'src', 'main.ts')
+  tx.replace(main,
+    '  installMicrophonePermissions(session.defaultSession, () => mainWindow?.webContents)\n',
+    '  installMicrophonePermissions(session.defaultSession, () => mainWindow?.webContents)\n'
+      + "  // Local build: spell check in the system language as well as English, with Windows' own\n"
+      + '  // dictionaries; dictionary downloads point nowhere, so nothing is ever fetched.\n'
+      + '  try {\n'
+      + "    session.defaultSession.setSpellCheckerDictionaryDownloadURL('http://127.0.0.1:9/')\n"
+      + '    const spellAvailable = session.defaultSession.availableSpellCheckerLanguages\n'
+      + "    const spellPick = (language: string): string | undefined => spellAvailable.find(known => known === language)\n"
+      + "      ?? spellAvailable.find(known => known.split('-')[0] === language.split('-')[0])\n"
+      + "    const spellWanted = [...new Set([app.getSystemLocale(), app.getPreferredSystemLanguages()[0] ?? '', 'en-US']\n"
+      + "      .filter(language => language !== '').map(spellPick).filter((language): language is string => language !== undefined))]\n"
+      + '    if (spellWanted.length > 0) session.defaultSession.setSpellCheckerLanguages(spellWanted)\n'
+      + '  } catch {\n'
+      + '    // Without a spell checker the editor still works.\n'
+      + '  }\n',
+    'setSpellCheckerDictionaryDownloadURL')
 })
 
 console.log('\nCambios aplicados:')

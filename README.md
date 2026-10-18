@@ -244,7 +244,9 @@ mínima: las versiones en una línea, el texto, un solo botón y lo demás como 
   ha cortado o hay páginas sin texto (escaneadas).
 - **Los documentos van enteros, sin resumir:** el modelo escribe solo lo que hay que hacer
   con ellos (objetivo, ficheros, restricciones, cuándo está hecho) y van debajo del prompt,
-  palabra por palabra, cada uno con su título. Si son largos (más de unas 10 páginas),
+  palabra por palabra, cada uno con su título. **Use** pone solo el prompt en el cuadro: los
+  documentos se quedan como una píldora con un clip (📎) y se añaden debajo del mensaje al
+  enviarlo, así la barra no se llena de páginas (✕ en la píldora los quita). Si son largos (más de unas 10 páginas),
   **Key parts** quita lo que la IA no necesita (portada, índice, agradecimientos,
   narrativa, repeticiones) para gastar menos contexto del chat: el modelo solo dice qué
   párrafos sobran y el resto se copia del original tal cual, sin cambiar una palabra; las
@@ -413,6 +415,11 @@ repetirlo en [`sistema/rendimiento/`](sistema/rendimiento)):
   quita solo cuando Ollama vuelve.
 - **«Show N more sessions» despliega todos los chats** del proyecto de una vez (antes, de
   5 en 5); **Show less** los vuelve a recoger.
+- **El cuadro de texto no se come la pantalla:** con un texto largo crece como mucho hasta
+  un tercio de la ventana (antes, 14 líneas aunque la ventana fuera baja) y luego hace scroll.
+- **Corrector en español:** el corrector ortográfico usa el idioma de Windows además del
+  inglés (antes subrayaba en rojo todo lo escrito en español), con los diccionarios del
+  propio Windows: nunca descarga nada.
 
 ## Qué cambia respecto a la versión oficial
 
@@ -452,6 +459,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Esqueleto de la interfaz al arrancar, con el tema de la última vez (opcional) | `apps/web/index.html`; código en [`sistema/esqueleto/`](sistema/esqueleto) |
 | Aviso si Ollama no responde, con «Open Ollama» (opcional) | `packages/client/ui-conversation` (`LocalOllamaBanner.tsx`) + `packages/api/session-controller` (`localOllamaStatus`) |
 | «Show N more sessions» despliega todos los chats (opcional) | `packages/client/ui-workspace` (`WorkspaceBrowser.tsx`) |
+| Corrector ortográfico también en el idioma del sistema, sin descargar diccionarios (opcional) | `apps/desktop` (`main.ts`) |
 | Prueba de arranque antes de publicar | [`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs) en el workflow |
 
 La app va en inglés (o en chino), como la oficial: no se añade ningún idioma.

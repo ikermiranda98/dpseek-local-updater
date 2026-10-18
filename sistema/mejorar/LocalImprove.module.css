@@ -415,3 +415,23 @@
   font-size: 12px;
   pointer-events: none;
 }
+
+/* Documentos que se envían debajo del mensaje (después de «Use»): píldora rellena con un clip. */
+.pillAttached {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);
+}
+
+.pillAttached > svg {
+  color: var(--dsw-alias-state-business-primary);
+}
+
+/* El texto del cuadro crece hasta 14 líneas: en pantallas bajas eso es casi toda la ventana.
+   Como mucho, un tercio de la altura (luego hace scroll, como siempre). */
+:global([data-composer-card]) {
+  --dsh-composer-text-max-height: min(336px, 33vh);
+}
+
+/* Con el texto del cuadro desplazado, la línea de arriba (cortada) se difumina. */
+:global([data-local-scrolled]) {
+  mask-image: linear-gradient(to bottom, transparent 0, #000 16px);
+}

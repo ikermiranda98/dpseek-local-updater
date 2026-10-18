@@ -9,8 +9,10 @@
  * siempre; soltarlos en ✨ los carga para el prompt. Los documentos cargados se ven
  * encima del texto, como los adjuntos, con su ✨. Con ellos, lo que escribas en el
  * cuadro es la instrucción (y ✨ la usa); con el cuadro vacío, la tarjeta ofrece qué
- * hacer: implementarlos, revisarlos, planificarlos o explicarlos. El prompt va delante
- * y los documentos debajo, palabra por palabra: enteros o solo sus partes clave.
+ * hacer: implementarlos, revisarlos, planificarlos o explicarlos. «Use» pone solo el
+ * prompt en el cuadro; los documentos se quedan como píldoras adjuntas (📎) y se añaden
+ * debajo del mensaje, palabra por palabra (enteros o sus partes clave), al enviarlo: así
+ * la barra no se llena con páginas de texto.
  *
  * La tarjeta, encima del cuadro, es mínima: las versiones en una línea, el texto
  * editable, un solo botón («Use») y el resto como enlaces. Enseña el texto mientras el
@@ -107,12 +109,24 @@ interface State extends Snapshot {
   readonly preview: boolean
   readonly refine: string
   readonly undo: { readonly before: string; readonly after: string; readonly snapshot: Snapshot } | null
+  /** Lo que «Use» dejó para enviar debajo del mensaje (los documentos, ya con su título). */
+  readonly attached: Attached | null
+}
+
+/** Documentos que se envían debajo del mensaje. */
+interface Attached {
+  readonly prompt: string
+  readonly appendix: string
+  readonly names: readonly string[]
+  readonly words: number
+  readonly key: boolean
 }
 
 const NO_LIVE = { phase: '', text: '' }
 const EMPTY: State = {
   documents: [], intent: null, block: null, attach: 'whole', keyNote: null, versions: {}, active: 'suggested', original: '',
   slow: false, busy: null, live: NO_LIVE, answers: [], error: null, showChanges: false, preview: false, refine: '', undo: null,
+  attached: null,
 }
 
 // Cada chat guarda su tarjeta aquí (cambiar de chat y volver la encuentra igual, también si sigue trabajando).
@@ -126,6 +140,25 @@ const write = (sid: string, change: (state: State) => State): void => {
   sessions.set(sid, change(read(sid)))
   for (const listener of listeners) listener()
 }
+/**
+ * Al enviar (lo llama el envío de la app, input/hub.ts): los documentos adjuntos de ese chat van
+ * debajo del mensaje. Se buscan por chat y, si no, por el prompt que puso «Use».
+ */
+const SEND_KEY = Symbol.for('dpseek-local-updater.before-send')
+;(globalThis as Record<symbol, unknown>)[SEND_KEY] = (sessionId: string, text: string): string => {
+  let sid = sessionId
+  let attached = sessions.get(sid)?.attached ?? null
+  if (attached === null) {
+    const found = [...sessions.entries()].find(([, state]) => state.attached?.prompt.trim() === text.trim())
+    if (found === undefined) return text
+    sid = found[0]
+    attached = found[1].attached
+  }
+  if (attached === null) return text
+  write(sid, (state) => ({ ...state, attached: null, undo: null }))
+  return `${text.trim()}\n\n---\n\n${attached.appendix}`
+}
+
 const subscribe = (listener: () => void): (() => void) => {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
@@ -157,6 +190,14 @@ const IconBack = (): ReactNode => (
     strokeLinejoin="round" aria-hidden="true">
     <path d="M5.5 4 2.5 7l3 3" />
     <path d="M2.5 7h7a3.5 3.5 0 0 1 0 7H7" />
+  </svg>
+)
+
+/** Clip de adjunto (la librería de la app solo lo trae en otro tamaño y peso). */
+const IconClip = (): ReactNode => (
+  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"
+    strokeLinejoin="round" aria-hidden="true">
+    <path d="M13.5 7.5 8 13a3.5 3.5 0 0 1-5-5l6-6a2.3 2.3 0 0 1 3.3 3.3L6.4 11.2a1.2 1.2 0 0 1-1.7-1.7L10 4.2" />
   </svg>
 )
 
@@ -224,6 +265,15 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
   // El hueco de los documentos, encima del texto (lo pone InputBar).
   useEffect(() => {
     setDocsHost(button.current?.closest('[data-composer-card]')?.querySelector<HTMLElement>('[data-local-improve-docs]') ?? null)
+  }, [sessionId, enabled])
+  // Con el texto desplazado, la línea de arriba queda cortada: se difumina (solo mientras hay scroll).
+  useEffect(() => {
+    const scroller = button.current?.closest('[data-composer-card]')?.querySelector<HTMLElement>('[data-input-scroll]')
+    if (scroller == null) return
+    const update = (): void => { scroller.toggleAttribute('data-local-scrolled', scroller.scrollTop > 2) }
+    update()
+    scroller.addEventListener('scroll', update, { passive: true })
+    return () => { scroller.removeEventListener('scroll', update); scroller.removeAttribute('data-local-scrolled') }
   }, [sessionId, enabled])
   // Ficheros arrastrándose por la ventana: la barra marca sus dos destinos mientras dure.
   useEffect(() => {
@@ -402,7 +452,7 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
   }
   const close = (): void => {
     invalidate()
-    write(sid, (state) => ({ ...EMPTY, undo: state.undo }))
+    write(sid, (state) => ({ ...EMPTY, undo: state.undo, attached: state.attached }))
   }
   const removeDocument = (index: number): void => {
     if (s.busy !== null) return
@@ -444,11 +494,16 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
   const use = (): void => {
     if (suggestion === null) return
     const below = appendix(s)
-    const after = below === '' ? suggestion.text : `${suggestion.text.trim()}\n\n---\n\n${below}`
+    const after = suggestion.text.trim()
     const { documents, intent, block, attach, keyNote, versions, active, original, slow } = s
+    const attached: Attached | null = below === '' ? null : {
+      prompt: after, appendix: below, names: documents.map((document) => document.name),
+      words: attach === 'key' && block?.key !== undefined ? count(block.key) : documents.reduce((sum, document) => sum + document.words, 0),
+      key: attach === 'key' && block?.key !== undefined,
+    }
     invalidate()
     setDraft(after)
-    write(sid, () => ({ ...EMPTY, undo: { before: draft, after, snapshot: { documents, intent, block, attach, keyNote, versions, active, original, slow } } }))
+    write(sid, () => ({ ...EMPTY, attached, undo: { before: draft, after, snapshot: { documents, intent, block, attach, keyNote, versions, active, original, slow } } }))
   }
   /** Volver: tu texto de antes, con sus documentos y la tarjeta como estaban. */
   const undo = (): void => {
@@ -460,7 +515,8 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
   }
 
   const diff = suggestion !== null && s.original.trim() !== '' ? localDiff(s.original, suggestion.text) : null
-  const counts = diff === null ? null : localDiffCount(diff)
+  // Con documentos, tu texto es la instrucción, no un borrador del prompt: comparar no dice nada.
+  const counts = diff === null || s.documents.length > 0 ? null : localDiffCount(diff)
   const hint = (vague || longPaste) && s.busy === null && !open
   const docsLabel = s.documents.length === 1 ? 'it' : 'them'
   const label = s.busy ?? (s.documents.length > 0
@@ -506,8 +562,18 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
           event.target.value = ''
           if (files.length > 0) load(files)
         }} />
-      {docsHost !== null && s.documents.length > 0 && createPortal(
+      {docsHost !== null && (s.documents.length > 0 || s.attached !== null) && createPortal(
         <div className={css.docs}>
+          {s.attached !== null && (
+            <span className={`${css.pill} ${css.pillAttached}`} data-local-improve-attached
+              title={`Goes below your message when you send it, word for word${s.attached.key ? ' (key parts)' : ''}`}>
+              <IconClip />
+              <span className={css.pillName}>{s.attached.names.length === 1 ? s.attached.names[0] : `${String(s.attached.names.length)} documents`}</span>
+              <span className={css.pillMeta}>{s.attached.key ? 'key parts · ' : ''}{number(s.attached.words)} words</span>
+              <button type="button" className={css.pillRemove} aria-label="Don't send the documents"
+                onMouseDown={(event) => { event.preventDefault() }} onClick={() => { set({ attached: null }) }}>✕</button>
+            </span>
+          )}
           {s.documents.map((document, index) => (
             <span key={`${document.name}-${String(index)}`} className={css.pill} data-local-improve-docs-pill
               title={[document.cut === undefined ? '' : `Read ${document.cut}`,
@@ -571,7 +637,7 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
                 <button type="button" className={css.link} onClick={pick}>Add file</button>
               </div>
               <span className={css.note}>
-                {empty ? 'Or type in the box what to do with them, then press ✨' : 'Or press ✨ to use what you wrote as the instruction'}
+                {empty ? `Or type in the box what to do with ${docsLabel}, then press ✨` : 'Or press ✨ to use what you wrote as the instruction'}
               </span>
             </div>
           )}
