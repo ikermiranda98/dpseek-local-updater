@@ -29,6 +29,8 @@ export interface LocalImproveOptions {
   readonly keyParts?: boolean
   /** Corregir la sugerencia anterior con una frase. */
   readonly refine?: { readonly previous: string; readonly request: string }
+  /** Traducir al inglés, corregir la gramática o pasar al idioma principal las frases en otro idioma. */
+  readonly transform?: { readonly kind: 'english' | 'grammar' | 'unify'; readonly text: string }
 }
 
 /** Versiones además de la sugerida. */

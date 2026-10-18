@@ -51,6 +51,14 @@ export interface LocalImproveInput {
   readonly keyParts?: boolean
   /** Corregir la sugerencia anterior con una frase («más corto», «no toques X»). */
   readonly refine?: LocalImproveRefine
+  /** Traducir al inglés, corregir la gramática o pasar al idioma principal las frases en otro idioma. */
+  readonly transform?: LocalImproveTransform
+}
+
+/** Un texto y qué hacer con él (sin reescribirlo como prompt). */
+export interface LocalImproveTransform {
+  readonly kind: 'english' | 'grammar' | 'unify'
+  readonly text: string
 }
 
 /** La sugerencia anterior y lo que el usuario quiere cambiar de ella. */
@@ -611,6 +619,7 @@ function isSpanish(input: LocalImproveInput): boolean {
 export async function localImprovePrompt(model: string, input: LocalImproveInput, signal: AbortSignal,
   progress?: LocalImproveProgress): Promise<LocalImproveResult> {
   const document = input.document
+  if (input.transform !== undefined) return transform(model, input.transform, signal, progress)
   if (input.refine !== undefined) return refine(model, input, input.refine, signal, progress)
   if (document === undefined && localIsLongPrompt(input.draft)) return restructure(model, input, signal, progress)
   const block = document === undefined ? undefined : documentBlock(document, isSpanish(input))
@@ -652,6 +661,69 @@ function splitAnswer(text: string): { body: string; questions: string[]; notes: 
   return { body, questions: lines(QUESTIONS.exec(clean)).slice(0, 2), notes: lines(NOTES.exec(clean)).slice(0, 3) }
 }
 
+/** Instrucciones de cada transformación: siempre fieles, sin mejorar ni resumir nada. */
+const TRANSFORM_INSTRUCTIONS: Readonly<Record<LocalImproveTransform['kind'], string>> = {
+  english: [
+    'Translate the text into English as faithfully as possible: same meaning, tone, structure and formatting (headings,',
+    'lists, tables, line breaks). Keep code, file names, paths, identifiers, numbers, units and quoted strings exactly as',
+    'they are. Do not add, drop, summarise, reorder or improve anything. Reply with only the translation.',
+  ].join(' '),
+  grammar: [
+    'Fix the spelling, grammar and punctuation of the text without changing its meaning, structure, formatting, wording',
+    'choices or tone, and without adding or removing formatting (backticks, bold, quotes). Detect the language of each',
+    'sentence and fix it in that language. Technical terms and English words',
+    'commonly used inside Spanish technical writing (merge, commit, backtest, prompt, script, deploy…), names, code, paths',
+    'and identifiers are not mistakes: leave them. If some whole sentences are written in a different language from the',
+    'rest of the text, keep them in their language and, after the text, add a line "NOTES:" and one line',
+    '"- <number> sentences in <language>". Reply with only the corrected text (and that NOTES block when needed).',
+  ].join(' '),
+  unify: [
+    'Find the main language of the text. Translate into it, faithfully, only the sentences written in another language;',
+    'leave everything else exactly as it is, including technical terms, names, code, paths and identifiers. Reply with',
+    'only the resulting text.',
+  ].join(' '),
+}
+
+/** Para un texto largo, trozos de este tamaño (la salida de una petición tiene un tope). */
+const TRANSFORM_PART_CHARS = 12_000
+
+/**
+ * Traduce, corrige o unifica el idioma de un texto, por trozos si es largo (es un cambio local:
+ * cada trozo se puede hacer aparte sin perder nada).
+ */
+async function transform(model: string, job: LocalImproveTransform, signal: AbortSignal,
+  progress?: LocalImproveProgress): Promise<LocalImproveResult> {
+  const chunks = job.text.length <= TRANSFORM_PART_CHARS ? [job.text] : groups(blocks(job.text), TRANSFORM_PART_CHARS).map((group) => group.blocks.join('\n\n'))
+  const out: string[] = []
+  const notes: string[] = []
+  const phase = job.kind === 'english' ? 'translating' : job.kind === 'grammar' ? 'fixing the grammar' : 'translating the other sentences'
+  for (const [index, chunk] of chunks.entries()) {
+    const predict = Math.min(16_000, Math.ceil(chunk.length / 2.5) + 300)
+    const done = out.join('\n\n')
+    const answer = splitAnswer(await chat(model, [
+      { role: 'system', content: TRANSFORM_INSTRUCTIONS[job.kind] },
+      { role: 'user', content: `Text:\n\n${chunk}` },
+    ], predict, signal, {
+      timeoutMs: Math.max(180_000, predict * 60),
+      onText: (text, thinking) => {
+        if (progress === undefined) return
+        const label = chunks.length === 1 ? phase : `${phase} (part ${String(index + 1)} of ${String(chunks.length)})`
+        progress(text === '' && thinking !== '' ? 'thinking' : label, done === '' ? text : `${done}\n\n${text}`)
+      },
+    }))
+    out.push(answer.body)
+    notes.push(...answer.notes)
+  }
+  // Varios trozos pueden decir lo mismo: «2 sentences in English» + «1 sentences in English» → 3.
+  const counted = new Map<string, number>()
+  for (const note of notes) {
+    const match = /(\d+)\s+sentences?\s+in\s+([\p{L} ]+)/iu.exec(note)
+    if (match !== null) counted.set(match[2]?.trim() ?? '', (counted.get(match[2]?.trim() ?? '') ?? 0) + Number(match[1]))
+  }
+  const note = [...counted].map(([language, count]) => `${String(count)} sentence${count === 1 ? '' : 's'} in ${language}`).join(', ')
+  return { text: out.join('\n\n'), questions: [], ...note === '' ? {} : { note: `Mixed languages: ${note}.` } }
+}
+
 /**
  * Corrige la sugerencia anterior con lo que pide el usuario y deja el resto igual. Si es un
  * prompt largo, con las reglas de reorganizar (sin perder nada).
@@ -678,50 +750,82 @@ async function refine(model: string, input: LocalImproveInput, change: LocalImpr
   return { text: answer.body, questions: answer.questions, ...block === undefined ? {} : { document: block } }
 }
 
+/** Lo que el modelo reescribe entero sin recortar: medido con un prompt de 68.000 caracteres, hacia los 23.000 deja de escribir. */
+const RESTRUCTURE_PART_CHARS = 12_000
+
 /**
- * Un prompt largo: se reorganiza entero, nunca se resume. Si el modelo devuelve mucho menos
- * texto que el original, se le pide otra vez; si sigue corto, se avisa en la nota.
+ * Un prompt largo: se reorganiza entero, nunca se resume. Primero se revisa entero (referencias,
+ * contradicciones, vaguedades); después se reescribe aplicando esas correcciones, de una vez o, si
+ * es muy largo, por partes que se juntan en orden. Si una parte sale mucho más corta que la
+ * original, se pide otra vez; si sigue corta, se avisa en la nota.
  */
 async function restructure(model: string, input: LocalImproveInput, signal: AbortSignal,
   progress?: LocalImproveProgress): Promise<LocalImproveResult> {
   const draft = input.draft.trim()
-  // Unos 3,5 caracteres por token en español: margen de sobra para no cortar la respuesta.
-  const predict = Math.min(16_000, Math.ceil(draft.length / 2.5) + 800)
-  const timeoutMs = Math.max(180_000, predict * 60) * (input.think === true ? 2 : 1)
-  const language = looksSpanish(draft) ? '\n\nWrite it in Spanish, like the original.' : ''
+  const spanish = looksSpanish(draft)
   // Primero, qué hay que corregir (rápido: poca salida); después, la reescritura entera aplicándolo.
   const review = (await chat(model, [
     { role: 'system', content: REVIEW_INSTRUCTIONS },
-    { role: 'user', content: `Prompt to review:\n\n${draft}${looksSpanish(draft) ? '\n\nWrite the list in Spanish.' : ''}` },
-  ], 900, signal, { think: input.think === true, onText: reporter(progress, 'reviewing') })).trim()
+    { role: 'user', content: `Prompt to review:\n\n${draft}${spanish ? '\n\nWrite the list in Spanish.' : ''}` },
+  ], 900, signal, { think: input.think === true, onText: reporter(progress, 'reviewing'), timeoutMs: 600_000 })).trim()
   const fixes = review === '-' ? [] : review.split('\n').map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
     .filter((line) => line !== '')
-  const messages: { role: string; content: string }[] = [
-    { role: 'system', content: RESTRUCTURE_INSTRUCTIONS },
-    {
-      role: 'user',
-      content: `Prompt to restructure (${String(draft.length)} characters):\n\n${draft}`
-        + (fixes.length === 0 ? '' : `\n\nApply these fixes while restructuring:\n${fixes.map((fix) => `- ${fix}`).join('\n')}`)
-        + language,
-    },
-  ]
-  let answer = splitAnswer(await chat(model, messages, predict, signal, { timeoutMs, onText: reporter(progress, 'rewriting') }))
-  if (answer.body.length < draft.length * 0.8) {
-    messages.push({ role: 'assistant', content: answer.body }, {
-      role: 'user',
-      content: `Your version has ${String(answer.body.length)} characters and the original ${String(draft.length)}: you dropped content. `
-        + 'Restructure it again keeping every rule, list item, number, template and table of the original.',
-    })
-    const retry = splitAnswer(await chat(model, messages, predict, signal, { timeoutMs, onText: reporter(progress, 'rewriting again (it came out short)') }))
-    if (retry.body.length > answer.body.length) answer = retry
+  const pieces = draft.length <= RESTRUCTURE_PART_CHARS * 1.5 ? [draft]
+    : groups(blocks(draft), RESTRUCTURE_PART_CHARS).map((group) => group.blocks.join('\n\n'))
+  const out: string[] = []
+  const questions: string[] = []
+  const notes: string[] = []
+  for (const [index, piece] of pieces.entries()) {
+    const total = pieces.length
+    const label = total === 1 ? '' : ` (part ${String(index + 1)} of ${String(total)})`
+    // Unos 3,5 caracteres por token en español: margen de sobra para no cortar la respuesta.
+    const predict = Math.min(16_000, Math.ceil(piece.length / 2.5) + 800)
+    const timeoutMs = Math.max(180_000, predict * 60) * (input.think === true ? 2 : 1)
+    const done = out.join('\n\n')
+    const live = (phase: string) => (text: string, thinking: string): void => {
+      if (progress === undefined) return
+      if (text === '' && thinking !== '') progress('thinking', thinking)
+      else progress(phase, done === '' ? text : `${done}\n\n${text}`)
+    }
+    const context = total === 1
+      ? `Prompt to restructure (${String(piece.length)} characters):\n\n${piece}`
+      : `This is part ${String(index + 1)} of ${String(total)} of a longer prompt; the other parts are restructured separately `
+        + 'and joined in order. Restructure only this part and keep all of it, with its section numbers and headings consistent '
+        + 'with the rest of the prompt; do not add an introduction, a conclusion or a summary of the other parts.'
+        + `\n\nPart ${String(index + 1)} of ${String(total)} (${String(piece.length)} characters):\n\n${piece}`
+    const messages: { role: string; content: string }[] = [
+      { role: 'system', content: RESTRUCTURE_INSTRUCTIONS },
+      {
+        role: 'user',
+        content: context
+          + (fixes.length === 0 ? '' : `\n\nApply these fixes while restructuring${total === 1 ? '' : ' (only those that concern this part)'}:\n${fixes.map((fix) => `- ${fix}`).join('\n')}`)
+          + (spanish ? '\n\nWrite it in Spanish, like the original.' : ''),
+      },
+    ]
+    let answer = splitAnswer(await chat(model, messages, predict, signal, { timeoutMs, onText: live(`rewriting${label}`) }))
+    if (answer.body.length < piece.length * 0.8) {
+      messages.push({ role: 'assistant', content: answer.body }, {
+        role: 'user',
+        content: `Your version has ${String(answer.body.length)} characters and the original ${String(piece.length)}: you dropped content. `
+          + 'Restructure it again keeping every rule, list item, number, template and table of the original.',
+      })
+      const retry = splitAnswer(await chat(model, messages, predict, signal, { timeoutMs, onText: live(`rewriting again${label} (it came out short)`) }))
+      if (retry.body.length > answer.body.length) answer = retry
+    }
+    out.push(answer.body)
+    questions.push(...answer.questions)
+    notes.push(...answer.notes)
   }
-  const ratio = answer.body.length / draft.length
+  const text = out.join('\n\n')
+  const ratio = text.length / draft.length
   const short = ratio < 0.8
     ? [`Shorter than your prompt (${String(Math.round(ratio * 100))}% of its length): check nothing important is missing.`] : []
-  // En la tarjeta: si ha quedado corto y qué se ha corregido (la revisión, o las notas del modelo).
+  const parted = pieces.length > 1 ? [`Reorganized in ${String(pieces.length)} parts.`] : []
+  // En la tarjeta: si ha quedado corto y qué se ha corregido (la revisión, o las notas del modelo), en corto.
+  const brief = (line: string): string => (line.length > 120 ? `${line.slice(0, 117)}…` : line)
   const changed = fixes.length > 0
-    ? [`Fixed ${String(fixes.length)} issue${fixes.length === 1 ? '' : 's'}: ${fixes.slice(0, 3).join(' · ')}${fixes.length > 3 ? ' …' : ''}`]
-    : answer.notes
-  const note = [...short, ...changed].join(' ')
-  return { text: answer.body, questions: answer.questions, ...note === '' ? {} : { note } }
+    ? [`Fixed ${String(fixes.length)} issue${fixes.length === 1 ? '' : 's'}: ${fixes.slice(0, 3).map(brief).join(' · ')}${fixes.length > 3 ? ' …' : ''}`]
+    : notes.slice(0, 3).map(brief)
+  const note = [...short, ...parted, ...changed].join(' ')
+  return { text, questions: questions.slice(0, 2), ...note === '' ? {} : { note } }
 }

@@ -1,31 +1,32 @@
 /**
- * «Improve message» en la barra del cuadro de texto (añadido por dpseek-local-updater).
+ * Reprompt: el botón ✨ de la barra del cuadro de texto (añadido por dpseek-local-updater).
  *
- * Un botón más de la barra, junto al «+» y con su mismo aspecto: pide al modelo del
- * chat (en su misma variante de contexto, así Ollama no lo recarga) una versión más
- * clara del mensaje para la IA. También convierte documentos (PDF, DOCX o texto) en un
- * prompt: con el cuadro vacío, el botón pide los ficheros. Al arrastrar ficheros, la
- * barra marca los dos destinos: soltarlos en la barra los adjunta al mensaje, como
- * siempre; soltarlos en ✨ los carga para el prompt. Los documentos cargados se ven
- * encima del texto, como los adjuntos, con su ✨. Con ellos, lo que escribas en el
- * cuadro es la instrucción (y ✨ la usa); con el cuadro vacío, la tarjeta ofrece qué
- * hacer: implementarlos, revisarlos, planificarlos o explicarlos. «Use» pone solo el
- * prompt en el cuadro; los documentos se quedan como píldoras adjuntas (📎) y se añaden
- * debajo del mensaje, palabra por palabra (enteros o sus partes clave), al enviarlo: así
- * la barra no se llena con páginas de texto.
+ * Un botón más de la barra, junto al «+» y con su mismo aspecto: pide al modelo del chat (en su
+ * misma variante de contexto, así Ollama no lo recarga) una versión más clara del mensaje para
+ * la IA. También convierte documentos (PDF, DOCX o texto) en un prompt: con el cuadro vacío, el
+ * botón pide los ficheros. Al arrastrar ficheros, la barra marca los dos destinos: soltarlos en
+ * la barra los adjunta al mensaje, como siempre; soltarlos en ✨ los carga para el prompt. Los
+ * documentos cargados se ven encima del texto con su ✨; lo que escribas es la instrucción y,
+ * con el cuadro vacío, una fila ofrece qué hacer con ellos.
  *
- * La tarjeta, encima del cuadro, es mínima: las versiones en una línea, el texto
- * editable, un solo botón («Use») y el resto como enlaces. Enseña el texto mientras el
- * modelo lo escribe y cancelar corta la petición también en Ollama. Una frase en «Not
- * quite?» corrige la sugerencia. Después de «Use», la flecha junto a ✨ devuelve tu
- * texto (y la tarjeta). Cada chat guarda su tarjeta: cambiar de chat no la pierde. El
- * botón avisa (color y un punto) si lo que escribes es vago o si acabas de pegar un
- * texto largo que conviene reorganizar; nunca cambia nada por sí solo.
+ * Todo pasa dentro de la propia barra, sin nada encima: el resultado ocupa el sitio del texto
+ * («página» derecha) con sus versiones (Suggested · Step by step, y English / Grammar fixed
+ * cuando existen), el texto editable, «Not quite?» para corregir con una frase, enlaces
+ * (Changes, Think deeper, English, Fix grammar) y «Use». La flecha ‹ vuelve a tu texto original
+ * («página» izquierda, la barra de siempre) y «Reprompt ›» vuelve al nuevo: nunca se ven los dos
+ * a la vez. Con el prompt nuevo a la vista, el botón de enviar envía ese prompt.
+ *
+ * Mientras trabaja, un anillo alrededor de ✨ enseña el progreso (lleno cuando se sabe cuánto
+ * falta; girando cuando no). Una petición corta deja tu texto a la vista hasta tener el
+ * resultado; una larga pasa a la página nueva con el texto en directo, y ‹ deja verlo trabajar
+ * desde tu texto. Después de «Use», la flecha junto a ✨ devuelve tu texto. Cada chat guarda lo
+ * suyo. El botón avisa (color y un punto) si el mensaje es vago, si acabas de pegar un texto
+ * largo o si hay un resultado esperando; nunca cambia nada por sí solo.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { IconSparkleMedium, Tooltip, useAnchoredPosition } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconSparkleMedium, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import { DOCUMENT_ACCEPT, DOCUMENT_MAX_CHARS, localDocumentText, type LocalDocument } from './local-document-text.ts'
 import { localDiff, localDiffCount } from './local-improve-diff.ts'
 import {
@@ -35,15 +36,26 @@ import {
 } from './local-improve-bridge.ts'
 import css from './LocalImprove.module.css'
 
-type VersionKey = 'suggested' | LocalImproveStyle
+type VersionKey = 'suggested' | 'steps' | 'english' | 'grammar'
 type Suggestion = LocalImproveSuggestion & { deep?: boolean }
 
 const VERSIONS: readonly { readonly key: VersionKey; readonly label: string }[] = [
   { key: 'suggested', label: 'Suggested' },
-  { key: 'short', label: 'Short' },
-  { key: 'detailed', label: 'Detailed' },
   { key: 'steps', label: 'Step by step' },
+  { key: 'english', label: 'English' },
+  { key: 'grammar', label: 'Grammar fixed' },
 ]
+/** Versiones que se piden al pulsarlas; las demás solo salen cuando existen. */
+const ON_DEMAND: readonly VersionKey[] = ['suggested', 'steps']
+/** Una petición corta deja tu texto a la vista hasta este tiempo (si acaba antes, enseña el resultado). */
+const REVEAL_MS = 3000
+const RING = 2 * Math.PI * 12.5
+
+/** Cuánto tarda reorganizar un prompt largo: revisarlo y reescribirlo a unos 85 caracteres por segundo (medido con Qwen3.6-35B). */
+const longMinutes = (text: string): string => {
+  const minutes = Math.max(2, Math.round((text.length / 85 + 90) / 60))
+  return minutes <= 3 ? 'a few minutes' : `about ${String(minutes)} minutes`
+}
 
 /** Qué hacer con los documentos (el Host sabe qué pedir con cada uno). */
 const INTENTS: readonly { readonly key: string; readonly label: string }[] = [
@@ -56,12 +68,14 @@ const INTENTS: readonly { readonly key: string; readonly label: string }[] = [
 /** Desde este tamaño tiene sentido ofrecer solo las partes clave (para gastar menos contexto del chat). */
 const KEY_PARTS_CHARS = 20_000
 
-/** Cómo se llama cada fase del Host en la tarjeta. */
+/** Cómo se llama cada fase del Host. */
 const PHASES: Readonly<Record<string, string>> = {
   writing: 'Writing…',
   thinking: 'Thinking…',
   reviewing: 'Reviewing the prompt…',
   rewriting: 'Rewriting it, keeping all of it…',
+  translating: 'Translating…',
+  'fixing the grammar': 'Fixing the grammar…',
 }
 
 /** Una orden sin objeto: «arregla», «hazlo», «mejóralo eso». */
@@ -85,7 +99,7 @@ const count = (text: string): number => text.split(/\s+/).filter((word) => word 
 const number = (value: number): string => value.toLocaleString('en-US')
 const tokens = (chars: number): string => `~${number(Math.max(1, Math.round(chars / 3500)))}k tokens`
 
-/** Lo que «volver» recupera después de «Use»: los documentos y la tarjeta tal como estaban. */
+/** Lo que «volver» recupera después de «Use»: los documentos y el resultado tal como estaban. */
 interface Snapshot {
   readonly documents: readonly LocalDocument[]
   readonly intent: string | null
@@ -99,7 +113,7 @@ interface Snapshot {
   readonly slow: boolean
 }
 
-/** La tarjeta de un chat. */
+/** Lo de Reprompt en un chat. */
 interface State extends Snapshot {
   readonly busy: string | null
   readonly live: { readonly phase: string; readonly text: string }
@@ -111,6 +125,12 @@ interface State extends Snapshot {
   readonly undo: { readonly before: string; readonly after: string; readonly snapshot: Snapshot } | null
   /** Lo que «Use» dejó para enviar debajo del mensaje (los documentos, ya con su título). */
   readonly attached: Attached | null
+  /** A la vista tu texto original (‹), aunque haya resultado o siga trabajando. */
+  readonly minimized: boolean
+  /** Cuándo empezó la petición en curso. */
+  readonly since: number
+  /** La pidió ✨ (no la página del resultado): si es corta, tu texto sigue a la vista hasta el resultado. */
+  readonly quiet: boolean
 }
 
 /** Documentos que se envían debajo del mensaje. */
@@ -126,13 +146,13 @@ const NO_LIVE = { phase: '', text: '' }
 const EMPTY: State = {
   documents: [], intent: null, block: null, attach: 'whole', keyNote: null, versions: {}, active: 'suggested', original: '',
   slow: false, busy: null, live: NO_LIVE, answers: [], error: null, showChanges: false, preview: false, refine: '', undo: null,
-  attached: null,
+  attached: null, minimized: false, since: 0, quiet: false,
 }
 
-// Cada chat guarda su tarjeta aquí (cambiar de chat y volver la encuentra igual, también si sigue trabajando).
+// Cada chat guarda lo suyo aquí (cambiar de chat y volver lo encuentra igual, también si sigue trabajando).
 const sessions = new Map<string, State>()
 const listeners = new Set<() => void>()
-// Cada petición lleva un número por chat: si se descarta la tarjeta, la respuesta que llegue tarde no se enseña.
+// Cada petición lleva un número por chat: si se descarta, la respuesta que llegue tarde no se enseña.
 const generations = new Map<string, number>()
 const running = new Map<string, string>()
 const read = (sid: string): State => sessions.get(sid) ?? EMPTY
@@ -140,12 +160,26 @@ const write = (sid: string, change: (state: State) => State): void => {
   sessions.set(sid, change(read(sid)))
   for (const listener of listeners) listener()
 }
+const made = (state: State): boolean => VERSIONS.some((version) => state.versions[version.key] !== undefined)
+/** Si el resultado ocupa la barra (la «página» derecha) en vez de tu texto. */
+const panelShown = (state: State): boolean => !state.minimized && state.busy === null && made(state) && state.error === null
+
 /**
- * Al enviar (lo llama el envío de la app, input/hub.ts): los documentos adjuntos de ese chat van
- * debajo del mensaje. Se buscan por chat y, si no, por el prompt que puso «Use».
+ * Al enviar (lo llama el envío de la app, input/hub.ts). Con el prompt nuevo a la vista se envía
+ * ese (y los documentos debajo, si los hay); si no, los documentos que «Use» dejó adjuntos van
+ * debajo de tu mensaje. Se buscan por chat y, si no, por el texto.
  */
 const SEND_KEY = Symbol.for('dpseek-local-updater.before-send')
 ;(globalThis as Record<symbol, unknown>)[SEND_KEY] = (sessionId: string, text: string): string => {
+  const shown = sessions.get(sessionId)
+  if (shown !== undefined && panelShown(shown)) {
+    const suggestion = shown.versions[shown.active]
+    if (suggestion !== undefined) {
+      const below = appendix(shown)
+      write(sessionId, () => EMPTY)
+      return below === '' ? suggestion.text.trim() : `${suggestion.text.trim()}\n\n---\n\n${below}`
+    }
+  }
   let sid = sessionId
   let attached = sessions.get(sid)?.attached ?? null
   if (attached === null) {
@@ -184,6 +218,29 @@ function appendix(state: State): string {
   return documents.map((document) => `## ${prefix}: ${document.name}\n\n${document.text}`).join('\n\n')
 }
 
+/**
+ * Cuánto lleva una petición (0–1), o null si no se sabe (el anillo gira). La reescritura de un
+ * prompt largo, por lo escrito frente al original; por partes cuando las hay; si no, por lo
+ * escrito frente a lo que se espera.
+ */
+function progressOf(state: State): number | null {
+  const { phase, text } = state.live
+  const within = (value: number): number => Math.min(0.97, Math.max(0.03, value))
+  if (phase.startsWith('rewriting')) return within(0.25 + 0.75 * text.length / Math.max(1, state.original.length))
+  const part = /part (\d+) of (\d+)/.exec(phase)
+  if (part !== null) {
+    const index = Number(part[1])
+    const total = Math.max(1, Number(part[2]))
+    return within((index - 1 + Math.min(0.9, text.length / 4000)) / total)
+  }
+  if (phase === 'reviewing') return within(0.03 + 0.22 * Math.min(1, text.length / 1500))
+  if (phase === 'writing' || phase === 'translating' || phase === 'fixing the grammar') {
+    const expected = phase === 'writing' && !state.slow ? Math.max(400, Math.min(4000, state.original.length * 1.3)) : Math.max(400, state.original.length)
+    return within(text.length / expected)
+  }
+  return null
+}
+
 /** Flecha de volver (la librería de iconos de la app no trae una). */
 const IconBack = (): ReactNode => (
   <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"
@@ -202,7 +259,7 @@ const IconClip = (): ReactNode => (
 )
 
 /**
- * El botón de la barra, la tarjeta, los documentos cargados y la flecha de volver.
+ * El botón de la barra, la página del resultado, los documentos cargados y la flecha de volver.
  * @param props - chat, borrador, cómo sustituirlo y la clase del botón «+» (mismo aspecto).
  * @returns el botón, o nada fuera de un chat o dentro de un subagente.
  */
@@ -220,37 +277,39 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
   const [vague, setVague] = useState(false)
   // Acabas de pegar un texto largo: el botón sugiere reorganizarlo.
   const [longPaste, setLongPaste] = useState(false)
+  const [, setTick] = useState(0)
   // Ficheros arrastrándose por la ventana, y si están encima de ✨.
   const [dragging, setDragging] = useState(false)
   const [over, setOver] = useState(false)
+  // Los dos huecos que pone InputBar en la barra: encima del texto (documentos) y en su sitio (resultado).
   const [docsHost, setDocsHost] = useState<HTMLElement | null>(null)
+  const [panelHost, setPanelHost] = useState<HTMLElement | null>(null)
   const button = useRef<HTMLButtonElement | null>(null)
   const picker = useRef<HTMLInputElement | null>(null)
-  const card = useRef<HTMLDivElement | null>(null)
   const liveBox = useRef<HTMLPreElement | null>(null)
   const loadRef = useRef<(files: readonly File[]) => void>(() => undefined)
   const previous = useRef({ sid, draft })
-  // La tarjeta va encima de todo el cuadro de texto y con su ancho.
-  const composer = useRef<HTMLElement | null>(null)
-  composer.current = button.current?.closest<HTMLElement>('[data-composer-dock]')?.parentElement
-    ?? button.current?.parentElement?.parentElement?.parentElement ?? null
   const suggestion = s.versions[s.active] ?? null
-  const choosing = s.documents.length > 0 && s.intent === null && s.busy === null && s.error === null
-    && s.versions.suggested === undefined && s.versions[s.active] === undefined
-  const open = s.busy !== null || suggestion !== null || s.error !== null || s.documents.length > 0
-  const position = useAnchoredPosition({ open, anchorRef: composer, panelRef: card, side: 'top', align: 'start', gap: 8, margin: 12 })
-  const bounds = composer.current?.getBoundingClientRect()
-  const width = bounds?.width
-  // Lo que cabe encima del cuadro (en un chat nuevo está a media altura): lo demás, con scroll.
-  const room = bounds === undefined ? undefined : Math.max(180, bounds.top - 20)
+  const choosing = s.documents.length > 0 && s.intent === null && s.busy === null && s.error === null && !made(s)
   const enabled = host !== undefined && sessionId !== undefined && !subagent && !disabled
+  // La página del resultado: con el resultado, o trabajando (una petición corta, pasados 3 s).
+  const revealed = s.busy !== null && (!s.quiet || s.slow || s.documents.length > 0 || Date.now() - s.since >= REVEAL_MS)
+  const page = !s.minimized && ((s.busy !== null && revealed) || (s.busy === null && (made(s) || s.error !== null)))
 
   // El botón avisa de un mensaje vago cuando dejas de escribir (no mientras escribes).
   useEffect(() => {
     const timer = setTimeout(() => { setVague(isVagueDraft(draft)) }, 800)
     return () => { clearTimeout(timer) }
   }, [draft])
-  // Un texto largo que aparece de golpe (pegado) en el mismo chat; no al cambiar de chat ni al usar ✨.
+  // Una petición corta pasa a la página del resultado a los 3 s (si no ha terminado antes).
+  useEffect(() => {
+    if (s.busy === null) return
+    const left = s.since + REVEAL_MS - Date.now()
+    if (left <= 0) return
+    const timer = setTimeout(() => { setTick((value) => value + 1) }, left + 20)
+    return () => { clearTimeout(timer) }
+  }, [s.busy, s.since])
+  // Un texto largo que aparece de golpe (pegado) en el mismo chat; no al cambiar de chat ni al usar Reprompt.
   useEffect(() => {
     const before = previous.current
     previous.current = { sid, draft }
@@ -262,10 +321,19 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
   useEffect(() => {
     if (liveBox.current !== null) liveBox.current.scrollTop = liveBox.current.scrollHeight
   }, [s.live.text])
-  // El hueco de los documentos, encima del texto (lo pone InputBar).
+  // Los huecos de la barra (los pone InputBar).
   useEffect(() => {
-    setDocsHost(button.current?.closest('[data-composer-card]')?.querySelector<HTMLElement>('[data-local-improve-docs]') ?? null)
+    const bar = button.current?.closest('[data-composer-card]')
+    setDocsHost(bar?.querySelector<HTMLElement>('[data-local-improve-docs]') ?? null)
+    setPanelHost(bar?.querySelector<HTMLElement>('[data-local-improve-panel]') ?? null)
   }, [sessionId, enabled])
+  // Con la página del resultado, tu texto se esconde (sigue ahí: ‹ lo vuelve a enseñar).
+  useEffect(() => {
+    const bar = button.current?.closest<HTMLElement>('[data-composer-card]')
+    if (bar == null || !page || panelHost === null) return
+    bar.setAttribute('data-local-reprompt', '')
+    return () => { bar.removeAttribute('data-local-reprompt') }
+  }, [page, panelHost])
   // Con el texto desplazado, la línea de arriba queda cortada: se difumina (solo mientras hay scroll).
   useEffect(() => {
     const scroller = button.current?.closest('[data-composer-card]')?.querySelector<HTMLElement>('[data-input-scroll]')
@@ -356,13 +424,13 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
     const current = (): boolean => generations.get(sid) === generation
     const jobId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${String(Date.now())}-${String(Math.random())}`
     running.set(sid, jobId)
-    set({ busy: status, error: null, live: NO_LIVE, showChanges: false, preview: false })
+    set({ busy: status, error: null, live: NO_LIVE, showChanges: false, preview: false, minimized: false, since: Date.now(), quiet: false })
     const poll = setInterval(() => {
       host.progress(jobId).then((value) => {
         if (current() && value.phase !== '') set({ live: value })
       }, () => undefined)
     }, 500)
-    host.improve(sid, draft, { ...options, jobId }).then(
+    host.improve(sid, s.original === '' ? draft : s.original, { ...options, jobId }).then(
       (value) => { if (current()) done(value) },
       (reason: unknown) => { if (current()) set({ error: reason instanceof Error ? reason.message : String(reason) }) },
     ).finally(() => {
@@ -388,10 +456,41 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
       }))
     })
   }
-  /** Primera sugerencia (o desde cero): se olvidan las versiones anteriores. */
-  const start = (options: LocalImproveOptions, status: string, long: boolean): void => {
-    set({ versions: {}, active: 'suggested', original: draft, slow: long })
-    run(options, status)
+  /** Primera petición (o desde cero) con lo que hay ahora en la barra: se olvidan las versiones anteriores. */
+  const start = (options: LocalImproveOptions, status: string, long: boolean, quiet: boolean): void => {
+    write(sid, (state) => ({ ...state, versions: {}, active: 'suggested', original: draft, slow: long }))
+    // request lee el original de este render: se pasa el de ahora.
+    invalidate()
+    const generation = generations.get(sid) ?? 0
+    const current = (): boolean => generations.get(sid) === generation
+    const jobId = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${String(Date.now())}-${String(Math.random())}`
+    running.set(sid, jobId)
+    set({ busy: status, error: null, live: NO_LIVE, showChanges: false, preview: false, minimized: false, since: Date.now(), quiet })
+    const poll = setInterval(() => {
+      host.progress(jobId).then((value) => {
+        if (current() && value.phase !== '') set({ live: value })
+      }, () => undefined)
+    }, 500)
+    host.improve(sid, draft, { ...options, jobId }).then(
+      (value) => {
+        if (!current()) return
+        write(sid, (state) => ({
+          ...state,
+          versions: { suggested: value },
+          active: 'suggested',
+          answers: value.questions.map(() => ''),
+          refine: '',
+          ...value.document === undefined ? {} : { block: value.document },
+        }))
+      },
+      (reason: unknown) => { if (current()) set({ error: reason instanceof Error ? reason.message : String(reason) }) },
+    ).finally(() => {
+      clearInterval(poll)
+      if (current()) {
+        set({ busy: null })
+        running.delete(sid)
+      }
+    })
   }
   const base = (state: State = s): LocalImproveOptions => {
     const document = combined(state.documents)
@@ -402,7 +501,7 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
     invalidate()
     const generation = generations.get(sid) ?? 0
     const controller = new AbortController()
-    set({ busy: `Reading ${files.length === 1 ? files[0]?.name ?? '' : `${String(files.length)} files`}…`, error: null, live: NO_LIVE })
+    set({ busy: `Reading ${files.length === 1 ? files[0]?.name ?? '' : `${String(files.length)} files`}…`, error: null, live: NO_LIVE, quiet: true, since: Date.now() })
     void (async () => {
       const loaded: LocalDocument[] = []
       const failed: string[] = []
@@ -431,47 +530,72 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
     const document = combined(s.documents)
     if (document === undefined || s.busy !== null || value.trim() === '') return
     set({ intent: value.trim() })
-    start({ document, intent: value.trim() }, `Writing a prompt from ${s.documents.length === 1 ? s.documents[0]?.name ?? '' : `${String(s.documents.length)} documents`}…`, false)
+    start({ document, intent: value.trim() }, `Writing a prompt from ${s.documents.length === 1 ? s.documents[0]?.name ?? '' : `${String(s.documents.length)} documents`}…`, false, false)
   }
   const pick = (): void => { picker.current?.click() }
   const click = (): void => {
-    if (s.busy !== null) return
+    // Trabajando, o con un resultado de este mismo texto: ✨ enseña la página del resultado.
+    if (s.busy !== null) { set({ minimized: false, since: 0 }); return }
+    if (s.minimized && (made(s) || s.error !== null) && draft === s.original) { set({ minimized: false }); return }
     setLongPaste(false)
     const document = combined(s.documents)
     if (document === undefined && empty) { pick(); return }
-    // Con documentos y el cuadro vacío, la tarjeta ya ofrece qué hacer con ellos.
+    // Con documentos y el cuadro vacío, la fila ya ofrece qué hacer con ellos.
     if (document !== undefined && empty) return
     // Con documentos y texto, el texto es la instrucción.
     if (document !== undefined) {
       set({ intent: null })
-      start({ document }, `Writing a prompt from your text and ${s.documents.length === 1 ? s.documents[0]?.name ?? '' : `${String(s.documents.length)} documents`}…`, false)
+      start({ document }, `Writing a prompt from your text and ${s.documents.length === 1 ? s.documents[0]?.name ?? '' : `${String(s.documents.length)} documents`}…`, false, false)
       return
     }
     const long = isLongPrompt(draft)
-    start({}, long ? 'Reorganizing a long prompt, keeping all of it… (a few minutes)' : 'Improving message…', long)
+    start({}, long ? `Reorganizing a long prompt, keeping all of it… (${longMinutes(draft)})` : 'Reprompting…', long, true)
   }
+  /** Descarta el resultado: queda tu texto, como estaba. */
   const close = (): void => {
     invalidate()
-    write(sid, (state) => ({ ...EMPTY, undo: state.undo, attached: state.attached }))
+    write(sid, (state) => ({ ...EMPTY, undo: state.undo, attached: state.attached, documents: state.documents, intent: state.intent }))
   }
   const removeDocument = (index: number): void => {
     if (s.busy !== null) return
     const documents = s.documents.filter((_, at) => at !== index)
-    if (documents.length === 0 && s.versions.suggested === undefined) { close(); return }
     set({ documents, intent: null, block: null, attach: 'whole', keyNote: null, versions: {}, active: 'suggested', error: null })
   }
   const pickVersion = (key: VersionKey): void => {
     if (s.busy !== null) return
     if (s.versions[key] !== undefined) { set({ active: key, showChanges: false }); return }
-    run({ ...base(), ...key === 'suggested' ? {} : { style: key } }, `Writing the ${VERSIONS.find((v) => v.key === key)?.label.toLowerCase() ?? ''} version…`, key)
+    if (!ON_DEMAND.includes(key)) return
+    const steps: LocalImproveStyle = 'steps'
+    run({ ...base(), ...key === 'steps' ? { style: steps } : {} },
+      key === 'steps' ? 'Writing the step-by-step version…' : 'Reprompting…', key)
   }
-  const style = (): LocalImproveOptions => (s.active === 'suggested' ? {} : { style: s.active })
+  /** Las versiones hechas, en orden: las flechas ‹ › pasan de una a otra (y ‹ desde la primera, a tu texto). */
+  const ready = VERSIONS.map((version) => version.key).filter((key) => s.versions[key] !== undefined)
+  const style = (): LocalImproveOptions => (s.active === 'steps' ? { style: 'steps' as LocalImproveStyle } : {})
+  const previousPage = (): void => {
+    const at = ready.indexOf(s.active)
+    const before = at > 0 ? ready[at - 1] : undefined
+    if (s.busy === null && before !== undefined) set({ active: before, showChanges: false })
+    else set({ minimized: true })
+  }
+  const nextPage = (): void => {
+    const at = ready.indexOf(s.active)
+    const after = ready[at + 1]
+    if (s.busy === null && after !== undefined) set({ active: after, showChanges: false })
+  }
   const thinkDeeper = (): void => {
     if (s.busy !== null) return
     run({ ...base(), ...style(), think: true },
       s.slow ? 'Thinking it through, then reorganizing… (several minutes)' : 'Thinking it through…', s.active, true)
   }
-  /** Corrige la sugerencia con lo que digas («más corto», «no toques X»). */
+  /** Traduce, corrige o unifica el idioma del texto que se ve (sale como otra versión). */
+  const transformText = (kind: 'english' | 'grammar' | 'unify'): void => {
+    if (s.busy !== null || suggestion === null) return
+    run({ transform: { kind, text: suggestion.text } },
+      kind === 'english' ? 'Translating into English…' : kind === 'grammar' ? 'Fixing the grammar…' : 'Translating the other sentences…',
+      kind === 'english' ? 'english' : 'grammar')
+  }
+  /** Corrige el resultado con lo que digas («más corto», «no toques X»). */
   const refine = (): void => {
     if (s.busy !== null || suggestion === null || s.refine.trim() === '') return
     run({ ...base(), ...style(), refine: { previous: suggestion.text, request: s.refine.trim() } }, 'Applying your change…', s.active)
@@ -505,25 +629,28 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
     setDraft(after)
     write(sid, () => ({ ...EMPTY, attached, undo: { before: draft, after, snapshot: { documents, intent, block, attach, keyNote, versions, active, original, slow } } }))
   }
-  /** Volver: tu texto de antes, con sus documentos y la tarjeta como estaban. */
+  /** Volver: tu texto de antes, con sus documentos y el resultado como estaban. */
   const undo = (): void => {
     if (s.undo === null) return
     const { before, snapshot } = s.undo
     invalidate()
     setDraft(before)
-    write(sid, () => ({ ...EMPTY, ...snapshot }))
+    write(sid, () => ({ ...EMPTY, ...snapshot, minimized: true }))
   }
 
   const diff = suggestion !== null && s.original.trim() !== '' ? localDiff(s.original, suggestion.text) : null
   // Con documentos, tu texto es la instrucción, no un borrador del prompt: comparar no dice nada.
   const counts = diff === null || s.documents.length > 0 ? null : localDiffCount(diff)
-  const hint = (vague || longPaste) && s.busy === null && !open
+  // Resultado esperando con tu texto a la vista: ✨ pone su punto de «listo».
+  const waiting = s.minimized && s.busy === null && (made(s) || s.error !== null)
+  const hint = ((vague || longPaste) && s.busy === null && !page && !waiting) || waiting
+  const progress = s.busy === null ? null : progressOf(s)
   const docsLabel = s.documents.length === 1 ? 'it' : 'them'
-  const label = s.busy ?? (s.documents.length > 0
+  const label = waiting ? 'Reprompt is ready: click to see it' : s.busy ?? (s.documents.length > 0
     ? (empty ? `Choose what to do with the document${s.documents.length === 1 ? '' : 's'}` : `Make a prompt from your text and the document${s.documents.length === 1 ? '' : 's'}`)
     : empty ? 'Create a prompt from files (PDF, DOCX or text)'
       : longPaste ? 'Long text: click to reorganize it, keeping all of it'
-        : vague ? 'This message is a bit vague: click to make it clearer' : 'Improve message')
+        : vague ? 'This message is a bit vague: click to make it clearer' : 'Reprompt')
   const phase = s.live.phase === '' ? s.busy : PHASES[s.live.phase] ?? `${s.live.phase.charAt(0).toUpperCase()}${s.live.phase.slice(1)}…`
   const intentLabel = s.intent === null ? null
     : INTENTS.find((item) => item.key === s.intent)?.label ?? `“${s.intent.length > 40 ? `${s.intent.slice(0, 40)}…` : s.intent}”`
@@ -531,30 +658,48 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
   const allText = s.documents.reduce((sum, document) => sum + document.text.length, 0)
   const allWords = s.documents.reduce((sum, document) => sum + document.words, 0)
   const showUndo = s.undo !== null && draft.trim() === s.undo.after.trim() && s.busy === null
-  const tabs = !s.slow && !choosing && (s.versions.suggested !== undefined || (s.busy !== null && s.active !== 'suggested'))
+  const shownVersions = VERSIONS.filter((version) => s.versions[version.key] !== undefined || ON_DEMAND.includes(version.key))
+  // Con tu texto a la vista y un resultado (o trabajando): el camino de vuelta a la página del resultado.
+  const toPage = !page && (s.busy !== null || made(s) || s.error !== null)
+  const lines = suggestion === null ? 1 : suggestion.text.split('\n').length
 
   return (
     <>
       <Tooltip label={target ? 'Drop here to make a prompt from it' : label} side="top" delayMs={hint ? 0 : 500}>
         <button ref={button} type="button"
-          className={[className, hint ? css.hint : '', target ? css.target : '', s.documents.length > 0 ? css.loaded : ''].filter(Boolean).join(' ')}
-          aria-label={target ? 'Make a prompt from the dropped files' : empty && s.documents.length === 0 ? 'Create a prompt from files' : 'Improve message'}
+          className={[className, css.host, hint ? css.hint : '', target ? css.target : '', s.documents.length > 0 ? css.loaded : ''].filter(Boolean).join(' ')}
+          aria-label={target ? 'Make a prompt from the dropped files' : empty && s.documents.length === 0 ? 'Reprompt: create a prompt from files' : 'Reprompt'}
           data-local-improve data-local-improve-hint={hint || undefined} data-busy={s.busy !== null || undefined}
+          data-local-improve-ready={waiting || undefined}
           data-local-improve-target={target || undefined} data-over={(target && over) || undefined}
-          disabled={disabled || s.busy !== null}
+          disabled={disabled}
           onMouseDown={(event) => { event.preventDefault() }} onClick={click}>
-          <IconSparkleMedium size={14} className={s.busy !== null ? css.busy : undefined} />
+          <IconSparkleMedium size={14} />
+          {s.busy !== null && !target && (
+            <svg className={progress === null ? `${css.ring} ${css.spin}` : css.ring} viewBox="0 0 28 28" aria-hidden="true" data-local-improve-ring>
+              <circle cx="14" cy="14" r="12.5" className={css.ringTrack} />
+              <circle cx="14" cy="14" r="12.5" className={css.ringValue} strokeDasharray={String(RING)}
+                strokeDashoffset={String(progress === null ? RING * 0.72 : RING * (1 - progress))} />
+            </svg>
+          )}
           {target && <span>Make prompt</span>}
           {!target && s.documents.length > 0 && <span className={css.count} aria-hidden="true">{s.documents.length}</span>}
         </button>
       </Tooltip>
       {showUndo && (
-        <Tooltip label="Back to your text (undo ✨)" side="top" delayMs={300}>
+        <Tooltip label="Back to your text (undo Reprompt)" side="top" delayMs={300}>
           <button type="button" className={className} aria-label="Back to your text" data-local-improve-undo
             onMouseDown={(event) => { event.preventDefault() }} onClick={undo}>
             <IconBack />
           </button>
         </Tooltip>
+      )}
+      {/* Con tu texto a la vista y un resultado (o trabajando): junto a ✨, el camino a la página del resultado. */}
+      {toPage && (
+        <button type="button" className={css.toPage} data-local-improve-to-page data-waiting={waiting || undefined}
+          onMouseDown={(event) => { event.preventDefault() }} onClick={() => { set({ minimized: false, since: 0 }) }}>
+          {s.busy !== null ? 'Reprompting' : s.error !== null ? 'Reprompt failed' : 'Reprompt'} ›
+        </button>
       )}
       <input ref={picker} type="file" accept={DOCUMENT_ACCEPT} multiple hidden data-local-improve-file
         onChange={(event) => {
@@ -562,7 +707,7 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
           event.target.value = ''
           if (files.length > 0) load(files)
         }} />
-      {docsHost !== null && (s.documents.length > 0 || s.attached !== null) && createPortal(
+      {docsHost !== null && (s.documents.length > 0 || s.attached !== null || choosing) && createPortal(
         <div className={css.docs}>
           {s.attached !== null && (
             <span className={`${css.pill} ${css.pillAttached}`} data-local-improve-attached
@@ -589,33 +734,50 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
                 onMouseDown={(event) => { event.preventDefault() }} onClick={() => { removeDocument(index) }}>✕</button>
             </span>
           ))}
+          {choosing && (
+            <span className={css.choices} data-local-improve-intent>
+              <span className={css.title}>{empty ? `Do with ${docsLabel}:` : 'Or:'}</span>
+              {!empty && (
+                <button type="button" className={`${css.choice} ${css.choiceMain}`} onClick={click}>With my text</button>
+              )}
+              {INTENTS.map((item) => (
+                <button key={item.key} type="button" className={css.choice} onMouseDown={(event) => { event.preventDefault() }}
+                  onClick={() => { choose(item.key) }}>{item.label}</button>
+              ))}
+              <button type="button" className={css.link} onMouseDown={(event) => { event.preventDefault() }} onClick={pick}>Add file</button>
+            </span>
+          )}
         </div>,
         docsHost,
       )}
-      {open && !target && createPortal(
-        <div ref={card} className={css.card} role="dialog" aria-label="Improve message" data-local-improve-card
-          style={{ ...position ?? { visibility: 'hidden', left: 0, top: 0 }, ...width === undefined ? {} : { width }, ...room === undefined ? {} : { maxHeight: room, overflowY: 'auto' } }}>
+      {panelHost !== null && page && createPortal(
+        <div className={css.panel} role="region" aria-label="Reprompt" data-local-improve-card>
           <div className={css.head}>
-            {tabs && (
-              <div className={css.tabs} role="tablist" data-local-improve-versions>
-                {VERSIONS.map((version) => (
-                  <button key={version.key} type="button" role="tab" className={css.tab} aria-selected={s.active === version.key}
-                    disabled={s.busy !== null} data-ready={s.versions[version.key] !== undefined || undefined}
-                    onClick={() => { pickVersion(version.key) }}>{version.label}</button>
-                ))}
-              </div>
-            )}
-            {choosing && <span className={css.title}>What should the AI do with {docsLabel}?</span>}
-            {!tabs && !choosing && s.slow && <span className={css.title}>Reorganized prompt</span>}
+            <Tooltip label="Back to your text" side="top" delayMs={300}>
+              <button type="button" className={css.arrow} aria-label="Back to your text" onClick={previousPage} data-local-improve-prev>‹</button>
+            </Tooltip>
+            <div className={css.tabs} role="tablist" data-local-improve-versions>
+              {shownVersions.map((version) => (
+                <button key={version.key} type="button" role="tab" className={css.tab} aria-selected={s.active === version.key}
+                  disabled={s.busy !== null} data-ready={s.versions[version.key] !== undefined || undefined}
+                  data-version={version.key}
+                  onClick={() => { pickVersion(version.key) }}>{version.key === 'suggested' && s.slow ? 'Reorganized' : version.label}</button>
+              ))}
+            </div>
+            <button type="button" className={css.arrow} aria-label="Next version" onClick={nextPage} data-local-improve-next
+              disabled={s.busy !== null || ready.indexOf(s.active) >= ready.length - 1}>›</button>
             <span className={css.spacer} />
             {suggestion !== null && s.busy === null && (
               <span className={css.meta}>
                 {intentLabel === null ? '' : `${intentLabel} · `}{suggestion.deep === true ? 'thought through · ' : ''}{(suggestion.ms / 1000).toFixed(1)} s
               </span>
             )}
-            {s.busy !== null
-              ? <button type="button" className={css.link} onClick={close} data-local-improve-cancel>Cancel</button>
-              : <button type="button" className={css.close} aria-label="Close" onClick={close} data-local-improve-close>✕</button>}
+            {s.busy !== null && <button type="button" className={css.link} onClick={close} data-local-improve-cancel>Cancel</button>}
+            {s.busy === null && (
+              <Tooltip label="Discard and go back to your text" side="top" delayMs={300}>
+                <button type="button" className={css.close} aria-label="Discard" onClick={close} data-local-improve-close>✕</button>
+              </Tooltip>
+            )}
           </div>
           {s.busy !== null && <>
             <p className={css.status}>{phase}</p>
@@ -625,29 +787,20 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
               </pre>
             )}
           </>}
-          {choosing && (
-            <div className={css.intent} data-local-improve-intent>
-              <div className={css.choices}>
-                {!empty && (
-                  <button type="button" className={`${css.choice} ${css.choiceMain}`} onClick={click}>With my text</button>
-                )}
-                {INTENTS.map((item) => (
-                  <button key={item.key} type="button" className={css.choice} onClick={() => { choose(item.key) }}>{item.label}</button>
-                ))}
-                <button type="button" className={css.link} onClick={pick}>Add file</button>
-              </div>
-              <span className={css.note}>
-                {empty ? `Or type in the box what to do with ${docsLabel}, then press ✨` : 'Or press ✨ to use what you wrote as the instruction'}
-              </span>
-            </div>
-          )}
           {s.error !== null && s.busy === null && <p className={css.error}>{s.error}</p>}
           {suggestion !== null && s.busy === null && s.error === null && <>
-            {suggestion.note !== undefined && <p className={css.note}>{suggestion.note}</p>}
+            {suggestion.note !== undefined && (
+              <p className={css.note}>
+                {suggestion.note}
+                {suggestion.note.startsWith('Mixed languages') && <>
+                  {' '}
+                  <button type="button" className={css.link} onClick={() => { transformText('unify') }} data-local-improve-unify>Translate them</button>
+                </>}
+              </p>
+            )}
             {s.showChanges && diff !== null
               ? (
-                <div className={css.diff} data-local-improve-diff
-                  style={{ maxHeight: `${String(Math.min(s.slow ? 22 : 12, Math.max(3, suggestion.text.split('\n').length + 1)) * 20 + 18)}px` }}>
+                <div className={css.diff} data-local-improve-diff>
                   {diff.map((part, index) => part.kind === 'same'
                     ? <span key={index}>{part.text}</span>
                     : part.kind === 'add'
@@ -656,8 +809,7 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
                 </div>
               )
               : (
-                <textarea className={css.text} value={suggestion.text}
-                  rows={Math.min(s.slow ? 22 : 12, Math.max(3, suggestion.text.split('\n').length + 1))}
+                <textarea className={css.text} value={suggestion.text} rows={Math.min(14, Math.max(2, lines))} aria-label="New prompt"
                   onChange={(event) => {
                     const text = event.target.value
                     write(sid, (state) => ({ ...state, versions: { ...state.versions, [state.active]: { ...suggestion, text } } }))
@@ -707,8 +859,6 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
               placeholder="Not quite? Say what to change, then press Enter"
               onChange={(event) => { set({ refine: event.target.value }) }}
               onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); refine() } }} />
-          </>}
-          {suggestion !== null && s.busy === null && s.error === null && (
             <div className={css.actions}>
               {answered.length > 0 && (
                 <button type="button" className={css.link} onClick={updateWithAnswers}>Update with answers</button>
@@ -719,17 +869,29 @@ export function LocalImprove({ sessionId, draft, subagent, setDraft, className, 
                   {s.showChanges ? 'Edit' : `Changes +${String(counts.added)} −${String(counts.removed)}`}
                 </button>
               )}
-              {suggestion.deep !== true && (
+              {suggestion.deep !== true && (s.active === 'suggested' || s.active === 'steps') && (
                 <Tooltip label="Ask again with the model's reasoning: better for tricky cases, but slower (about a minute)" side="top" delayMs={400}>
                   <button type="button" className={css.link} onClick={thinkDeeper} data-local-improve-deeper>Think deeper</button>
                 </Tooltip>
               )}
+              {s.active !== 'english' && (
+                <Tooltip label="Translate this text into English as faithfully as possible (code, names and numbers stay as they are)" side="top" delayMs={400}>
+                  <button type="button" className={css.link} onClick={() => { transformText('english') }} data-local-improve-english>English</button>
+                </Tooltip>
+              )}
+              {s.active !== 'grammar' && (
+                <Tooltip label="Fix spelling and grammar in each sentence's own language; technical English words stay as they are" side="top" delayMs={400}>
+                  <button type="button" className={css.link} onClick={() => { transformText('grammar') }} data-local-improve-grammar>Fix grammar</button>
+                </Tooltip>
+              )}
               <span className={css.spacer} />
-              <button type="button" className={css.use} onClick={use}>Use</button>
+              <Tooltip label="Put it in the box to edit it there (the send button also sends it as it is)" side="top" delayMs={500}>
+                <button type="button" className={css.use} onClick={use}>Use</button>
+              </Tooltip>
             </div>
-          )}
+          </>}
         </div>,
-        window.document.body,
+        panelHost,
       )}
     </>
   )

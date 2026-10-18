@@ -154,9 +154,13 @@ export class LocalSessionDeleter {
   }
 }
 
-/** Subagentes (y los suyos) creados desde un chat. */
+/**
+ * Subagentes (y los suyos) creados desde un chat. Solo los que delegan (delegationDepth > 0): las
+ * copias de «editar y reenviar» también apuntan a su chat original (parentSession) y son chats
+ * aparte, que no se deben borrar con él.
+ */
 function descendants(
-  records: readonly { readonly header: { readonly id: SessionId; readonly parentSession?: SessionId } }[],
+  records: readonly { readonly header: { readonly id: SessionId; readonly parentSession?: SessionId; readonly delegationDepth?: number } }[],
   sessionId: SessionId,
 ): SessionId[] {
   const found: SessionId[] = []
@@ -165,7 +169,8 @@ function descendants(
     const parent = queue.shift()
     for (const record of records) {
       const id = record.header.id
-      if (record.header.parentSession === parent && id !== sessionId && !found.includes(id)) {
+      const delegated = (record.header.delegationDepth ?? 0) > 0
+      if (delegated && record.header.parentSession === parent && id !== sessionId && !found.includes(id)) {
         found.push(id)
         queue.push(id)
       }

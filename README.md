@@ -190,14 +190,22 @@ Para tareas que ocuparían mucho del chat sin llenarlo:
   con las cifras al pasar el ratón. Un clic manda lo que has escrito a un subchat.
 - Dentro de un subchat no se abre otro.
 
-## Mejorar un mensaje antes de enviarlo
+## Reprompt: mejorar un mensaje antes de enviarlo
 
-En la barra del cuadro de texto, junto al **+**, el botón ✨ (**Improve message**)
+En la barra del cuadro de texto, junto al **+**, el botón ✨ (**Reprompt**)
 reescribe tu mensaje para que la IA lo entienda sin ambigüedad (qué hacer, con qué
 ficheros o nombres y qué resultado esperas), sin cambiar lo que pides, sin responderlo
-y en tu idioma. La sugerencia sale en una tarjeta pequeña encima del cuadro y se puede
-retocar: **Use** la pone en el cuadro (no la envía) y ✕ deja lo tuyo. La tarjeta es
-mínima: las versiones en una línea, el texto, un solo botón y lo demás como enlaces.
+y en tu idioma. Todo pasa dentro de la propia barra, sin nada encima: el prompt nuevo ocupa el
+sitio de tu texto, con sus versiones en una línea, el texto editable, lo demás como enlaces y
+**Use** (lo pone en el cuadro para retocarlo). **‹** vuelve a tu texto original y **Reprompt ›**
+al nuevo: nunca se ven los dos a la vez. Con el prompt nuevo a la vista, el botón de enviar envía
+ese; ✕ lo descarta y deja lo tuyo.
+
+- **Anillo de progreso:** mientras trabaja, un anillo alrededor de ✨ se va llenando (por
+  partes, o por lo escrito frente a lo esperado) o gira cuando no se sabe cuánto falta. Las
+  peticiones cortas dejan tu texto a la vista hasta tener el resultado; las largas enseñan el
+  texto en directo, y **‹** deja verlo trabajar desde tu texto: al terminar, ✨ pone su punto de
+  «listo» y **Reprompt ›** (o ✨) enseña el resultado.
 
 - **No inventa nombres:** ve los últimos mensajes del chat y la lista de ficheros del
   proyecto (solo los nombres), así que «el archivo de la calculadora» pasa a ser
@@ -214,11 +222,19 @@ mínima: las versiones en una línea, el texto, un solo botón y lo demás como 
   instrucciones vagas, pasos sin orden claro) y después lo reescribe entero, ordenado en
   secciones, con todas sus reglas, cifras, tablas y plantillas, corrigiendo esos problemas.
   Si la versión nueva sale mucho más corta que la tuya, lo repite y, si sigue corta, avisa.
-  Tarda unos minutos; la tarjeta dice qué ha corregido.
+  Un prompt enorme (más de unas 18.000 letras) se reescribe por partes de unas 12.000 que se
+  juntan en orden: de una vez, el modelo deja de escribir hacia las 23.000 y el resultado se
+  quedaba en un tercio. Tarda unos 85 caracteres por segundo (la tarjeta dice los minutos).
 - **Mientras escribe:** la tarjeta enseña el texto según llega (y, en los prompts largos,
   la fase: revisando o reescribiendo); **Cancel** corta la petición también en Ollama.
-- **Otras versiones:** **Suggested · Short · Detailed · Step by step**, en una línea; cada una
-  se pide al pulsarla y se guarda, así cambiar entre ellas es inmediato.
+- **Versiones:** **Suggested · Step by step** (y **English** / **Grammar fixed** cuando existen)
+  en una línea, con flechas ‹ › para pasar de una a otra; desde la primera, ‹ lleva a tu texto.
+  **Step by step** se pide al pulsarla y todas se guardan.
+- **English y Fix grammar:** dos enlaces más. **English** traduce el texto que ves lo más fiel
+  posible (código, nombres y cifras tal cual); **Fix grammar** corrige faltas y gramática de
+  cada frase en su idioma y deja como están los términos técnicos en inglés dentro de un texto
+  en español. Si hay frases enteras en otro idioma, lo dice («Mixed languages: 2 sentences in
+  English») y **Translate them** las pasa al idioma principal. Salen como versiones nuevas.
 - **Corregir con una frase:** en **Not quite?** escribes lo que no te convence («más corto»,
   «en Python», «no toques la parte de X») y la rehace a partir de la sugerencia, no desde cero.
 - **Volver:** después de **Use**, una flecha junto a ✨ devuelve tu texto de antes, con sus
@@ -231,7 +247,7 @@ mínima: las versiones en una línea, el texto, un solo botón y lo demás como 
   respecto a tu texto; los cambios solo de formato (viñetas, negritas) no cuentan.
 - **El botón avisa:** si lo que has escrito es vago («arregla eso», «no va», «hazlo como te
   dije») o acabas de pegar un texto largo que conviene reorganizar, el ✨ se pone de color con
-  un punto. No cambia nada solo.
+  un punto. No cambia nada solo, y la gramática solo se revisa cuando pulsas **Fix grammar**.
 - **De documentos a un prompt:** con el cuadro vacío, ✨ pide los ficheros (PDF, DOCX o
   texto; uno o varios). Al arrastrar ficheros ya no sale la capa a pantalla completa: la
   barra se marca con un borde («Drop to attach») y ✨ se convierte en **Make prompt**.
@@ -421,6 +437,16 @@ repetirlo en [`sistema/rendimiento/`](sistema/rendimiento)):
 - **Corrector en español:** el corrector ortográfico usa el idioma de Windows además del
   inglés (antes subrayaba en rojo todo lo escrito en español), con los diccionarios del
   propio Windows: nunca descarga nada.
+- **Con la ventana cerrada no retiene el modelo:** cerrar la ventana solo la esconde (la app
+  sigue en la bandeja para terminar lo que esté haciendo, y apenas gasta), pero el modelo de
+  Ollama se quedaba cargado (decenas de GB de RAM y la gráfica) y se volvía a cargar si Ollama
+  lo soltaba. Ahora, con la ventana cerrada más de 2 minutos se descarga y no se vuelve a
+  cargar; al abrir la ventana se carga enseguida (unos segundos antes de tu primer mensaje).
+- **Copias de «editar y reenviar» como chats normales:** editar un mensaje crea una copia del
+  chat que apunta al original. La app la trataba como un subagente: sin menú con el botón
+  derecho, sin poder seleccionarla y sin aviso al terminar. Y al borrar el chat original se
+  borraban también sus copias (las nuevas versiones). Ahora solo cuentan como subagentes los
+  que lo son de verdad.
 
 ## Qué cambia respecto a la versión oficial
 
@@ -451,7 +477,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Actualizar Ollama desde la app, en el aviso de actualizaciones de abajo a la izquierda (opcional) | `packages/client/ui-settings-general` (`LocalUpdatesIndicator.tsx`) + `packages/client/ui-model-selection` (`local-ollama-bridge.ts`) + `packages/api/session-controller` (`local-ollama-update.ts`) |
 | Cursor normal (flecha) en toda la interfaz; la mano solo en los enlaces (opcional) | estilos `.css` de `packages/client`, `packages/extensions` y `apps/desktop/renderer` |
 | El subchat se abre al 40 % de la zona de chat (opcional) | `packages/client/ui-layout` (`localSetRightbarShare`) |
-| Mejorar un mensaje antes de enviarlo: botón ✨ «Improve message» junto al «+», también desde un PDF, DOCX o texto (opcional) | `packages/client/ui-conversation` (`LocalImprove.tsx`) + `packages/client/ui-chat` (`local-improve-bridge.ts`) + `packages/api/session-controller` (`local-improve.ts`); código en [`sistema/mejorar/`](sistema/mejorar) |
+| Reprompt: botón ✨ junto al «+» para mejorar un mensaje, también desde un PDF, DOCX o texto (opcional) | `packages/client/ui-conversation` (`LocalImprove.tsx`) + `packages/client/ui-chat` (`local-improve-bridge.ts`) + `packages/api/session-controller` (`local-improve.ts`); código en [`sistema/mejorar/`](sistema/mejorar) |
 | Aviso antes de instalar: semáforo, detalles y «Skip this version» (opcional) | `apps/desktop/src/main.ts` y `update-coordinator.ts` (`local-update-notice.ts`); el informe, [`sistema/informe-actualizacion.mjs`](sistema/informe-actualizacion.mjs) en el workflow |
 | Instalador sin firma, sin la «actualización obligatoria» de DeepSeek | `apps/desktop/scripts` |
 | Actualizaciones desde los Releases de este repositorio | `apps/desktop/scripts/electron-builder-config.mjs` |
@@ -461,6 +487,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Aviso si Ollama no responde, con «Open Ollama» (opcional) | `packages/client/ui-conversation` (`LocalOllamaBanner.tsx`) + `packages/api/session-controller` (`localOllamaStatus`) |
 | «Show N more sessions» despliega todos los chats (opcional) | `packages/client/ui-workspace` (`WorkspaceBrowser.tsx`) |
 | Corrector ortográfico también en el idioma del sistema, sin descargar diccionarios (opcional) | `apps/desktop` (`main.ts`) |
+| Con la ventana cerrada, la app no retiene el modelo de Ollama (opcional) | `apps/desktop` (`local-window-state.ts`) + [`sistema/contexto/precarga.cjs`](sistema/contexto/precarga.cjs) |
 | Prueba de arranque antes de publicar | [`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs) en el workflow |
 
 La app va en inglés (o en chino), como la oficial: no se añade ningún idioma.

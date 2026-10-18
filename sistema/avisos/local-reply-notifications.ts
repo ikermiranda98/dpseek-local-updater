@@ -35,7 +35,8 @@ export function installLocalReplyNotifications(sessions: ISessions, open: (sessi
     for (const id of running) {
       if (now.has(id) || !background || Notification.permission === 'denied') continue
       const row = list.byId[id]
-      if (row === undefined || row.parentId !== undefined || row.origin === 'subagent') continue
+      // Las copias de «editar y reenviar» tienen padre pero son chats normales: solo se saltan los subagentes.
+      if (row === undefined || row.origin === 'subagent') continue
       const notification = new Notification(row.displayTitle, { body: bodyText() })
       notification.onclick = () => {
         window.focus()

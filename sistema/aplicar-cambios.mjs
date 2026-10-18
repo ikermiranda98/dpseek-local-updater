@@ -854,7 +854,9 @@ optional('seleccionar chats como en el Explorador (borrar y mover a un proyecto)
       '  setSelection: (ids) => { localSelection.set(ids) },',
       '  isSelectable: (id) => {',
       '    const row = sessions.list.getSnapshot().byId[id]',
-      "    return row !== undefined && row.parentId === undefined && row.origin !== 'subagent' && !row.blank",
+      '    // Las copias de «editar y reenviar» también tienen padre (parentId) y son chats normales: solo se',
+      '    // excluyen los subagentes (los subchats tienen su propio menú).',
+      "    return row !== undefined && row.origin !== 'subagent' && !row.blank",
       '  },',
       '  titlesOf: ids => ids.map(titleOf),',
       '  openSession: (id) => { uiWorkspace.openSession(id) },',
@@ -2234,14 +2236,14 @@ optional('el subchat se abre al 40 % de la zona de chat', (tx) => {
     '  localSetRightbarShare(share: number): void {\n')
 })
 
-// ── 24. Mejorar un mensaje antes de enviarlo ──────────────────────────────────
-// Botón «Improve message» en la barra del cuadro de texto, junto al «+» y con su
+// ── 24. Reprompt: mejorar un mensaje antes de enviarlo ────────────────────────
+// Botón ✨ «Reprompt» en la barra del cuadro de texto, junto al «+» y con su
 // mismo aspecto: el modelo del chat (en su misma variante de contexto, así Ollama no
 // lo recarga) reescribe el mensaje, o convierte un documento (PDF, DOCX o texto) en
 // un prompt (lo que hay que hacer con él, y el documento debajo palabra por palabra),
 // con los ficheros del proyecto a la vista para no inventar nombres y preguntando si
-// falta algo. La sugerencia sale editable encima del cuadro; «Use» la pone en el
-// cuadro, sin enviarla. Código: sistema/mejorar/.
+// falta algo. El resultado ocupa el sitio del texto dentro de la propia barra (‹ vuelve al
+// tuyo); «Use» lo pone en el cuadro y enviar lo envía tal cual. Código: sistema/mejorar/.
 
 optional('mejorar un mensaje antes de enviarlo', (tx) => {
   const better = join(here, 'mejorar')
@@ -2279,6 +2281,8 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       '  readonly keyParts?: boolean',
       '  /** Change the previous suggestion with one sentence from the user. */',
       '  readonly refine?: { readonly previous: string; readonly request: string }',
+      "  /** Translate into English, fix the grammar, or bring sentences in other languages into the main one. */",
+      "  readonly transform?: { readonly kind: 'english' | 'grammar' | 'unify'; readonly text: string }",
       '}',
       '',
       '/** Local build: one improve request, by the id its caller chose. */',
@@ -2368,6 +2372,7 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       '        ...request.intent === undefined ? {} : { intent: request.intent },',
       '        ...request.keyParts === undefined ? {} : { keyParts: request.keyParts },',
       '        ...request.refine === undefined ? {} : { refine: request.refine },',
+      '        ...request.transform === undefined ? {} : { transform: request.transform },',
       '      }, jobSignal, progress))',
       '      return { ...result, ms: Date.now() - started }',
       '    } catch (error) {',
@@ -2425,6 +2430,7 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       + '          ...options?.intent === undefined ? {} : { intent: options.intent },\n'
       + '          ...options?.keyParts === undefined ? {} : { keyParts: options.keyParts },\n'
       + '          ...options?.refine === undefined ? {} : { refine: options.refine },\n'
+      + '          ...options?.transform === undefined ? {} : { transform: options.transform },\n'
       + '        })\n'
       + '        if (!result.ok) throw new Error(result.error.message)\n'
       + '        return result.value\n'
@@ -2489,6 +2495,12 @@ optional('mejorar un mensaje antes de enviarlo', (tx) => {
       + '        <div data-local-improve-docs />\n'
       + '        {/* One scrollport, one text surface:',
     'data-local-improve-docs')
+  // En el sitio del texto, la página del resultado de Reprompt (el texto se esconde mientras).
+  tx.replace(inputBar, '        <div data-local-improve-docs />\n',
+    '        <div data-local-improve-docs />\n'
+      + '        {/* Local build: Reprompt shows its result in place of the text (LocalImprove.tsx). */}\n'
+      + '        <div data-local-improve-panel />\n',
+    'data-local-improve-panel')
   // Al arrastrar un fichero, sin la capa a pantalla completa: la propia barra marca los dos destinos
   // (soltar en la barra adjunta; en ✨, prompt). Se mantiene si no hay ✨ o si no se puede adjuntar.
   const attachmentsView = join(repo, 'packages', 'client', 'ui-attachment', 'src', 'client', 'ComposerAttachments.tsx')
@@ -2721,6 +2733,33 @@ optional('corrector ortográfico también en el idioma del sistema', (tx) => {
       + '    // Without a spell checker the editor still works.\n'
       + '  }\n',
     'setSpellCheckerDictionaryDownloadURL')
+})
+
+// ── 30. Con la ventana cerrada, la app no retiene el modelo ──────────────────────
+// Cerrar la ventana solo la esconde: la app sigue en la bandeja (para terminar lo que esté
+// haciendo) y gasta poco, pero el mantenedor del modelo (contexto/precarga.cjs) lo seguía
+// renovando y, si Ollama lo descargaba, lo volvía a cargar: decenas de GB de RAM y de
+// gráfica ocupados con la app en segundo plano. Ahora la app anota si la ventana está a la
+// vista (escritorio/local-window-state.ts); con ella cerrada más de 2 minutos, el
+// mantenedor descarga el modelo y deja de cargarlo, y al volver a abrirla lo carga enseguida.
+
+optional('con la ventana cerrada, la app no retiene el modelo', (tx) => {
+  const src = join(repo, 'apps', 'desktop', 'src')
+  const main = join(src, 'main.ts')
+  tx.copy(join(here, 'escritorio', 'local-window-state.ts'), join(src, 'local-window-state.ts'))
+  let text = tx.read(main)
+  if (!text.includes("from './local-window-state.ts'")) {
+    const lastImport = [...text.matchAll(/^import [^\n]*\n|^} from '[^']+'\n/gm)].pop()
+    if (lastImport === undefined) skip(`no se encuentran los imports de ${rel(main)}`)
+    const at = lastImport.index + lastImport[0].length
+    text = text.slice(0, at) + "import { localTrackWindow } from './local-window-state.ts'\n" + text.slice(at)
+    tx.write(main, text)
+  }
+  tx.replace(main, '    window.on(\'focus\', automaticCheck)\n',
+    '    window.on(\'focus\', automaticCheck)\n'
+      + '    // Local build: hidden or shown, for the model keeper (local-window-state.ts).\n'
+      + '    localTrackWindow(window)\n',
+    'localTrackWindow(window)')
 })
 
 console.log('\nCambios aplicados:')

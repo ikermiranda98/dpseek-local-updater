@@ -367,6 +367,8 @@ async function main() {
       hostPid: process.ppid,
       lockFile: keepLock,
       usageFile: join(home, 'storages', 'local-variantes-uso.json'),
+      // Si la ventana está a la vista (la anota la app, local-window-state.ts).
+      windowFile: join(home, 'storages', 'local-ventana.json'),
       calibrationLock,
     }
     launchHelper('precarga', process.env.DSH_CTX_PRECARGA, { DSH_CTX_KEEP: JSON.stringify(keep) })

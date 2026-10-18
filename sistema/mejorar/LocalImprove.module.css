@@ -435,3 +435,141 @@
 :global([data-local-scrolled]) {
   mask-image: linear-gradient(to bottom, transparent 0, #000 16px);
 }
+
+/* El botón lleva encima su anillo de progreso. */
+.host {
+  position: relative;
+}
+
+/* Anillo alrededor de ✨ mientras trabaja: se llena cuando se sabe cuánto falta; si no, gira. */
+.ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+
+.ringTrack {
+  fill: none;
+  stroke: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent);
+  stroke-width: 2;
+}
+
+.ringValue {
+  fill: none;
+  stroke: var(--dsw-alias-state-business-primary);
+  stroke-width: 2;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 400ms ease-out;
+}
+
+.spin {
+  animation: spin 1.1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(-90deg); }
+  to { transform: rotate(270deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin { animation-duration: 3s; }
+}
+
+/* Flechas para pasar de una versión a otra. */
+.arrow {
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: default;
+}
+
+.arrow:hover:not(:disabled) {
+  color: var(--dsw-alias-label-primary);
+}
+
+.arrow:disabled {
+  opacity: 0.35;
+}
+
+/* La página del resultado: dentro de la barra, en el sitio del texto (que se esconde mientras). */
+:global([data-composer-card][data-local-reprompt]) [data-input-scroll] {
+  display: none;
+}
+
+.panel {
+  display: grid;
+  gap: 6px;
+  padding: 2px 12px 0 14px;
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+}
+
+.panel .head {
+  gap: 6px;
+}
+
+.panel .tabs {
+  gap: 12px;
+}
+
+/* El prompt nuevo, con el mismo aspecto que el texto de la barra. */
+.panel .text {
+  max-height: var(--dsh-composer-text-max-height, 336px);
+  padding: 2px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: inherit;
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+  resize: none;
+  overflow-y: auto;
+}
+
+.panel .text:focus {
+  border: 0;
+}
+
+.panel .diff {
+  max-height: var(--dsh-composer-text-max-height, 336px);
+  padding: 2px 0;
+  border: 0;
+  font-size: inherit;
+  line-height: calc(24px + var(--dsh-content-font-delta, 0px));
+}
+
+.panel .answer {
+  height: 26px;
+  background: transparent;
+}
+
+.panel .actions {
+  padding-bottom: 2px;
+}
+
+/* Con tu texto a la vista: el camino de vuelta al resultado («Reprompt ›»), a la derecha. */
+.toPage {
+  flex: none;
+  height: 24px;
+  padding: 0 8px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 11px;
+  background: transparent;
+  color: var(--dsw-alias-state-business-primary);
+  font-size: 12px;
+  cursor: default;
+}
+
+.toPage[data-waiting] {
+  border-color: var(--dsw-alias-state-business-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent);
+}
+
+.docs .choices {
+  display: inline-flex;
+}
