@@ -291,10 +291,64 @@ el paso a paso del turno («Opened…», «Clicked Botón Entrar», «Filled in 
 que escribe en un campo) y **Saved sign-ins**: una ventanita con las webs donde el navegador
 del agente tiene sesión guardada, con **Remove** para cerrarla (borra sus cookies y datos).
 
+**La página, nítida y a tu medida.** La imagen ocupa todo el panel sin deformarse y llega con
+sus píxeles justos (los del panel por la escala de Windows), así que se ve nítida al cambiar el
+tamaño de la ventana o pasarla a otra pantalla. El menú de tamaño cambia la página: **Fit to
+panel** (la página toma el tamaño del panel, como una ventana de verdad), **Desktop**
+1280 × 800, **Wide screen** 1920 × 1080, **Tablet** 768 × 1024 y **Mobile** 375 × 812 (con
+pantalla táctil y agente de usuario de móvil).
+
+**Take control.** Para iniciar sesión, meter un código 2FA o resolver un captcha sin pasar
+nada por el chat: **Take control** y usas la página desde el panel (clic, rueda, teclado y
+pegar); lo que escribes va directo a la página, nunca al chat ni al modelo. Mientras tanto
+las acciones del agente en el navegador esperan; **Give back to agent** las deja seguir (y si
+te olvidas, el control vuelve solo a los 5 minutos sin tocar nada). El agente sabe que, si una
+web le pide una contraseña que no tiene, debe pedirte que lo hagas tú así.
+
+**Contraseñas guardadas.** En **Saved sign-ins › Saved passwords** guardas una contraseña con
+un nombre y su web; queda cifrada en el PC con DPAPI de Windows (solo tu usuario de Windows
+la descifra). El agente solo conoce el nombre: lo escribe donde va la contraseña y el
+navegador pone el valor real, que el modelo nunca ve (en las respuestas sale como
+`<secret>NOMBRE</secret>`). Vale para los chats que empiecen a usar el navegador después.
+
+**Menos pasos y menos contexto.** Playwright, tras cada acción, devolvía un enlace a un fichero
+con la página en vez de la página: el modelo gastaba otra llamada en leerla o actuaba con
+referencias viejas. Ahora cada resultado lleva la página en línea (sin el eco del código ni
+los avisos de consola), en el historial solo queda entera la última (las anteriores se quedan
+en su dirección y título) y el modelo recibe unas instrucciones cortas de uso del navegador.
+Los ficheros de Playwright van a `~/.dsh/storages/agent-browser-output` (con límite de
+tamaño), no a tu carpeta de trabajo.
+
 Probado con una web local cuyo formulario y datos solo existen con JavaScript: el agente
-entró, inició sesión y leyó el saldo y los movimientos en unos 2 minutos (con Qwen3.6-35B), y la
-pestaña enseñó la página y los 14 pasos. Ojo: lo que pones en el prompt (también una contraseña)
-queda en el registro del chat; para cuentas reales, mejor iniciar sesión tú.
+entró, inició sesión y leyó el saldo y los movimientos (con Qwen3.6-35B), y la pestaña enseñó
+la página y el paso a paso.
+
+## Control de Windows
+
+El agente puede abrir apps y moverse por ellas: listar apps y ventanas, abrir una app, leer
+una ventana (como un árbol de elementos numerados, en texto: vale para un modelo sin visión),
+pulsar, escribir, teclas y atajos, poner valores, desplazar, usar menús y el portapapeles.
+Pulsa por elemento, sin mover tu ratón ni robarte el foco. Va con el controlador Cua Driver
+que ya trae el repositorio, en un servidor MCP propio y en su propio proceso
+([`sistema/escritorio/desktop-mcp.mjs`](sistema/escritorio/desktop-mcp.mjs)): si el controlador
+falla, no tumba la app. Solo ofrece 16 herramientas (nada de cerrar procesos a la fuerza ni
+grabar la pantalla) con las definiciones recortadas para no llenar el contexto, y el agente
+debe pedirte confirmación antes de cerrar apps, borrar, enviar mensajes, pagar o cambiar
+ajustes del sistema.
+
+## Arranque con Windows y tareas programadas
+
+La app se abre sola al iniciar sesión en Windows, oculta en la bandeja (`--hidden`): así las
+tareas programadas (`schedule_create`: a una hora, cada día, cada semana o con cron) se
+cumplen aunque no la hayas abierto. Al abrirla tú, se enseña como siempre. Con el control de
+Windows, una tarea programada puede, por ejemplo, abrir otra app y escribir en ella. Se puede
+quitar del inicio en el Administrador de tareas › Aplicaciones de arranque.
+
+## Esfuerzo de razonamiento por defecto
+
+Los chats nuevos empiezan en **Pensar a fondo** (esfuerzo alto, en los modelos que razonan).
+Cambiar el cerebro en un chat solo cambia ese chat: los demás conservan el suyo y los nuevos
+siguen empezando en alto.
 
 ## Contexto de cada chat
 
@@ -541,7 +595,12 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | El selector de modelo como chip («Qwen3.6 · 128K», la rueda cambia el contexto) que abre una fila de modelos dentro de la barra (opcional) | `packages/client/ui-model-selection` (`ModelSelect.tsx`) + [`sistema/contexto/LocalModelDrawer.tsx`](sistema/contexto/LocalModelDrawer.tsx) |
 | La barra lateral se esconde por debajo de 760 px de ventana, no de 1024 (opcional) | `packages/client/ui-layout` (`columns.ts`) |
 | Un navegador de verdad para el agente: Playwright MCP con un Edge compartido que guarda las sesiones, incluido en la app empaquetada (opcional) | `apps/cli/package.json`, `pnpm-lock.yaml`, `packages/bundle/web-app/cordis.patch.yml`, `packages/experimental/browser-use-playwright-mcp` + [`sistema/navegador/agent-browser-launcher.mjs`](sistema/navegador/agent-browser-launcher.mjs) |
-| Pestaña «Browser» en el panel derecho (página en directo, paso a paso y «Saved sign-ins») y «View browser» en la línea de estado del turno (opcional) | `packages/client/ui-deliverables`, `packages/client/ui-chat`, `packages/api/session-controller` + [`sistema/navegador/`](sistema/navegador/) |
+| Pestaña «Browser» en el panel derecho (página en directo y nítida, tamaños de página, «Take control», paso a paso, «Saved sign-ins» y «Saved passwords») y «View browser» en la línea de estado del turno (opcional) | `packages/client/ui-deliverables`, `packages/client/ui-chat`, `packages/api/session-controller` + [`sistema/navegador/`](sistema/navegador/) |
+| Navegador con menos pasos y contexto (página en línea en cada acción, solo la última entera, instrucciones de uso) y contraseñas por nombre (opcional) | `packages/experimental/browser-use-playwright-mcp` + [`sistema/navegador/local-browser-context.ts`](sistema/navegador/local-browser-context.ts) |
+| Arranque reintentado y sin cookies de acceso acumuladas (el error «Web authentication failed (HTTP 431)») (opcional) | `apps/desktop` (`welcome-backend.ts`, `main.ts`) |
+| La app arranca con Windows, oculta en la bandeja (opcional) | `apps/desktop` (`main.ts`) |
+| Control de Windows para el agente: servidor MCP propio sobre Cua Driver, en su propio proceso (opcional) | `apps/cli/package.json`, `pnpm-lock.yaml`, `packages/bundle/web-app/cordis.patch.yml` + [`sistema/escritorio/desktop-mcp.mjs`](sistema/escritorio/desktop-mcp.mjs) |
+| Chats nuevos con esfuerzo alto; el cambio en un chat se queda en ese chat (opcional) | `packages/bundle/base` (`reasoning: high`), `packages/api/session-controller` (`commands.ts`), `packages/client/ui-model-selection` |
 | Prueba de arranque antes de publicar | [`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs) en el workflow |
 
 La app va en inglés (o en chino), como la oficial: no se añade ningún idioma.

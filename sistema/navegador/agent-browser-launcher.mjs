@@ -4,14 +4,18 @@
 // no está en marcha, lo arranca sin ventana, con su propio perfil (las sesiones iniciadas se guardan ahí) y un puerto
 // de depuración, y lo anota en un fichero de estado; luego carga el servidor de Playwright conectado a él. Todos los
 // chats comparten ese Edge, y la app lee el mismo fichero para enseñarlo en la barra lateral.
-// Argumentos: <cli.js de @playwright/mcp> <msedge.exe> <carpeta del perfil> <fichero de estado>
-import { spawn } from 'node:child_process'
+// Argumentos: <cli.js de @playwright/mcp> <msedge.exe> <carpeta del perfil> <fichero de estado> [carpeta de salida]
+// [contraseñas guardadas] (la carpeta de salida guarda páginas y capturas de Playwright; sin ella van a .playwright-mcp
+// en la carpeta de trabajo del chat).
+import { randomUUID } from 'node:crypto'
+import { execFileSync, spawn } from 'node:child_process'
 import { closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const args = process.argv.slice(1).filter((arg) => arg !== '--')
-const [cli, edge, profile, stateFile] = args
+const [cli, edge, profile, stateFile, outputDir, secretsFile] = args
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms) })
 
 const alive = async (port) => {
@@ -76,6 +80,38 @@ if (state === undefined || !await alive(state.port)) {
   }
 }
 
+// Contraseñas guardadas («Saved passwords», cifradas con DPAPI): se descifran aquí y Playwright las recibe en un
+// fichero temporal que lee al arrancar y que se borra en seguida. El modelo escribe el nombre; Playwright pone el valor
+// en la página y lo tapa en todo lo que devuelve.
+let secretsTemp
+try {
+  const stored = secretsFile === undefined ? [] : JSON.parse(readFileSync(secretsFile, 'utf8'))
+  if (Array.isArray(stored) && stored.length > 0) {
+    const script = '[Console]::InputEncoding = [Text.Encoding]::UTF8; [Console]::OutputEncoding = [Text.Encoding]::UTF8; '
+      + 'Add-Type -AssemblyName System.Security; $items = [Console]::In.ReadToEnd() | ConvertFrom-Json; '
+      + '$out = foreach ($i in $items) { try { [pscustomobject]@{ name = $i.name; value = [Text.Encoding]::UTF8.GetString('
+      + "[Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($i.value), $null, 'CurrentUser')) } } catch { } }; "
+      + 'ConvertTo-Json -InputObject @($out) -Compress'
+    const plain = JSON.parse(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      input: JSON.stringify(stored), windowsHide: true, timeout: 20_000,
+    }).toString('utf8') || '[]')
+    // dotenv: comillas simples (literal) salvo que el valor las tenga; entonces otra comilla que no aparezca.
+    const quote = (value) => [`'`, '`', '"'].map(q => value.includes(q) ? undefined : `${q}${value}${q}`).find(v => v !== undefined) ?? `'${value.replace(/'/g, '')}'`
+    const lines = plain.filter(item => /^[A-Z0-9_]+$/.test(item.name) && !/[\r\n]/.test(item.value)).map(item => `${item.name}=${quote(item.value)}`)
+    if (lines.length > 0) {
+      secretsTemp = join(tmpdir(), `dsh-agent-secrets-${randomUUID()}.env`)
+      writeFileSync(secretsTemp, lines.join('\n') + '\n', { mode: 0o600 })
+      const remove = () => { try { rmSync(secretsTemp, { force: true }) } catch { /* ya no está */ } }
+      setTimeout(remove, 5000).unref()
+      process.once('exit', remove)
+    }
+  }
+} catch {
+  // Sin contraseñas guardadas (o sin poder descifrarlas): el navegador funciona igual.
+}
+
 // El servidor de Playwright, en este mismo proceso, conectado al Edge del agente.
-process.argv = [process.argv[0], cli, '--browser', 'chromium', '--cdp-endpoint', `http://127.0.0.1:${String(state.port)}`]
+process.argv = [process.argv[0], cli, '--browser', 'chromium', '--cdp-endpoint', `http://127.0.0.1:${String(state.port)}`,
+  ...outputDir === undefined ? [] : ['--output-dir', outputDir, '--output-max-size', String(50 * 1024 * 1024)],
+  ...secretsTemp === undefined ? [] : ['--secrets', secretsTemp]]
 await import(pathToFileURL(cli).href)

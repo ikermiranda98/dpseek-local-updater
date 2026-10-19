@@ -69,6 +69,8 @@ export function LocalThinkButton({ efforts, effort, disabled, onChange, t }: {
 } & Pick<PropsLocale<'model'>, 't'>) {
   const offId = efforts?.find(level => level.id === 'off')?.id
   const highId = efforts?.find(level => level.id === 'high')?.id
+  // «Pensar» pide el nivel medio: sin nivel, el chat usaría el de por defecto, que ahora es «a fondo».
+  const mediumId = efforts?.find(level => level.id === 'medium')?.id
   const actual: Mode = effort !== undefined && effort === offId ? 0 : effort !== undefined && effort === highId ? 2 : 1
   // El cambio se ve al momento; la selección real llega un instante después (o no, si falla: entonces vuelve).
   const [wanted, setWanted] = useState<Mode | null>(null)
@@ -106,7 +108,7 @@ export function LocalThinkButton({ efforts, effort, disabled, onChange, t }: {
     setAnim(current => ({ key: current.key + 1, kind: m === 1 ? 'wake' : m === 2 ? 'pop' : null }))
     clearTimeout(timer.current)
     timer.current = setTimeout(() => { setWanted(null) }, 4000)
-    onChange(m === 0 ? offId : m === 2 ? highId : undefined)
+    onChange(m === 0 ? offId : m === 2 ? highId : mediumId)
   }
 
   return (

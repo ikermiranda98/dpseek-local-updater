@@ -9,9 +9,20 @@
 .tool { display: inline-flex; flex: none; align-items: center; height: 26px; padding: 0 8px; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); white-space: nowrap; cursor: default; }
 .tool:hover, .tool[aria-expanded='true'] { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 
+.tool[data-control] { background: var(--dsw-alias-state-business-primary); color: var(--dsw-alias-label-on-color, #fff); }
+.tool[data-control]:hover { background: var(--dsw-alias-state-business-primary); opacity: 0.9; }
+.tool:disabled { opacity: 0.45; }
+
+/* «Take control»: un aviso y la página marcada; el ratón y el teclado van a la página. */
+.notice { flex: none; margin: 0; padding: 7px 12px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent); color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); line-height: 18px; }
+
 /* La página, a todo el ancho del panel. */
-.view { flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--dsw-alias-bg-base); }
-.image { display: block; width: 100%; height: auto; user-select: none; }
+.view { display: flex; flex: 1 1 auto; align-items: center; justify-content: center; min-height: 0; overflow: hidden; background: var(--dsw-alias-bg-base); outline: none; }
+.view[data-control] { box-shadow: inset 0 0 0 2px var(--dsw-alias-state-business-primary); }
+.view[data-control] .image { cursor: pointer; }
+.view[data-control]:focus-visible { box-shadow: inset 0 0 0 3px var(--dsw-alias-state-business-primary); }
+/* El tamaño lo calcula el componente (lo más grande que cabe sin deformarse); la imagen llega con sus píxeles justos. */
+.image { display: block; flex: none; max-width: 100%; max-height: 100%; user-select: none; box-shadow: 0 0 0 0.5px var(--dsw-alias-border-l3); }
 .empty { margin: 0; padding: 16px; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); line-height: 20px; }
 
 /* El paso a paso del turno. */
@@ -26,7 +37,7 @@
 
 /* «Saved sign-ins»: una ventanita como los menús de la app. */
 /* Encima de la página (casi siempre blanca), así que el material del menú va sobre el fondo de la app, no transparente. */
-.popover { position: absolute; top: 34px; right: 6px; z-index: 10; box-sizing: border-box; width: 280px; max-height: 320px; padding: 8px; overflow-y: auto; border-radius: var(--dsw-radius-lg); background: linear-gradient(var(--dsw-specific-menu), var(--dsw-specific-menu)), var(--dsw-alias-bg-layer-1); backdrop-filter: var(--dsw-menu-backdrop-filter); box-shadow: var(--dsw-elevation-panel); color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); }
+.popover { position: absolute; top: 34px; right: 6px; z-index: 10; box-sizing: border-box; width: 300px; max-height: min(560px, calc(100% - 44px)); padding: 8px; overflow-y: auto; border-radius: var(--dsw-radius-lg); background: linear-gradient(var(--dsw-specific-menu), var(--dsw-specific-menu)), var(--dsw-alias-bg-layer-1); backdrop-filter: var(--dsw-menu-backdrop-filter); box-shadow: var(--dsw-elevation-panel); color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); }
 .popoverTitle { padding: 2px 4px 4px; color: var(--dsw-alias-label-primary); font-weight: 500; }
 .popoverHint { margin: 0; padding: 0 4px 6px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
 .sites { margin: 0; padding: 0; list-style: none; }
@@ -41,3 +52,21 @@
 @media (prefers-reduced-motion: reduce) {
   .step[data-status='running'] .stepDot { animation: none; }
 }
+
+/* Menú de tamaño de página. */
+.chevron { width: 12px; height: 12px; margin-left: 2px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.modeMenu { right: 120px; width: 240px; padding: 4px; }
+.modeItem { display: grid; grid-template-columns: 16px 1fr auto; gap: 6px; align-items: center; width: 100%; min-height: 32px; padding: 0 8px; border: 0; border-radius: var(--dsw-radius-md); background: transparent; color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); text-align: left; cursor: default; }
+.modeItem:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.modeCheck { color: var(--dsw-alias-state-business-primary); }
+.modeHint { color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+
+/* «Saved passwords», dentro de la misma ventanita. */
+.passwords { margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--dsw-alias-border-l3); }
+.secretSite { color: var(--dsw-alias-label-tertiary); }
+.secretForm { display: grid; gap: 6px; padding: 6px 4px 2px; }
+.field { box-sizing: border-box; width: 100%; height: 30px; padding: 0 8px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; outline: none; }
+.field:focus { border-color: var(--dsw-alias-state-business-primary); }
+.save { justify-self: end; height: 28px; padding: 0 12px; border: 0; border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-state-business-primary); color: var(--dsw-alias-label-on-color, #fff); font: inherit; cursor: default; }
+.save:disabled { opacity: 0.45; }
+.okNote { margin: 6px 4px 0; color: var(--dsw-alias-label-secondary); font-size: 12px; }

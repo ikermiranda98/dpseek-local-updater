@@ -368,6 +368,8 @@ function piAiBlock(models) {
     '    retryPolicy:',
     '      mode: normal',
     '      maxRetries: 2',
+    '    # Esfuerzo de razonamiento de un chat que no ha elegido otro: alto (solo en modelos que razonan).',
+    '    reasoning: high',
     `    models: !!js ${yamlString(runtimeModelsExpression(models.map(toPiAi)))}`,
   ]
 }
@@ -2791,8 +2793,16 @@ optional('con la ventana cerrada, la app no retiene el modelo', (tx) => {
 // cerebro junto al selector cambia el modo con un clic: Pensar (lo de «Default»),
 // Pensar a fondo (nivel high) y Sin pensar (off). El menú del selector ya no tiene
 // la fila «Effort». Interfaz: sistema/contexto/LocalThinkButton.tsx.
+// Los chats nuevos empiezan en «a fondo» (reasoning: high del proveedor, sección 1) y el
+// cambio en un chat se queda en ese chat: ya no se guarda como valor de los chats nuevos.
 
 optional('el esfuerzo de razonamiento como un cerebro en la barra', (tx) => {
+  // El modelo elegido en un chat sigue siendo el de los chats nuevos; su esfuerzo, no.
+  tx.replace(join(hostDir, 'commands.ts'),
+    '        void this.ctx.agentDefaultModel.saveSelection(selected).catch((error: unknown) => {\n',
+    '        // Local build: new chats keep the provider\'s default effort (high); a chat\'s effort stays in that chat.\n'
+      + '        void this.ctx.agentDefaultModel.saveSelection({ provider: selected.provider, model: selected.model }).catch((error: unknown) => {\n',
+    "saveSelection({ provider: selected.provider, model: selected.model })")
   const dir = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client')
   const select = join(dir, 'ModelSelect.tsx')
   const locales = join(dir, 'locales.ts')
@@ -2816,7 +2826,7 @@ optional('el esfuerzo de razonamiento como un cerebro en la barra', (tx) => {
       `${pad}{/* Local build: reasoning effort as a brain next to the model (LocalThinkButton.tsx). */}`,
       `${pad}<LocalThinkButton`,
       `${pad}  efforts={reasoning?.efforts}`,
-      `${pad}  effort={state.current?.reasoningEffort}`,
+      `${pad}  effort={effectiveEffort}`,
       `${pad}  disabled={locked || busy || state.current === null}`,
       `${pad}  onChange={(effort) => {`,
       `${pad}    if (state.current === null) return`,
@@ -2860,23 +2870,23 @@ optional('el esfuerzo de razonamiento como un cerebro en la barra', (tx) => {
 // el Edge de Windows, sin ventana: uno compartido por todos los chats, con su propio perfil
 // (las sesiones iniciadas se guardan) y visible en la barra lateral (sección 35).
 
-const LOCAL_BROWSER_PACKAGES = [
-  ['@deepseek-ai/dsh-browser-use', 'packages/browser-use/browser-use'],
-  ['@deepseek-ai/dsh-experimental-browser-use-playwright-mcp', 'packages/experimental/browser-use-playwright-mcp'],
-]
-
-optional('un navegador de verdad para el agente (Playwright con Edge)', (tx) => {
+/**
+ * Mete paquetes del repositorio en la app empaquetada: dependencias de apps/cli (el empaquetado recorre las suyas) y sus
+ * líneas del fichero de bloqueo (la compilación instala con --frozen-lockfile).
+ * @param tx - transacción de la sección.
+ * @param packages - [nombre, ruta en el repositorio] de cada paquete.
+ */
+function addCliWorkspaceDeps(tx, packages) {
   const cliPackage = join(repo, 'apps', 'cli', 'package.json')
   const lockFile = join(repo, 'pnpm-lock.yaml')
-  const bundle = join(repo, 'packages', 'bundle', 'web-app', 'cordis.patch.yml')
-  for (const [, path] of LOCAL_BROWSER_PACKAGES) {
+  for (const [, path] of packages) {
     if (!existsSync(join(repo, path, 'package.json'))) skip(`no está el paquete ${path}`)
   }
 
   // Dependencias del paquete raíz de la app: el empaquetado recorre las suyas.
   const manifest = JSON.parse(tx.read(cliPackage))
   let changed = false
-  for (const [name] of LOCAL_BROWSER_PACKAGES) {
+  for (const [name] of packages) {
     if (manifest.dependencies?.[name] !== undefined) continue
     manifest.dependencies = { ...manifest.dependencies, [name]: 'workspace:*' }
     changed = true
@@ -2889,7 +2899,7 @@ optional('un navegador de verdad para el agente (Playwright con Edge)', (tx) => 
   const start = lock.indexOf('\n  apps/cli:\n')
   const depsAt = start < 0 ? -1 : lock.indexOf('\n    dependencies:\n', start)
   if (depsAt < 0) skip(`no se encuentran las dependencias de apps/cli en ${rel(lockFile)}`)
-  for (const [name, path] of LOCAL_BROWSER_PACKAGES) {
+  for (const [name, path] of packages) {
     const body = depsAt + '\n    dependencies:\n'.length
     // Fin del bloque: la primera línea con menos de 6 espacios.
     const rest = lock.slice(body)
@@ -2905,6 +2915,16 @@ optional('un navegador de verdad para el agente (Playwright con Edge)', (tx) => 
     lock = lock.slice(0, at) + entry + lock.slice(at)
   }
   tx.write(lockFile, lock)
+}
+
+const LOCAL_BROWSER_PACKAGES = [
+  ['@deepseek-ai/dsh-browser-use', 'packages/browser-use/browser-use'],
+  ['@deepseek-ai/dsh-experimental-browser-use-playwright-mcp', 'packages/experimental/browser-use-playwright-mcp'],
+]
+
+optional('un navegador de verdad para el agente (Playwright con Edge)', (tx) => {
+  const bundle = join(repo, 'packages', 'bundle', 'web-app', 'cordis.patch.yml')
+  addCliWorkspaceDeps(tx, LOCAL_BROWSER_PACKAGES)
 
   // Activado en la composición del escritorio (bundle dsh-web-app).
   let rows = tx.read(bundle)
@@ -2948,7 +2968,8 @@ optional('un navegador de verdad para el agente (Playwright con Edge)', (tx) => 
       '    // launcher, which then loads the Playwright server connected to it; the app shows its pages in the sidebar.',
       "    const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')",
       "    args.splice(0, args.length, '--input-type=module', '-e', LOCAL_AGENT_BROWSER_LAUNCHER, '--', cli, config.executablePath,",
-      "      join(home, 'storages', 'agent-browser'), join(home, 'storages', 'local-agent-browser.json'))",
+      "      join(home, 'storages', 'agent-browser'), join(home, 'storages', 'local-agent-browser.json'),",
+      "      join(home, 'storages', 'agent-browser-output'), join(home, 'storages', 'local-secrets.json'))",
       original.replace('  } else {', '  } else {'),
     ].join('\n'))
     source = source.replace("import { dirname, join } from 'node:path'\n",
@@ -2958,12 +2979,26 @@ optional('un navegador de verdad para el agente (Playwright con Edge)', (tx) => 
       + `const LOCAL_AGENT_BROWSER_LAUNCHER = ${JSON.stringify(launcher)}\n`
     tx.write(provider, source)
   }
+
+  // Menos pasos y menos contexto: la página va en línea en cada acción, solo la última queda entera en el
+  // historial y el modelo recibe unas instrucciones cortas de uso (sistema/navegador/local-browser-context.ts).
+  tx.copy(join(here, 'navegador', 'local-browser-context.ts'), join(dirname(provider), 'local-browser-context.ts'))
+  tx.replace(provider, "import type {} from '@deepseek-ai/dsh-working-directory'\n",
+    "import type {} from '@deepseek-ai/dsh-working-directory'\nimport { setupLocalBrowserContext } from './local-browser-context.ts'\n",
+    "import { setupLocalBrowserContext } from './local-browser-context.ts'")
+  tx.replace(provider, '  mountSessionMcp(ctx, {\n',
+    "  // Local build: snapshots inline, older ones pruned, short usage tips (local-browser-context.ts).\n"
+      + "  setupLocalBrowserContext(ctx, 'mcp__playwright-mcp__')\n"
+      + '  mountSessionMcp(ctx, {\n',
+    "setupLocalBrowserContext(ctx, 'mcp__playwright-mcp__')")
 })
 
 // ── 35. Lo que hace el agente en el navegador, en el panel derecho ──────────────────
 // Pestaña «Agent browser» junto a «Live code»: la página del Edge del agente en directo, el
 // paso a paso del turno y «Saved sign-ins» para borrar las sesiones guardadas que ya no
-// quieras. La línea de estado del turno lleva «View browser» cuando el agente navega.
+// quieras. «Take control» deja usar la página desde el panel (iniciar sesión, códigos,
+// captchas) mientras el agente espera; lo escrito va directo a la página, nunca al chat.
+// La línea de estado del turno lleva «View browser» cuando el agente navega.
 // Código: sistema/navegador/ (y los pasos, en sistema/codigo-vivo/local-live-watch.tsx).
 
 optional('ver el navegador del agente en el panel derecho', (tx) => {
@@ -3017,6 +3052,80 @@ optional('ver el navegador del agente en el panel derecho', (tx) => {
       '  readonly title: string',
       '  /** JPEG in base64, or null if there is no page to show. */',
       '  readonly image: string | null',
+      '  /** The user has taken control from the panel (the agent waits). */',
+      '  readonly control: boolean',
+      '  /** Page size in CSS pixels (the picture covers exactly this). */',
+      '  readonly viewport: { readonly width: number; readonly height: number }',
+      "  readonly mode: 'fit' | 'desktop' | 'wide' | 'tablet' | 'mobile'",
+      '}',
+      '',
+      '/** Local build: how many device pixels the panel has for the picture. */',
+      'export interface SessionLocalBrowserFrameRequest {',
+      '  readonly width?: number',
+      '  readonly height?: number',
+      '}',
+      '',
+      "/** Local build: the page size of the agent's browser (fit to the panel, or a fixed desktop, wide, tablet or mobile size). */",
+      'export interface SessionLocalBrowserViewportRequest {',
+      "  readonly mode: 'fit' | 'desktop' | 'wide' | 'tablet' | 'mobile'",
+      '  /** Panel size in CSS pixels, for fit. */',
+      '  readonly fit?: { readonly width: number; readonly height: number }',
+      '}',
+      '',
+      '/** Local build: the page size now in use. */',
+      'export interface SessionLocalBrowserViewportValue {',
+      "  readonly mode: 'fit' | 'desktop' | 'wide' | 'tablet' | 'mobile'",
+      '}',
+      '',
+      "/** Local build: the user takes or gives back control of the agent's browser. */",
+      'export interface SessionLocalBrowserControlRequest {',
+      '  readonly active: boolean',
+      '}',
+      '',
+      '/** Local build: whether the user is in control now. */',
+      'export interface SessionLocalBrowserControlValue {',
+      '  readonly control: boolean',
+      '}',
+      '',
+      '/** Local build: one gesture of the user on the panel; positions go from 0 to 1 over the picture. */',
+      'export interface SessionLocalBrowserInputRequest {',
+      '  readonly input:',
+      "    | { readonly kind: 'click'; readonly x: number; readonly y: number; readonly button: 'left' | 'right' | 'middle'; readonly clickCount: number }",
+      "    | { readonly kind: 'wheel'; readonly x: number; readonly y: number; readonly deltaX: number; readonly deltaY: number }",
+      "    | { readonly kind: 'text'; readonly text: string }",
+      "    | { readonly kind: 'key'; readonly key: string; readonly code: string; readonly keyCode: number; readonly modifiers: number }",
+      '}',
+      '',
+      '/** Local build: whether the gesture reached the page. */',
+      'export interface SessionLocalBrowserInputValue {',
+      '  readonly sent: boolean',
+      '}',
+      '',
+      "/** Local build: passwords saved for the agent's browser (names and sites only, never the values). */",
+      'export interface SessionLocalBrowserSecrets {',
+      '  readonly secrets: readonly { readonly name: string; readonly site: string }[]',
+      '}',
+      '',
+      '/** Local build: save a password for the agent\'s browser (stored encrypted with Windows DPAPI). */',
+      'export interface SessionLocalBrowserSaveSecretRequest {',
+      '  readonly name: string',
+      '  readonly site: string',
+      '  readonly value: string',
+      '}',
+      '',
+      '/** Local build: the name the password was saved under. */',
+      'export interface SessionLocalBrowserSaveSecretValue {',
+      '  readonly name: string',
+      '}',
+      '',
+      '/** Local build: remove a saved password. */',
+      'export interface SessionLocalBrowserRemoveSecretRequest {',
+      '  readonly name: string',
+      '}',
+      '',
+      '/** Local build: whether it was removed. */',
+      'export interface SessionLocalBrowserRemoveSecretValue {',
+      '  readonly removed: boolean',
       '}',
       '',
       "/** Local build: sites with a saved sign-in in the agent's browser. */",
@@ -3038,8 +3147,14 @@ optional('ver el navegador del agente en el panel derecho', (tx) => {
   }
   tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n",
     "import { ApiSessionList } from './list.ts'\n"
-      + "import { localAgentBrowserForget, localAgentBrowserFrame, localAgentBrowserSites } from './local-agent-browser.ts'\n"
-      + 'import type {\n  SessionLocalBrowserForgetRequest, SessionLocalBrowserForgetValue, SessionLocalBrowserFrame, SessionLocalBrowserSites,\n'
+      + 'import {\n  localAgentBrowserControl, localAgentBrowserForget, localAgentBrowserFrame, localAgentBrowserInput, localAgentBrowserSites,\n'
+      + '  localAgentBrowserViewport, localAgentBrowserSecrets, localAgentBrowserSaveSecret, localAgentBrowserRemoveSecret,\n'
+      + "} from './local-agent-browser.ts'\n"
+      + 'import type {\n  SessionLocalBrowserControlRequest, SessionLocalBrowserControlValue, SessionLocalBrowserForgetRequest,\n'
+      + '  SessionLocalBrowserForgetValue, SessionLocalBrowserFrame, SessionLocalBrowserInputRequest, SessionLocalBrowserInputValue,\n'
+      + '  SessionLocalBrowserFrameRequest, SessionLocalBrowserSites, SessionLocalBrowserViewportRequest, SessionLocalBrowserViewportValue,\n'
+      + '  SessionLocalBrowserSecrets, SessionLocalBrowserSaveSecretRequest, SessionLocalBrowserSaveSecretValue,\n'
+      + '  SessionLocalBrowserRemoveSecretRequest, SessionLocalBrowserRemoveSecretValue,\n'
       + "} from './types.ts'\n",
     'SessionLocalBrowserForgetRequest, SessionLocalBrowserForgetValue')
   let host = tx.read(hostIndex)
@@ -3049,13 +3164,55 @@ optional('ver el navegador del agente en el panel derecho', (tx) => {
     if (doc < 0) skip(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
     host = host.slice(0, doc) + [
       '  /**',
-      "   * Local build: a picture of the page the agent's browser shows now, with its address.",
-      '   * @param _request - no fields are required.',
+      "   * Local build: a picture of the page the agent's browser shows now, with its address, sized to the panel.",
+      '   * @param request - device pixels the panel has for the picture (optional).',
       '   * @returns the frame, with no image if the browser is not running.',
       '   */',
       "  @Remote('localAgentBrowserFrame')",
-      '  async localAgentBrowserFrame(_request: SessionLocalEmptyRequest): Promise<SessionLocalBrowserFrame> {',
-      '    return localAgentBrowserFrame()',
+      '  async localAgentBrowserFrame(request: SessionLocalBrowserFrameRequest): Promise<SessionLocalBrowserFrame> {',
+      '    return localAgentBrowserFrame(request.width === undefined || request.height === undefined',
+      '      ? undefined : { width: request.width, height: request.height })',
+      '  }',
+      '',
+      '  /**',
+      "   * Local build: change the page size of the agent's browser (fit to the panel, desktop, wide, tablet or mobile).",
+      '   * @param request - the size mode and, for fit, the panel size.',
+      '   * @returns the mode in use.',
+      '   */',
+      "  @Remote('localAgentBrowserViewport')",
+      '  localAgentBrowserViewport(request: SessionLocalBrowserViewportRequest): SessionLocalBrowserViewportValue {',
+      '    return localAgentBrowserViewport(request.mode, request.fit)',
+      '  }',
+      '',
+      '  /**',
+      "   * Local build: passwords saved for the agent's browser, by name and site (never the values).",
+      '   * @param _request - no fields are required.',
+      '   * @returns the saved passwords.',
+      '   */',
+      "  @Remote('localAgentBrowserSecrets')",
+      '  localAgentBrowserSecrets(_request: SessionLocalEmptyRequest): SessionLocalBrowserSecrets {',
+      '    return localAgentBrowserSecrets()',
+      '  }',
+      '',
+      '  /**',
+      "   * Local build: save a password for the agent's browser, encrypted with Windows DPAPI. The agent types its",
+      '   * name and the browser fills the value; the model never sees it. New browser sessions pick it up.',
+      '   * @param request - name, site and value.',
+      '   * @returns the normalized name.',
+      '   */',
+      "  @Remote('localAgentBrowserSaveSecret')",
+      '  async localAgentBrowserSaveSecret(request: SessionLocalBrowserSaveSecretRequest): Promise<SessionLocalBrowserSaveSecretValue> {',
+      '    return localAgentBrowserSaveSecret(request.name, request.site, request.value)',
+      '  }',
+      '',
+      '  /**',
+      '   * Local build: remove a saved password.',
+      '   * @param request - its name.',
+      '   * @returns whether it was removed.',
+      '   */',
+      "  @Remote('localAgentBrowserRemoveSecret')",
+      '  localAgentBrowserRemoveSecret(request: SessionLocalBrowserRemoveSecretRequest): SessionLocalBrowserRemoveSecretValue {',
+      '    return localAgentBrowserRemoveSecret(request.name)',
       '  }',
       '',
       '  /**',
@@ -3076,6 +3233,28 @@ optional('ver el navegador del agente en el panel derecho', (tx) => {
       "  @Remote('localAgentBrowserForget')",
       '  async localAgentBrowserForget(request: SessionLocalBrowserForgetRequest): Promise<SessionLocalBrowserForgetValue> {',
       '    return localAgentBrowserForget(request.domain)',
+      '  }',
+      '',
+      '  /**',
+      "   * Local build: the user takes control of the agent's browser from the panel (its browser actions wait) or",
+      '   * gives it back. Control goes back on its own after five minutes without gestures.',
+      '   * @param request - whether to take control.',
+      '   * @returns whether the user is in control now.',
+      '   */',
+      "  @Remote('localAgentBrowserControl')",
+      '  localAgentBrowserControl(request: SessionLocalBrowserControlRequest): SessionLocalBrowserControlValue {',
+      '    return localAgentBrowserControl(request.active)',
+      '  }',
+      '',
+      '  /**',
+      "   * Local build: one click, wheel, key or text from the panel to the page the agent's browser shows. Text goes",
+      '   * straight to the page; it never reaches the chat or the model.',
+      '   * @param request - the gesture.',
+      '   * @returns whether it reached the page (only while the user is in control).',
+      '   */',
+      "  @Remote('localAgentBrowserInput')",
+      '  async localAgentBrowserInput(request: SessionLocalBrowserInputRequest): Promise<SessionLocalBrowserInputValue> {',
+      '    return localAgentBrowserInput(request.input)',
       '  }',
       '',
     ].join('\n') + host.slice(doc)
@@ -3244,6 +3423,71 @@ optional('el arranque reintenta la entrada a la interfaz', (tx) => {
       '',
     ].join('\n'),
     "cookie.name.startsWith('dsh-auth-')")
+})
+
+// ── 37. La app arranca con Windows, en la bandeja ─────────────────────────────────
+// Para que las tareas programadas (schedule_create) se cumplan aunque no hayas abierto la
+// app: al iniciar sesión en Windows arranca oculta en la bandeja (--hidden). Al abrirla tú,
+// se enseña como siempre (la instancia única enfoca la que ya está en marcha).
+
+optional('la app arranca con Windows, en la bandeja', (tx) => {
+  const main = join(repo, 'apps', 'desktop', 'src', 'main.ts')
+  tx.replace(main, '  let tray: DesktopTray | undefined\n',
+    '  let tray: DesktopTray | undefined\n'
+      + '  // Local build: start with Windows, hidden in the tray, so scheduled tasks run without opening the app.\n'
+      + "  let localHiddenStart = process.argv.includes('--hidden')\n"
+      + '  // Only the installed copy registers itself (not test copies started with their own profile).\n'
+      + "  if (app.isPackaged && process.platform === 'win32' && !process.argv.some(arg => arg.startsWith('--user-data-dir'))\n"
+      + '    && /\\\\AppData\\\\Local\\\\Programs\\\\/i.test(process.execPath)) {\n'
+      + "    try { app.setLoginItemSettings({ openAtLogin: true, args: ['--hidden'] }) } catch (error) { console.warn('local login item:', error) }\n"
+      + '  }\n',
+    "process.argv.includes('--hidden')")
+  tx.replace(main, '    if (activate) window.show()\n    else window.showInactive()\n',
+    '    // Local build: a start at Windows sign-in stays in the tray; the next show (tray, relaunch) is normal.\n'
+      + '    if (localHiddenStart) localHiddenStart = false\n'
+      + '    else if (activate) window.show()\n'
+      + '    else window.showInactive()\n',
+    'if (localHiddenStart) localHiddenStart = false')
+})
+
+// ── 38. Control de Windows para el agente ─────────────────────────────────────────
+// Abrir apps y moverse por ellas: un servidor MCP propio (sistema/escritorio/desktop-mcp.mjs) sobre Cua Driver, que ya
+// trae el repositorio con su binario de Windows. Va en su propio proceso (un fallo del controlador nativo no tumba la
+// app) y ofrece 16 herramientas esenciales con definiciones recortadas: lee cada ventana como un árbol de elementos de
+// texto (vale para un modelo sin visión) y pulsa o escribe por elemento, sin robar el foco.
+
+const LOCAL_DESKTOP_PACKAGES = [
+  ['@deepseek-ai/dsh-experimental-computer-use-cua-driver-native', 'packages/experimental/computer-use-cua-driver-native'],
+]
+
+optional('control de Windows para el agente (abrir apps y moverse por ellas)', (tx) => {
+  const bundle = join(repo, 'packages', 'bundle', 'web-app', 'cordis.patch.yml')
+  // El paquete trae @trycua/cua-driver y su binario de Windows (los .node quedan fuera del asar al empaquetar).
+  addCliWorkspaceDeps(tx, LOCAL_DESKTOP_PACKAGES)
+  let rows = tx.read(bundle)
+  if (!rows.includes('serverName: desktop')) {
+    const script = readFileSync(join(here, 'escritorio', 'desktop-mcp.mjs'), 'utf8')
+    // El SDK se busca desde el Host (process.argv[1] es la entrada del Host, dentro de node_modules); si no está, el
+    // servidor responde con error y la app sigue sin estas herramientas.
+    const args = "(() => { let sdk = ''; try { sdk = process.getBuiltinModule('node:module').createRequire(process.argv[1]).resolve('@trycua/cua-driver') } catch {} "
+      + `return ['--input-type=module', '-e', ${JSON.stringify(script)}, '--', sdk] })()`
+    rows = rows.trimEnd() + '\n\n' + [
+      '# Local build (dpseek-local-updater): Windows desktop control for the agent (sistema/escritorio/desktop-mcp.mjs).',
+      '- insert:',
+      '    - id: local-desktop',
+      "      name: '@deepseek-ai/dsh-mcp-client'",
+      '      config:',
+      '        serverName: desktop',
+      '        transport: stdio',
+      '        command: !!js process.execPath',
+      `        args: !!js ${JSON.stringify(args)}`,
+      '        env:',
+      "          ELECTRON_RUN_AS_NODE: '1'",
+      '        toolCallTimeoutMs: 60000',
+      '',
+    ].join('\n')
+    tx.write(bundle, rows)
+  }
 })
 
 console.log('\nCambios aplicados:')
