@@ -19,7 +19,7 @@
  * Esc vuelve a tu texto. Cada chat recuerda lo suyo. El botón avisa (color y un punto) si el
  * mensaje es vago o si acabas de pegar un texto largo; nunca cambia nada por sí solo.
  */
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { IconSparkleMedium, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -56,31 +56,16 @@ const INTENTS: readonly { readonly key: string; readonly label: string }[] = [
 /** Desde este tamaño tiene sentido ofrecer solo las partes clave (para gastar menos contexto del chat). */
 const KEY_PARTS_CHARS = 20_000
 
-/** Las opciones de la pestaña, en su orden de siempre (cada uno puede reordenarlas arrastrando). */
-type OptionKey = 'steps' | 'english' | 'grammar' | 'changes' | 'ask' | 'again' | 'deeper' | 'discard'
-const OPTIONS: readonly { readonly key: OptionKey; readonly label: string; readonly icon: string }[] = [
-  { key: 'steps', label: 'Step by step', icon: 'steps' },
-  { key: 'english', label: 'English', icon: 'english' },
-  { key: 'grammar', label: 'Fix grammar', icon: 'grammar' },
-  { key: 'changes', label: 'Show changes', icon: 'changes' },
-  { key: 'ask', label: 'Ask for a change', icon: 'ask' },
-  { key: 'again', label: 'Reprompt again', icon: 'again' },
-  { key: 'deeper', label: 'Think deeper', icon: 'deeper' },
-  { key: 'discard', label: 'Discard', icon: 'discard' },
+/** Atajos de «Ask for a change»: las versiones de siempre, a un clic (otra vez, vuelves a la sugerida). */
+const SHORTCUTS: readonly { readonly key: 'steps' | 'english' | 'grammar'; readonly label: string }[] = [
+  { key: 'steps', label: 'Step by step' },
+  { key: 'english', label: 'English' },
+  { key: 'grammar', label: 'Fix grammar' },
 ]
-const ORDER_KEY = 'dsh-local-reprompt-order'
-function savedOrder(): OptionKey[] {
-  const known = OPTIONS.map((option) => option.key)
-  try {
-    const saved = JSON.parse(localStorage.getItem(ORDER_KEY) ?? '[]') as unknown
-    if (Array.isArray(saved)) {
-      const kept = saved.filter((key): key is OptionKey => known.includes(key as OptionKey))
-      return [...new Set([...kept, ...known])]
-    }
-  } catch {
-    // Sin almacenamiento: el orden de siempre.
-  }
-  return known
+
+/** «Pensar a fondo» en el cerebro de la barra (LocalThinkButton.tsx, en el selector de modelo). */
+function thinkingHard(): boolean {
+  return document.querySelector<HTMLElement>('[data-composer-card] button[data-mode]')?.dataset.mode === '2'
 }
 
 /** Cómo se llama cada fase del Host. */
@@ -228,16 +213,17 @@ function progressOf(state: State): number | null {
   return null
 }
 
+/** Alto del prompt nuevo: el de sus líneas (el tope lo pone el CSS). */
+function fitPrompt(box: HTMLTextAreaElement): void {
+  box.style.height = 'auto'
+  box.style.height = `${String(box.scrollHeight)}px`
+}
+
 /** Iconos de las opciones (trazo fino, como los de la app; la librería no los trae todos). */
 function OptionIcon({ name }: { name: string }): ReactNode {
   const paths: Readonly<Record<string, ReactNode>> = {
-    steps: <><path d="M6 4h7M6 8h7M6 12h7" /><path d="M2.5 4h.5M2.5 8h.5M2.5 12h.5" /></>,
-    english: <><path d="M2 3.5h7M5.5 2v1.5M3.5 3.5c.5 2.5 2.5 4.5 5 5.5M7.5 3.5c-.5 2.5-2.5 4.5-5 5.5" /><path d="M8.5 14l2.5-6 2.5 6M9.3 12h3.4" /></>,
-    grammar: <><path d="M2 12l2.8-8 2.8 8M3 9.5h3.6" /><path d="M9.5 9.5l1.8 1.8 3.2-4" /></>,
-    changes: <><path d="M5 2.5v8M2.5 5h5" /><path d="M9 13.5h4.5" /></>,
     ask: <path d="M3 3.5h10v7H7.5L4.5 13v-2.5H3z" />,
     again: <><path d="M13 8a5 5 0 1 1-1.5-3.6" /><path d="M13 2.5v2.5h-2.5" /></>,
-    deeper: <><path d="M8 13V9M5.5 13h5" /><path d="M8 9a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z" /><path d="M6.5 5.5h3" /></>,
     discard: <path d="M4 4l8 8M12 4l-8 8" />,
   }
   return (
@@ -272,11 +258,6 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
   // Los dos huecos que pone InputBar en la barra: encima del texto (documentos) y en su sitio (resultado).
   const [docsHost, setDocsHost] = useState<HTMLElement | null>(null)
   const [panelHost, setPanelHost] = useState<HTMLElement | null>(null)
-  // Orden de las opciones de la pestaña (se reordenan arrastrando) y la que se está arrastrando.
-  const [order, setOrder] = useState<OptionKey[]>(savedOrder)
-  const [dragged, setDragged] = useState<OptionKey | null>(null)
-  // La que se arrastra, también fuera del render (los dragover llegan antes de volver a pintar).
-  const draggedRef = useRef<OptionKey | null>(null)
   const anchor = useRef<HTMLSpanElement | null>(null)
   const button = useRef<HTMLButtonElement | null>(null)
   const picker = useRef<HTMLInputElement | null>(null)
@@ -297,27 +278,28 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
   // Con un resultado (o trabajando en uno), el ✨ es el interruptor de caras.
   const twoFaces = made(s) || s.error !== null || (s.busy !== null && !reading)
   // El prompt nuevo crece con sus líneas reales (también las que salen al ajustar al ancho), como el editor de la
-  // barra; el tope de altura lo pone el CSS y a partir de ahí se desplaza.
+  // barra; el tope de altura lo pone el CSS y a partir de ahí se desplaza. Se ajusta cada vez que el cuadro aparece
+  // (al terminar una opción se crea de nuevo aunque el texto no cambie) y en cada pintado, que es barato.
   const promptBox = useRef<HTMLTextAreaElement | null>(null)
-  const promptText = s.versions[s.active]?.text
-  useLayoutEffect(() => {
-    const box = promptBox.current
-    if (box === null) return undefined
-    const fit = (): void => {
-      box.style.height = 'auto'
-      box.style.height = `${String(box.scrollHeight)}px`
-    }
-    fit()
-    // Solo los cambios de ancho cambian el ajuste de líneas (los de alto los provoca el propio fit).
+  const promptObserver = useRef<ResizeObserver | null>(null)
+  const promptRef = useCallback((box: HTMLTextAreaElement | null): void => {
+    promptObserver.current?.disconnect()
+    promptObserver.current = null
+    promptBox.current = box
+    if (box === null) return
+    fitPrompt(box)
+    // Solo los cambios de ancho cambian el ajuste de líneas (los de alto los provoca el propio ajuste).
     let width = box.clientWidth
     const observer = new ResizeObserver(() => {
       if (box.clientWidth === width) return
       width = box.clientWidth
-      fit()
+      fitPrompt(box)
     })
     observer.observe(box.parentElement ?? box)
-    return () => { observer.disconnect() }
-  }, [promptText, page, s.showChanges])
+    promptObserver.current = observer
+  }, [])
+  useLayoutEffect(() => { if (promptBox.current !== null) fitPrompt(promptBox.current) })
+  useEffect(() => () => { promptObserver.current?.disconnect() }, [])
 
   // El botón avisa de un mensaje vago cuando dejas de escribir (no mientras escribes).
   useEffect(() => {
@@ -356,6 +338,14 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
     bar.setAttribute('data-local-reprompt', '')
     return () => { bar.removeAttribute('data-local-reprompt') }
   }, [page, panelHost])
+  // Con la pestaña, la esquina de arriba a la izquierda de la barra es recta: su lado sigue el de la pestaña.
+  const withNotch = page && suggestion !== null && s.error === null
+  useEffect(() => {
+    const bar = anchor.current?.closest<HTMLElement>('[data-composer-card]')
+    if (bar == null || !withNotch || panelHost === null) return
+    bar.setAttribute('data-local-notch', '')
+    return () => { bar.removeAttribute('data-local-notch') }
+  }, [withNotch, panelHost])
   // El fondo del interruptor, bajo la cara activa (se desliza al cambiar).
   useLayoutEffect(() => {
     const active = page ? theirs.current : mine.current
@@ -576,7 +566,8 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
     if (s.busy !== null) { flip(1); return }
     setLongPaste(false)
     const document = combined(s.documents)
-    if (document === undefined && empty) { pick(); return }
+    // Sin texto ni documentos no hace nada: los ficheros se traen arrastrándolos al botón, sin abrir el explorador.
+    if (document === undefined && empty) return
     // Con documentos y el cuadro vacío, la fila ya ofrece qué hacer con ellos.
     if (document !== undefined && empty) return
     // Con documentos y texto, el texto es la instrucción.
@@ -615,18 +606,22 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
     if (s.busy !== null || suggestion === null) return
     run({ transform: { kind: 'unify', text: suggestion.text } }, 'Translating the other sentences…', s.active)
   }
+  /** Otra vez desde tu texto; con el cerebro de la barra en «Pensar a fondo», razonándolo (lo que era «Think deeper»). */
   const again = (): void => {
     if (s.busy !== null) return
     const text = s.original === '' ? draft : s.original
     const document = combined(s.documents)
-    start(text, base(), document === undefined && isLongPrompt(text)
-      ? `Reorganizing a long prompt, keeping all of it… (${longMinutes(text)})` : 'Reprompting…', document === undefined && isLongPrompt(text), false)
+    const long = document === undefined && isLongPrompt(text)
+    if (thinkingHard()) {
+      start(text, { ...base(), think: true }, long ? 'Thinking it through, then reorganizing… (several minutes)' : 'Thinking it through…', long, false)
+      return
+    }
+    start(text, base(), long ? `Reorganizing a long prompt, keeping all of it… (${longMinutes(text)})` : 'Reprompting…', long, false)
   }
-  const thinkDeeper = (): void => {
-    if (s.busy !== null) return
-    const key: VersionKey = s.active === 'steps' ? 'steps' : 'suggested'
-    run({ ...base(), ...key === 'steps' ? { style: 'steps' as LocalImproveStyle } : {}, think: true },
-      s.slow ? 'Thinking it through, then reorganizing… (several minutes)' : 'Thinking it through…', key, true)
+  /** Un atajo de «Ask for a change»: cierra la línea y hace (o deshace) esa versión. */
+  const shortcut = (key: 'steps' | 'english' | 'grammar'): void => {
+    set({ asking: false })
+    version(key)
   }
   /** Corrige el texto que ves con lo que digas («más corto», «no toques X»). */
   const refine = (): void => {
@@ -649,26 +644,6 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
   const updateWithAnswers = (): void => {
     if (answered.length > 0) run({ ...base(), ...s.active === 'steps' ? { style: 'steps' as LocalImproveStyle } : {}, answers: answered }, 'Updating with your answers…', s.active)
   }
-  const chooseOption = (key: OptionKey): void => {
-    switch (key) {
-      case 'steps': case 'english': case 'grammar': version(key); break
-      case 'changes': set({ showChanges: !s.showChanges }); break
-      case 'ask': set({ asking: !s.asking }); break
-      case 'again': again(); break
-      case 'deeper': thinkDeeper(); break
-      case 'discard': close(); break
-    }
-  }
-  /** Reordenar la pestaña: la opción arrastrada pasa al sitio de la que tiene debajo (y se guarda). */
-  const moveOption = (from: OptionKey, to: OptionKey): void => {
-    if (from === to) return
-    setOrder((current) => {
-      const next = current.filter((key) => key !== from)
-      next.splice(next.indexOf(to) + (current.indexOf(from) < current.indexOf(to) ? 1 : 0), 0, from)
-      try { localStorage.setItem(ORDER_KEY, JSON.stringify(next)) } catch { /* sin almacenamiento: solo esta vez */ }
-      return next
-    })
-  }
 
   const diff = suggestion !== null && s.original.trim() !== '' ? localDiff(s.original, suggestion.text) : null
   // Con documentos, tu texto es la instrucción, no un borrador del prompt: comparar no dice nada.
@@ -680,7 +655,7 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
   const docsLabel = s.documents.length === 1 ? 'it' : 'them'
   const label = s.busy ?? (s.documents.length > 0
     ? (empty ? `Choose what to do with the document${s.documents.length === 1 ? '' : 's'}` : `Make a prompt from your text and the document${s.documents.length === 1 ? '' : 's'}`)
-    : empty ? 'Create a prompt from files (PDF, DOCX or text)'
+    : empty ? 'Write a message, or drop files here (PDF, DOCX or text) to make a prompt'
       : longPaste ? 'Long text: click to reorganize it, keeping all of it'
         : vague ? 'This message is a bit vague: click to make it clearer' : 'Reprompt')
   const phase = s.live.phase === '' ? s.busy : PHASES[s.live.phase] ?? `${s.live.phase.charAt(0).toUpperCase()}${s.live.phase.slice(1)}…`
@@ -689,16 +664,8 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
   const below = suggestion !== null && s.busy === null && s.error === null && s.documents.length > 0 && s.block !== null
   const allText = s.documents.reduce((sum, document) => sum + document.text.length, 0)
   const allWords = s.documents.reduce((sum, document) => sum + document.words, 0)
-  // Las opciones que se pueden usar ahora (Changes solo si hay con qué comparar; Think deeper una vez por versión).
-  const available = (key: OptionKey): boolean => key !== 'changes' || counts !== null
-  const pressed = (key: OptionKey): boolean => (key === 'steps' || key === 'english' || key === 'grammar')
-    ? s.active === key : key === 'changes' ? s.showChanges : key === 'ask' ? s.asking : key === 'deeper' && suggestion?.deep === true
-  const optionLabel = (key: OptionKey): string => {
-    const option = OPTIONS.find((item) => item.key === key)
-    const name = option?.label ?? key
-    if (key === 'changes' && counts !== null) return `${name} (+${String(counts.added)} −${String(counts.removed)})`
-    return name
-  }
+  // «+12 −3» junto al interruptor: cuánto cambió; al pulsarlo, los cambios marcados (lo que era «Show changes»).
+  const changes = page && counts !== null && s.busy === null && s.error === null
   const ring = (
     <svg className={progress === null && s.busy !== null ? `${css.ring} ${css.spin}` : css.ring} viewBox="0 0 20 20" aria-hidden="true" data-local-improve-ring>
       <circle cx="10" cy="10" r="8.5" className={css.ringTrack} />
@@ -711,6 +678,7 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
     <span ref={anchor} className={css.contents}>
       {twoFaces && !target
         ? (
+          <>
           <span className={css.faces} role="tablist" aria-label="Reprompt" data-local-improve data-busy={s.busy !== null || undefined}
             data-local-improve-ready={waiting || undefined}>
             {knob !== null && <span className={css.knob} style={{ left: knob.left, width: knob.width }} />}
@@ -730,12 +698,22 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
               </button>
             </Tooltip>
           </span>
+          {changes && counts !== null && (
+            <Tooltip label={s.showChanges ? 'Hide changes' : 'Show changes'} side="top" delayMs={500}>
+              <button type="button" className={css.counter} aria-pressed={s.showChanges} data-local-improve-changes
+                aria-label={`${s.showChanges ? 'Hide' : 'Show'} changes: ${String(counts.added)} words added, ${String(counts.removed)} removed`}
+                onMouseDown={(event) => { event.preventDefault() }} onClick={() => { set({ showChanges: !s.showChanges }) }}>
+                <span className={css.added}>+{counts.added}</span> <span className={css.removed}>−{counts.removed}</span>
+              </button>
+            </Tooltip>
+          )}
+          </>
         )
         : (
           <Tooltip label={target ? 'Drop here to make a prompt from it' : label} side="top" delayMs={hint ? 0 : 500}>
             <button ref={button} type="button"
               className={[className, css.host, hint ? css.hint : '', target ? css.target : '', s.documents.length > 0 ? css.loaded : ''].filter(Boolean).join(' ')}
-              aria-label={target ? 'Make a prompt from the dropped files' : empty && s.documents.length === 0 ? 'Reprompt: create a prompt from files' : 'Reprompt'}
+              aria-label={target ? 'Make a prompt from the dropped files' : empty && s.documents.length === 0 ? 'Reprompt: write a message or drop files here' : 'Reprompt'}
               data-local-improve data-local-improve-hint={hint || undefined} data-busy={s.busy !== null || undefined}
               data-local-improve-target={target || undefined} data-over={(target && over) || undefined}
               disabled={disabled}
@@ -762,10 +740,12 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
       {docsHost !== null && (s.documents.length > 0 || choosing) && createPortal(
         <div className={css.docs}>
           {s.documents.map((document, index) => (
-            <span key={`${document.name}-${String(index)}`} className={css.pill} data-local-improve-docs-pill
-              title={[document.cut === undefined ? '' : `Read ${document.cut}`,
+            <Tooltip key={`${document.name}-${String(index)}`} side="top" delayMs={400}
+              disabled={document.cut === undefined && document.blank === undefined}
+              label={[document.cut === undefined ? '' : `Read ${document.cut}`,
                 document.blank === undefined ? '' : `${number(document.blank)} page${document.blank === 1 ? '' : 's'} without text`]
-                .filter(Boolean).join(' · ') || undefined}>
+                .filter(Boolean).join(' · ')}>
+            <span className={css.pill} data-local-improve-docs-pill>
               <IconSparkleMedium size={12} />
               <span className={css.pillName}>{document.name}</span>
               <span className={css.pillMeta}>
@@ -775,6 +755,7 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
               <button type="button" className={css.pillRemove} aria-label={`Remove ${document.name}`} disabled={s.busy !== null}
                 onMouseDown={(event) => { event.preventDefault() }} onClick={() => { removeDocument(index) }}>✕</button>
             </span>
+            </Tooltip>
           ))}
           {choosing && (
             <span className={css.choices} data-local-improve-intent>
@@ -794,27 +775,29 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
       )}
       {panelHost !== null && page && createPortal(
         <div className={css.panel} role="region" aria-label="Reprompt" data-local-improve-card>
-          {suggestion !== null && s.error === null && (
+          {withNotch && (
             <div className={css.notch} role="toolbar" aria-label="Reprompt options" data-local-improve-options
               data-busy={s.busy !== null || undefined}>
-              {order.filter(available).map((key) => (
-                <button key={key} type="button" className={css.option} aria-label={optionLabel(key)} aria-pressed={pressed(key)}
-                  data-option={key} data-dragging={dragged === key || undefined} draggable
-                  onDragStart={(event) => { draggedRef.current = key; setDragged(key); event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', key) }}
-                  onDragOver={(event) => {
-                    const from = draggedRef.current
-                    if (from === null) return
-                    event.preventDefault()
-                    event.dataTransfer.dropEffect = 'move'
-                    if (from !== key) moveOption(from, key)
-                  }}
-                  onDrop={(event) => { event.preventDefault(); draggedRef.current = null; setDragged(null) }}
-                  onDragEnd={() => { draggedRef.current = null; setDragged(null) }}
-                  onMouseDown={(event) => { event.preventDefault() }} onClick={() => { chooseOption(key) }}>
-                  <OptionIcon name={key} />
-                  <span className={css.optionName}>{optionLabel(key)}</span>
+              <span className={css.optionsTrack}>
+              <Tooltip label={thinkingHard() ? 'Again, thinking it through (brain: Think hard)' : 'Again, from your text'} side="top" delayMs={600}>
+                <button type="button" className={css.option} data-option="again"
+                  onMouseDown={(event) => { event.preventDefault() }} onClick={again}>
+                  <OptionIcon name="again" />
+                  Reprompt again
                 </button>
-              ))}
+              </Tooltip>
+              <button type="button" className={css.option} data-option="ask" aria-pressed={s.asking}
+                onMouseDown={(event) => { event.preventDefault() }} onClick={() => { set({ asking: !s.asking }) }}>
+                <OptionIcon name="ask" />
+                Ask for a change
+              </button>
+              <Tooltip label="Discard" side="top" delayMs={400}>
+                <button type="button" className={`${css.option} ${css.discard}`} data-option="discard" aria-label="Discard"
+                  onMouseDown={(event) => { event.preventDefault() }} onClick={close}>
+                  <OptionIcon name="discard" />
+                </button>
+              </Tooltip>
+              </span>
             </div>
           )}
           {s.busy !== null && <>
@@ -850,7 +833,7 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
                 </div>
               )
               : (
-                <textarea ref={promptBox} className={css.text} value={suggestion.text} rows={1} aria-label="New prompt"
+                <textarea ref={promptRef} className={css.text} value={suggestion.text} rows={1} aria-label="New prompt"
                   onChange={(event) => {
                     const text = event.target.value
                     write(sid, (state) => ({ ...state, versions: { ...state.versions, [state.active]: { ...suggestion, text } } }))
@@ -906,13 +889,21 @@ export function LocalImprove({ sessionId, draft, subagent, className, disabled }
               </div>
             )}
             {s.asking && (
-              <input className={css.answer} value={s.refine} data-local-improve-refine autoFocus
-                placeholder="What should change? (more concise, in Python, don't touch X…) then Enter"
-                onChange={(event) => { set({ refine: event.target.value }) }}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') { event.preventDefault(); refine() }
-                  else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); set({ asking: false }) }
-                }} />
+              <div className={css.ask} data-local-improve-ask>
+                {SHORTCUTS.map((item) => (
+                  <button key={item.key} type="button" className={css.shortcut} aria-pressed={s.active === item.key}
+                    data-shortcut={item.key} onMouseDown={(event) => { event.preventDefault() }} onClick={() => { shortcut(item.key) }}>
+                    {item.label}
+                  </button>
+                ))}
+                <input className={css.answer} value={s.refine} data-local-improve-refine autoFocus
+                  placeholder="Or write it: shorter, in Python, don't touch X… then Enter"
+                  onChange={(event) => { set({ refine: event.target.value }) }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') { event.preventDefault(); refine() }
+                    else if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); set({ asking: false }) }
+                  }} />
+              </div>
             )}
           </>}
         </div>,

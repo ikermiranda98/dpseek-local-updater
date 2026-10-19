@@ -587,17 +587,30 @@
 
 /* La cara de Reprompt: la barra se tiñe un poco (la única señal) y tu texto se esconde. El tinte va en una
    variable para que la pestaña de opciones (y sus curvas de unión) sean exactamente la misma superficie. */
+/* Filete de 1px en vez de 0,5px: con el escalado de Windows (125-150 %) el de medio píxel se ve borroso, y la
+   pestaña de opciones lo continúa con el mismo grosor. */
 :global([data-composer-card]) {
-  transition: background-color 200ms var(--ds-ease-in-out, ease), margin-top 160ms var(--ds-ease-in-out, ease);
+  --dsw-elevation-stroke: 0 0 0 1px var(--dsw-elevation-stroke-color);
+  transition: background-color 200ms var(--ds-ease-in-out, ease), margin-top 160ms var(--ds-ease-in-out, ease),
+    border-radius 200ms var(--ds-ease-in-out, ease);
 }
 
 /* La pestaña de opciones tiene su propio hueco encima de la barra: lo que la app pone ahí (carpeta de trabajo
    en un chat nuevo, To-dos, cola) sube en vez de quedar tapado. Se reserva desde que empieza a trabajar para
-   que la pestaña no empuje nada al aparecer. */
+   que la pestaña no empuje nada al aparecer. Todas las esquinas, las de la barra, las de la pestaña y la curva
+   que las une, tienen el mismo radio. */
 :global([data-composer-card][data-local-reprompt]) {
   --local-reprompt-surface: color-mix(in srgb, var(--dsw-alias-state-business-primary) 7%, var(--dsw-specific-input-major));
-  margin-top: 32px;
+  --local-notch-radius: 16px;
+  --local-notch-height: 34px;
+  margin-top: var(--local-notch-height);
+  border-radius: var(--local-notch-radius);
   background: var(--local-reprompt-surface);
+}
+
+/* Con la pestaña, la esquina de arriba a la izquierda es recta: el lado de la pestaña sigue el de la barra. */
+:global([data-composer-card][data-local-reprompt][data-local-notch]) {
+  border-top-left-radius: 0;
 }
 
 :global([data-composer-card][data-local-reprompt]) [data-input-scroll] {
@@ -673,94 +686,98 @@
   background: transparent;
 }
 
-/* La pestaña de opciones: sale del borde de arriba de la barra, a la izquierda, y es la misma superficie (mismo tinte y mismo
-   filete de 0,5px). Las dos curvas cóncavas de la base la funden con el borde, como una pestaña nativa; la
-   barra no pinta su filete bajo la pestaña porque la pestaña lo tapa (el filete de la barra va por fuera). */
+/* La pestaña de opciones: sale del borde de arriba de la barra, pegada a su lado izquierdo (sin hueco), y es la misma
+   superficie con el mismo filete de 1px. Una sola curva cóncava, a la derecha, la une al borde; todas con el mismo
+   radio. La barra no pinta su filete bajo la pestaña porque la pestaña lo tapa (el filete de la barra va por fuera). */
 .notch {
-  --notch-height: 32px;
-  --notch-fillet: 8px;
   --notch-stroke: var(--dsw-elevation-stroke-color, var(--dsw-alias-border-l2));
   --notch-surface: var(--local-reprompt-surface, var(--dsw-specific-input-major));
+  --notch-r: var(--local-notch-radius, 16px);
   position: absolute;
-  top: calc(0px - var(--notch-height));
-  /* A la izquierda, justo donde acaba la curva de la esquina de la barra más el hueco de la curva de unión. Al
-     desplegarse un nombre, la pestaña crece hacia la derecha y nada se mueve bajo el cursor. */
-  left: calc(var(--dsw-radius-panel, 28px) + var(--notch-fillet) + 4px);
+  top: calc(0px - var(--local-notch-height, 34px));
+  left: -1px;
   display: inline-flex;
   align-items: center;
-  gap: 2px;
-  height: var(--notch-height);
-  padding: 0 4px 1px;
+  height: var(--local-notch-height, 34px);
+  padding: 0 4px 0 5px;
   box-sizing: border-box;
-  border: 0.5px solid var(--notch-stroke);
+  border: 1px solid var(--notch-stroke);
   border-bottom: 0;
-  border-radius: var(--dsw-radius-md) var(--dsw-radius-md) 0 0;
+  border-radius: var(--notch-r) var(--notch-r) 0 0;
   background: var(--notch-surface);
   animation: notch-in 200ms var(--ds-ease-in-out, ease);
 }
 
-/* Las curvas de unión: fuera del círculo, la superficie; en su borde, el filete, que empalma con el lateral
-   de la pestaña arriba y con el filete de la barra abajo; dentro, transparente. Tapan también el tramo del
-   lateral que quedaría recto. */
+/* La curva de unión, con formas vectoriales (máscaras SVG) para que el borde se suavice igual que las esquinas de
+   la barra; un degradado radial lo dejaba dentado. ::before es la superficie de fuera del círculo (tapa el tramo
+   recto del lado derecho) y ::after el filete del arco, que sigue el lado de la pestaña arriba y el de la barra
+   abajo; dentro del círculo queda transparente. Dibujadas para un radio de 16 (--local-notch-radius). */
 .notch::before,
 .notch::after {
   content: '';
   position: absolute;
+  left: 100%;
   bottom: 0;
-  /* 2px más de ancho: entran en la pestaña y tapan el tramo recto del lateral (allí son superficie). */
-  width: calc(var(--notch-fillet) + 2px);
-  height: calc(var(--notch-fillet) + 0.5px);
+  width: var(--notch-r);
+  height: var(--notch-r);
+  -webkit-mask: var(--notch-mask) 0 0 / 100% 100% no-repeat;
+  mask: var(--notch-mask) 0 0 / 100% 100% no-repeat;
   pointer-events: none;
 }
 
 .notch::before {
-  left: calc(0px - var(--notch-fillet));
-  background: radial-gradient(circle at 0 0, transparent calc(var(--notch-fillet) - 0.25px),
-    var(--notch-stroke) var(--notch-fillet), var(--notch-stroke) calc(var(--notch-fillet) + 0.5px),
-    var(--notch-surface) calc(var(--notch-fillet) + 0.75px));
+  --notch-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M0 0V16H16A16 16 0 0 1 0 0Z'/%3E%3C/svg%3E");
+  background: var(--notch-surface);
 }
 
 .notch::after {
-  right: calc(0px - var(--notch-fillet));
-  background: radial-gradient(circle at 100% 0, transparent calc(var(--notch-fillet) - 0.25px),
-    var(--notch-stroke) var(--notch-fillet), var(--notch-stroke) calc(var(--notch-fillet) + 0.5px),
-    var(--notch-surface) calc(var(--notch-fillet) + 0.75px));
+  --notch-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M16 15.5A15.5 15.5 0 0 1 0.5 0' fill='none' stroke='black' stroke-width='1'/%3E%3C/svg%3E");
+  background: var(--notch-stroke);
 }
 
 /* Al aparecer, sube desde detrás del borde de la barra. */
 @keyframes notch-in {
-  from { clip-path: inset(100% -16px 0 -16px); }
-  to { clip-path: inset(-4px -16px 0 -16px); }
+  from { clip-path: inset(100% -20px 0 -2px); }
+  to { clip-path: inset(-4px -20px 0 -2px); }
 }
 
-/* Mismo tamaño, radio, letra y hover que los chips de la fila de abajo (Plan, modelo…). */
+/* Los botones, como el interruptor «Your text | Reprompt»: un riel con el mismo filete y píldoras dentro; al
+   pasar el ratón se rellenan como su cara elegida, y «Ask for a change» abierto se tiñe como «Reprompt». */
+.optionsTrack {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 2px;
+  box-sizing: border-box;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 14px;
+}
+
 .option {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  height: 26px;
-  padding: 0 6px;
-  box-sizing: border-box;
-  white-space: nowrap;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
   border: 0;
-  border-radius: var(--dsw-radius-sm);
+  border-radius: 12px;
   background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  white-space: nowrap;
   cursor: default;
-  transition: background-color 100ms ease, color 100ms ease, opacity 120ms ease, transform 120ms ease;
+  transition: color 200ms, background-color 200ms;
+}
+
+.option svg {
+  width: 14px;
+  height: 14px;
 }
 
 .option:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+  background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-interactive-bg-hover-solid));
   color: var(--dsw-alias-label-primary);
-}
-
-.option:active {
-  transform: scale(0.96);
 }
 
 .option:focus-visible {
@@ -769,8 +786,21 @@
 }
 
 .option[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 14%, transparent);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 16%, transparent);
   color: var(--dsw-alias-state-business-primary);
+}
+
+/* La ✕: solo el icono, del mismo alto, y en el rojo del botón «Delete» de los chats. */
+.discard,
+.discard:hover {
+  width: 24px;
+  padding: 0;
+  justify-content: center;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.discard:hover {
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent);
 }
 
 /* Mientras trabaja, la pestaña se queda (no desaparece y vuelve) pero sus opciones no responden. */
@@ -779,24 +809,73 @@
   pointer-events: none;
 }
 
-/* La que se está arrastrando para reordenarla. */
-.option[data-dragging] {
-  opacity: 0.4;
+/* «Ask for a change»: los atajos, como píldoras, y lo que quieras escribir. */
+.ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
 }
 
-/* El nombre de cada opción se despliega al pasar el ratón (sin tooltips: no tapa el icono). */
-.optionName {
-  max-width: 0;
-  overflow: hidden;
-  opacity: 0;
-  transition: max-width 180ms var(--ds-ease-in-out, ease), margin-left 180ms var(--ds-ease-in-out, ease), opacity 120ms ease;
+.ask .answer {
+  flex: 1 1 220px;
+  min-width: 0;
 }
 
-.option:hover .optionName,
-.option:focus-visible .optionName {
-  max-width: 160px;
+.shortcut {
+  height: 24px;
+  padding: 0 10px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: default;
+  transition: color 200ms, background-color 200ms;
+}
+
+.shortcut:hover {
+  background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-interactive-bg-hover-solid));
+  color: var(--dsw-alias-label-primary);
+}
+
+.shortcut[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 16%, transparent);
+  color: var(--dsw-alias-state-business-primary);
+}
+
+/* «+12 −3» junto al interruptor de caras: cuánto cambió; pulsado, los cambios marcados en el texto. */
+.counter {
+  flex: none;
+  height: 24px;
   margin-left: 6px;
-  opacity: 1;
+  padding: 0 8px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  cursor: default;
+  transition: background-color 200ms;
+}
+
+.counter:hover {
+  background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-interactive-bg-hover-solid));
+}
+
+.counter[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 16%, transparent);
+}
+
+.added {
+  color: var(--dsw-alias-state-success-primary, #2f9e6b);
+}
+
+.removed {
+  color: var(--dsw-alias-state-error-primary, #d9534f);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -809,12 +888,9 @@
   }
 
   .option,
-  .optionName {
+  .shortcut,
+  .counter {
     transition: none;
-  }
-
-  .option:active {
-    transform: none;
   }
 }
 
@@ -833,8 +909,8 @@
   padding-bottom: 4px;
 }
 
-/* Selector de modelo: solo su icono (el nombre está en el menú y en el aviso al pasar el ratón). */
+/* Selector de modelo: un chip con el icono, el modelo y el contexto («Qwen3.6 · 128K»; LocalModelDrawer.tsx). */
 :global([data-composer-card] [class$="_row"]) {
-  --dsh-composer-model-text-display: none;
+  --dsh-composer-model-text-display: block;
   --dsh-composer-model-icon-display: block;
 }

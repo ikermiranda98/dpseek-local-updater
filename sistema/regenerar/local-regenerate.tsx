@@ -354,7 +354,6 @@ export function LocalUserMessage({ node, t, children }: { node: UserNodeLike; t:
         : (
           <div
             className={css.editable}
-            title={t('local.edit.hint')}
             onClick={(event) => {
               const target = event.target as HTMLElement
               if (hasTextSelection() || target.closest('a, button, img, video, [role="button"]') !== null) return
@@ -440,11 +439,11 @@ function EditBox({ node, turn, sessionId, useChat, t, onClose }: {
       <div className={css.editFooter}>
         {error !== null && <span className={css.editError}>{error}</span>}
         {error === null && hasFiles(node.data.content) && <span className={css.editNote}>{t('local.edit.files')}</span>}
+        <Tooltip label={t('local.edit.send')} side="top" delayMs={500}>
         <button
           type="button"
           className={css.send}
           aria-label={t('local.edit.send')}
-          title={t('local.edit.send')}
           disabled={sending || text.trim() === ''}
           // Que el clic no quite el foco al editor antes de enviar.
           onPointerDown={(event) => { event.preventDefault() }}
@@ -452,6 +451,7 @@ function EditBox({ node, turn, sessionId, useChat, t, onClose }: {
         >
           <IconSendOutlineRegular size={14} />
         </button>
+        </Tooltip>
       </div>
     </div>
   )

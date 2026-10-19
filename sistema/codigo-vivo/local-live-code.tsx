@@ -11,7 +11,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
-import { IconCodeOutlineRegular, languageForPath, useCodeHighlighter } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconCodeOutlineRegular, languageForPath, Tooltip, useCodeHighlighter } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { CodeHighlighter, HighlightSpan } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -151,17 +151,21 @@ function LiveCodeTab({ sessionId, useTabInfo }: PropsRuntime<'sidebar.right.pane
       <div className={css.header}>
         <div className={css.chips} role="tablist" aria-label="Files written in this turn">
           {files.map((entry) => (
-            <button key={entry.path} type="button" role="tab" className={css.chip} aria-selected={entry.path === path}
-              title={entry.path} onClick={() => { setChosen(entry.path) }}>
-              <span className={css.dot} data-status={fileStatus(entry)} />
-              <span className={css.chipName}>{basename(entry.path)}</span>
-            </button>
+            <Tooltip key={entry.path} label={entry.path} side="bottom" delayMs={500}>
+              <button type="button" role="tab" className={css.chip} aria-selected={entry.path === path}
+                onClick={() => { setChosen(entry.path) }}>
+                <span className={css.dot} data-status={fileStatus(entry)} />
+                <span className={css.chipName}>{basename(entry.path)}</span>
+              </button>
+            </Tooltip>
           ))}
         </div>
-        <button type="button" className={css.tool} aria-pressed={following} disabled={files.length === 0}
-          title="Show the file the agent is writing" onClick={() => { setChosen(undefined) }}>Follow</button>
+        <Tooltip label="Show the file the agent is writing" side="bottom" align="end" delayMs={500}>
+          <button type="button" className={css.tool} aria-pressed={following} disabled={files.length === 0}
+            onClick={() => { setChosen(undefined) }}>Follow</button>
+        </Tooltip>
       </div>
-      {file !== undefined && <div className={css.path} title={file.path}>{file.path}</div>}
+      {file !== undefined && <Tooltip label={file.path} side="bottom" delayMs={500}><div className={css.path}>{file.path}</div></Tooltip>}
       <div ref={body} className={css.body}>
         {file === undefined
           ? <p className={css.empty}>
@@ -223,11 +227,13 @@ export function LocalUndoButton({ sessionId, seq, index, file }: {
     : state === 'done' ? 'This file is back as it was before this turn'
       : 'Put this file back as it was before this turn'
   return (
-    <button type="button" className={css.undo} data-state={state} title={title}
-      disabled={state === 'working' || state === 'done'}
-      onClick={() => {
-        if (state === 'confirm') void run()
-        else setState('confirm')
-      }}>{label}</button>
+    <Tooltip label={title} side="top" delayMs={500}>
+      <button type="button" className={css.undo} data-state={state}
+        disabled={state === 'working' || state === 'done'}
+        onClick={() => {
+          if (state === 'confirm') void run()
+          else setState('confirm')
+        }}>{label}</button>
+    </Tooltip>
   )
 }

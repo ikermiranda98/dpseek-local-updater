@@ -76,7 +76,19 @@ export function LocalThinkButton({ efforts, effort, disabled, onChange, t }: {
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => { setWanted(null) }, [effort])
   useEffect(() => () => { clearTimeout(timer.current) }, [])
-  if (efforts === undefined || efforts.length === 0) return null
+  // Un modelo que no razona (qwen2.5): el cerebro se queda, apagado, para que la barra no cambie y se sepa por qué.
+  if (efforts === undefined || efforts.length === 0) {
+    return (
+      <Tooltip label={t('local.think.none')} side="top" delayMs={300}>
+        <button type="button" className={css.button} data-mode={0} data-none aria-disabled aria-label={t('local.think.none')}
+          onMouseDown={(event) => { event.preventDefault() }}>
+          <svg className={css.icon} viewBox="0 0 24 24" aria-hidden="true">
+            <g className={css.brain}>{BRAIN.map(d => <path key={d} className={css.line} d={d} />)}</g>
+          </svg>
+        </button>
+      </Tooltip>
+    )
+  }
 
   const mode = wanted ?? actual
   const available = (m: Mode): boolean => m === 1 || (m === 0 ? offId !== undefined : highId !== undefined)

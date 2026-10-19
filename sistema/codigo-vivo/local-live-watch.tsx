@@ -11,7 +11,7 @@
  */
 import { createContext, useContext, useEffect, useRef, useSyncExternalStore } from 'react'
 import type { ReactNode } from 'react'
-import { LinkIconMedium } from '@deepseek-ai/dsh-client-ui-primitives'
+import { LinkIconMedium, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ToolCallBlock } from '../contract/snapshot.ts'
 import type { UseChat } from '../contract/slots.ts'
 import { liveSnapshot, publishLive, requestLiveOpen, subscribeLive, type LiveEdit, type LiveFile } from './local-live-store.ts'
@@ -146,16 +146,17 @@ export function LocalLiveCodeButton({ turn, placement }: { turn?: number; placem
   const writing = live.files.some((file) => file.edits.some((edit) => edit.status === 'writing'))
   const count = live.files.length
   return (
-    <button type="button" className={css.button} data-placement={placement} data-live-code-button
-      title="Open the code in the right panel"
-      onClick={(event) => {
-        // Dentro de la línea «Completed in…», que pliega el turno: el clic es solo nuestro.
-        event.stopPropagation()
-        requestLiveOpen(sessionId)
-      }}>
-      <LinkIconMedium kind="code" className={css.icon} />
-      <span>{writing ? 'Writing code' : 'View code'}</span>
-      <span className={css.count}>{count === 1 ? '1 file' : `${String(count)} files`}</span>
-    </button>
+    <Tooltip label="Open the code in the right panel" side="top" delayMs={500}>
+      <button type="button" className={css.button} data-placement={placement} data-live-code-button
+        onClick={(event) => {
+          // Dentro de la línea «Completed in…», que pliega el turno: el clic es solo nuestro.
+          event.stopPropagation()
+          requestLiveOpen(sessionId)
+        }}>
+        <LinkIconMedium kind="code" className={css.icon} />
+        <span>{writing ? 'Writing code' : 'View code'}</span>
+        <span className={css.count}>{count === 1 ? '1 file' : `${String(count)} files`}</span>
+      </button>
+    </Tooltip>
   )
 }

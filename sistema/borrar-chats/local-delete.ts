@@ -60,7 +60,16 @@ export class LocalSessionDeleter {
       }
       const records = await this.ctx.sessionQuery.listSessions()
       const known = records.some(record => record.header.id === sessionId) || this.ctx.sessions.get(sessionId) !== undefined
-      if (!known) throw new RemoteError('session/not-found', `session ${sessionId} does not exist`, { sessionId })
+      if (!known) {
+        // Ya no existe (p. ej. un borrado anterior quitó sus archivos y falló después, con un archivo bloqueado
+        // por Windows), pero la lista lo sigue enseñando con su id por título hasta reiniciar. Lo que se pedía
+        // ya está hecho: se oculta ahora y el arranque siguiente quita lo que quede apuntado (archivado).
+        const pending = await this.loadPending()
+        pending.add(sessionId)
+        await this.savePending()
+        this.ctx.logger.info(`local-delete: ${sessionId} ya no existía; oculto hasta el próximo arranque`)
+        return { deletedSessionIds: [], pendingSessionIds: [sessionId] }
+      }
 
       // Archivar detiene el trabajo en curso (turnos, subagentes, tareas) y
       // bloquea nuevos pasos del modelo; si ya estaba archivada no hace nada.
@@ -74,8 +83,15 @@ export class LocalSessionDeleter {
           pendingIds.push(id)
           continue
         }
-        await removeSessionFiles(root, id)
-        deleted.push(id)
+        try {
+          await removeSessionFiles(root, id)
+          deleted.push(id)
+        } catch (error) {
+          // Un archivo bloqueado (antivirus, indexador de Windows…): mejor terminar en el próximo arranque que
+          // dejar el chat a medio borrar y que el siguiente intento ya no lo encuentre.
+          this.ctx.logger.warn(`local-delete: ${id} se termina de borrar al reiniciar: ${String(error)}`)
+          pendingIds.push(id)
+        }
       }
       if (pendingIds.length > 0) {
         const pending = await this.loadPending()

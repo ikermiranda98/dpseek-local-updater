@@ -38,6 +38,13 @@
   opacity: 0.5;
 }
 
+/* Modelo que no razona: apagado y sin respuesta al ratón (el aviso dice por qué). */
+.button[data-none],
+.button[data-none]:hover {
+  background: transparent;
+  opacity: 0.4;
+}
+
 /* Pensar: círculo azul suave y cerebro azul. */
 .button[data-mode='1'],
 .button[data-mode='1']:hover:not(:disabled) {

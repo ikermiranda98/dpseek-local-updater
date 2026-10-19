@@ -14,7 +14,7 @@
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import {
-  IconCheckOutlineRegular, IconGaugeOutlineRegular, IconTrashOutlineRegular,
+  IconCheckOutlineRegular, IconGaugeOutlineRegular, IconTrashOutlineRegular, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import css from './LocalOptimizeButton.module.css'
@@ -54,15 +54,15 @@ export function setLocalOptimizer(next: LocalOptimizer | undefined): void {
 }
 
 const VARIANT = /^(.*):(?:(.+)-)?dsh-ctx-(?:auto|\d+)$/
-const baseModel = (id: string): string => {
+export const baseModel = (id: string): string => {
   const match = VARIANT.exec(id)
   return match === null ? id : `${match[1] ?? ''}:${match[2] ?? 'latest'}`
 }
-const gigabytes = (bytes: number): string => `${(bytes / 1e9).toFixed(1).replace('.', ',')} GB`
+export const gigabytes = (bytes: number): string => `${(bytes / 1e9).toFixed(1).replace('.', ',')} GB`
 
 // ── Estado compartido: una sola consulta periódica para todas las filas ──────
 
-interface Snapshot {
+export interface Snapshot {
   status: LocalStatus
   models: Readonly<Record<string, LocalModelInfo>>
   deleted: ReadonlySet<string>
@@ -99,7 +99,7 @@ function subscribe(listener: () => void): () => void {
     }
   }
 }
-function useLocal(): Snapshot {
+export function useLocal(): Snapshot {
   return useSyncExternalStore(subscribe, () => snapshot)
 }
 
@@ -154,11 +154,11 @@ function OptimizeButton({ base, t, local }: { base: string; local: Snapshot } & 
     ? t('local.optimize.running', { percent: percent === null ? '…' : `${String(percent)} %` })
     : done ? t('local.optimize.done') : busy ? t('local.optimize.other') : t('local.optimize.title'))
   return (
+    // Midiendo, el porcentaje ya se ve al pasar el ratón: sin globo de texto.
+    <Tooltip label={title} side="top" align="end" delayMs={400} portal maxWidth={300} disabled={mine}>
     <button
       type="button"
       className={css.optimize}
-      // Midiendo, el porcentaje ya se ve al pasar el ratón: sin globo de texto.
-      title={mine ? undefined : title}
       aria-label={title}
       disabled={busy && !mine}
       data-error={error === null ? undefined : ''}
@@ -186,6 +186,7 @@ function OptimizeButton({ base, t, local }: { base: string; local: Snapshot } & 
           : <IconGaugeOutlineRegular size={mine ? 12 : 14} />}
       </span>
     </button>
+    </Tooltip>
   )
 }
 
@@ -201,10 +202,10 @@ function DeleteButton({ info, t }: { info: LocalModelInfo } & T) {
   const size = gigabytes(info.sizeBytes)
   const title = error ?? (armed ? t('local.delete.confirm', { size }) : t('local.delete.title', { size }))
   return (
+    <Tooltip label={title} side="top" align="end" delayMs={400} portal disabled={armed}>
     <button
       type="button"
       className={armed ? css.deleteArmed : css.optimize}
-      title={title}
       aria-label={title}
       disabled={deleting}
       data-error={error === null ? undefined : ''}
@@ -228,15 +229,17 @@ function DeleteButton({ info, t }: { info: LocalModelInfo } & T) {
     >
       {armed ? t('local.delete.confirm', { size }) : <IconTrashOutlineRegular size={14} />}
     </button>
+    </Tooltip>
   )
 }
 
 /**
  * Herramientas junto a una fila de la lista de modelos.
  * @param props - id del modelo (o de su variante) y los textos del selector.
- * @returns la marca de «sin usar», la papelera y «Optimizar», o null sin Host.
+ * @returns la marca de «sin usar», la papelera y «Optimizar», o null sin Host. Compacta (en los bloques de la barra):
+ * solo los botones, porque «sin usar» ya lo dice el bloque.
  */
-export function LocalModelExtras({ model, t }: { model: string } & T) {
+export function LocalModelExtras({ model, t, compact = false }: { model: string; compact?: boolean } & T) {
   const local = useLocal()
   if (optimizer === undefined) return null
   const base = baseModel(model)
@@ -246,12 +249,11 @@ export function LocalModelExtras({ model, t }: { model: string } & T) {
     <>
       {info?.unused === true && (
         <>
-          <span
-            className={css.badge}
-            title={t('local.unused.title', { days: String(info.idleDays), size: gigabytes(info.sizeBytes) })}
-          >
-            {t('local.unused.badge', { size: gigabytes(info.sizeBytes) })}
-          </span>
+          {!compact && <Tooltip label={t('local.unused.title', { days: String(info.idleDays), size: gigabytes(info.sizeBytes) })} side="top" delayMs={400} portal>
+            <span className={css.badge}>
+              {t('local.unused.badge', { size: gigabytes(info.sizeBytes) })}
+            </span>
+          </Tooltip>}
           <DeleteButton info={info} t={t} />
         </>
       )}
@@ -275,7 +277,8 @@ export function LocalCleanupSwitch({ t }: T) {
   if (optimizer === undefined) return null
   const on = local.status.cleanup
   return (
-    <div className={css.cleanupRow} title={t('local.cleanup.hint')}>
+    <Tooltip label={t('local.cleanup.hint')} side="top" delayMs={500} portal maxWidth={300}>
+    <div className={css.cleanupRow}>
       <span className={css.cleanupLabel}>{t('local.cleanup.label')}</span>
       <button
         type="button"
@@ -296,5 +299,6 @@ export function LocalCleanupSwitch({ t }: T) {
         <span className={css.switchKnob} />
       </button>
     </div>
+    </Tooltip>
   )
 }

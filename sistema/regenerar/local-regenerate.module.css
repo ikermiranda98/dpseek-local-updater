@@ -43,6 +43,13 @@
   cursor: default;
 }
 
+/* La fila del mensaje ocupa todo el ancho, como sin este envoltorio: el globo tiene de máximo el 82 % de su fila, y
+   encogida al ancho de la hora y el botón de copiar partía «Hola, qué tal?» en dos líneas. La fila ya alinea el
+   globo a la derecha. */
+.editable > * {
+  align-self: stretch;
+}
+
 /* Editor en el sitio: mismo aspecto que la burbuja (MessageItem.module.css .bubble). */
 .editBox {
   display: flex;

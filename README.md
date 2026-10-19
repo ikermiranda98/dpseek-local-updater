@@ -209,12 +209,12 @@ y en tu idioma. Todo pasa dentro de la propia barra, que tiene dos caras:
   dejan tu texto a la vista hasta tener el resultado; las largas enseñan el texto en directo
   en la cara de Reprompt. Con un resultado esperando y tu texto a la vista, «Reprompt» lleva
   un punto.
-- **Opciones en una pestaña que sale del borde de arriba** de la barra, a la izquierda, con su
-  mismo color y borde, y solo con iconos (el nombre se despliega al pasar el ratón; mientras
-  trabaja, las opciones se atenúan): **Step by step**, **English** y **Fix grammar**
-  (interruptores: pulsado, ves esa versión; otra vez, vuelves a la sugerida), **Show changes**,
-  **Ask for a change**, **Reprompt again**, **Think deeper** y **Discard**. Se reordenan
-  arrastrándolas a izquierda o derecha, y el orden se guarda.
+- **Opciones en una pestaña** que sale del borde de arriba de la barra, pegada a su lado
+  izquierdo, con el mismo color, borde y curvas (todas las esquinas con el mismo radio) y
+  botones como los del interruptor: **Reprompt again** (otra vez desde tu texto; con el
+  cerebro de la barra en «Pensar a fondo», razonándolo), **Ask for a change** y una **✕** roja
+  para descartar. Junto al interruptor, un contador **+12 −3** dice cuánto cambió y, al
+  pulsarlo, marca los cambios en el texto. Mientras trabaja, la pestaña se queda atenuada.
 
 - **No inventa nombres:** ve los últimos mensajes del chat y la lista de ficheros del
   proyecto (solo los nombres), así que «el archivo de la calculadora» pasa a ser
@@ -233,22 +233,21 @@ y en tu idioma. Todo pasa dentro de la propia barra, que tiene dos caras:
   Un prompt enorme (más de unas 18.000 letras) se reescribe por partes de unas 12.000 que se
   juntan en orden: de una vez, el modelo deja de escribir hacia las 23.000 y el resultado se
   quedaba en un tercio. Tarda unos 85 caracteres por segundo (el aviso dice los minutos).
-- **English y Fix grammar:** **English** traduce lo más fiel posible (código, nombres y cifras
-  tal cual); **Fix grammar** corrige faltas y gramática de cada frase en su idioma y deja como
-  están los términos técnicos en inglés dentro de un texto en español. Si hay frases enteras en
-  otro idioma, lo dice («Mixed languages: 2 sentences in English») y **Translate them** las pasa
-  al idioma principal. La gramática solo se revisa cuando lo pides.
-- **Ask for a change:** abre una línea dentro de la barra; escribes lo que no te convence
-  («más corto», «en Python», «no toques la parte de X») y lo rehace a partir de lo que ves.
-- **Think deeper:** repite la versión con el razonamiento del modelo activado; mejor para casos
-  difíciles, pero tarda alrededor de un minuto (se ve el razonamiento mientras).
-- **Show changes:** marca palabra a palabra lo añadido (verde) y lo quitado (tachado) respecto a
-  tu texto; los cambios solo de formato (viñetas, negritas) no cuentan.
+- **Ask for a change:** abre una línea dentro de la barra con tres atajos, **Step by step**,
+  **English** y **Fix grammar** (pulsados otra vez, vuelves a la versión sugerida), y un campo
+  para escribir cualquier otro cambio («más corto», «en Python», «no toques la parte de X»).
+  **English** traduce lo más fiel posible (código, nombres y cifras tal cual); **Fix grammar**
+  corrige faltas y gramática de cada frase en su idioma y deja como están los términos
+  técnicos en inglés. Si hay frases enteras en otro idioma, lo dice («Mixed languages: 2
+  sentences in English») y **Translate them** las pasa al idioma principal. La gramática solo
+  se revisa cuando lo pides.
+- **Los cambios:** el contador marca palabra a palabra lo añadido (verde) y lo quitado
+  (tachado) respecto a tu texto; los cambios solo de formato (viñetas, negritas) no cuentan.
 - **El botón avisa:** si lo que has escrito es vago («arregla eso», «no va», «hazlo como te
   dije») o acabas de pegar un texto largo que conviene reorganizar, el ✨ se pone de color con
   un punto. No cambia nada solo, y la gramática solo se revisa cuando pulsas **Fix grammar**.
-- **De documentos a un prompt:** con el cuadro vacío, ✨ pide los ficheros (PDF, DOCX o
-  texto; uno o varios). Al arrastrar ficheros ya no sale la capa a pantalla completa: la
+- **De documentos a un prompt:** arrastra los ficheros (PDF, DOCX o texto; uno o varios)
+  al ✨; pulsarlo con el cuadro vacío no abre el explorador. Al arrastrar ficheros ya no sale la capa a pantalla completa: la
   barra se marca con un borde («Drop to attach») y ✨ se convierte en **Make prompt**.
   Soltarlos en la barra los adjunta al mensaje, como siempre; soltarlos en ✨ los carga
   para el prompt. Los documentos cargados se ven encima del texto como píldoras con ✨ (y
@@ -277,12 +276,22 @@ la sugerencia con Qwen3.6-35B; el prompt de un documento, unos 5–10 s).
 
 ## Contexto de cada chat
 
-Al abrir el selector de modelo de cada chat sale una tarjeta con el **nombre del
-modelo** (al pulsarlo se abre la lista de modelos) y debajo **un botón por tamaño
-de contexto** (32K, 64K, 128K, 256K, hasta el máximo de cada modelo): el fondo se
-desliza al elegido y un **punto azul** marca el recomendado, el mejor contexto para
-tu equipo, medido por la app. También se cambia con las flechas del teclado. Los
-chats nuevos empiezan en el recomendado. Los tamaños se cambian en
+El selector de modelo de la barra es un **chip con el modelo y el contexto**
+(«Qwen3.6 · 128K»):
+
+- **La rueda del ratón** encima cambia el contexto (hacia arriba, más; hacia abajo, menos).
+- **Al pulsarlo** no se abre un menú flotante: arriba de la propia barra, encima del texto,
+  sale una fila con un **bloque por modelo** (el actual en azul con ✓ y los usados hace
+  menos; con más de tres, **+N** abre un buscador y una tira que se desplaza) y, a la
+  derecha, **un botón por tamaño de contexto** (32K, 64K, 128K, 256K, hasta el máximo de cada
+  modelo), con un **punto azul** en el recomendado: el mejor contexto para tu equipo, medido
+  por la app. Al pasar el ratón por un bloque aparecen sus herramientas (optimizar y, si
+  lleva 30 días sin usarse, borrarlo). Debajo, la limpieza automática de variantes. Se
+  cierra con Esc, pulsando fuera o al elegir un modelo; **Mayús+clic** en el chip abre el menú
+  original, con su navegación por teclado.
+- Un modelo que solo admite un tamaño (qwen2.5 1.5B: 32K) lo enseña sin poder cambiarlo.
+
+Los chats nuevos empiezan en el recomendado. Los tamaños se cambian en
 `config.json` → `contexto.tamanos`.
 
 ### Pensar: el cerebro de la barra
@@ -299,8 +308,8 @@ siguiente modo, y se distingue de un vistazo por el fondo del botón:
 - **Sin pensar** (gris): nivel `off`; responde enseguida, sin razonar (en esa misma
   pregunta, en medio segundo pero con la respuesta equivocada).
 
-Si el modelo no razona, no hay cerebro; si no tiene alguno de esos niveles, ese
-modo no aparece. Con «reducir animaciones» de Windows, las estrellas se quedan
+Si el modelo no razona (qwen2.5), el cerebro sale apagado, con un aviso que lo dice; si no
+tiene alguno de esos niveles, ese modo no aparece. Con «reducir animaciones» de Windows, las estrellas se quedan
 quietas.
 
 Cómo funciona:
@@ -355,8 +364,8 @@ Cómo funciona:
   cargado) y, mientras la app sigue abierta, se mantiene cargado el que estés
   usando; al cerrarla se descarga y se libera la memoria. Se aparta mientras se
   mide el contexto.
-- **Automatic variant cleanup** (interruptor al final de la lista de modelos del
-  selector; activado por defecto): solo se guarda en Ollama la variante
+- **Automatic variant cleanup** (interruptor bajo la fila de modelos de la barra;
+  activado por defecto): solo se guarda en Ollama la variante
   recomendada (`dsh-ctx-auto`). Las demás se crean al enviar el primer mensaje con
   ese tamaño (unos segundos) y se borran al abrir la app si llevan **7 días** sin
   usarse. Así puedes cambiar de tamaño cuando quieras sin que `ollama list` se llene
@@ -507,6 +516,8 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Corrector ortográfico también en el idioma del sistema, sin descargar diccionarios (opcional) | `apps/desktop` (`main.ts`) |
 | Con la ventana cerrada, la app no retiene el modelo de Ollama (opcional) | `apps/desktop` (`local-window-state.ts`) + [`sistema/contexto/precarga.cjs`](sistema/contexto/precarga.cjs) |
 | El esfuerzo de razonamiento como un cerebro en la barra, sin la fila «Effort» del selector (opcional) | `packages/client/ui-model-selection` (`ModelSelect.tsx`) + [`sistema/contexto/LocalThinkButton.tsx`](sistema/contexto/LocalThinkButton.tsx) |
+| El selector de modelo como chip («Qwen3.6 · 128K», la rueda cambia el contexto) que abre una fila de modelos dentro de la barra (opcional) | `packages/client/ui-model-selection` (`ModelSelect.tsx`) + [`sistema/contexto/LocalModelDrawer.tsx`](sistema/contexto/LocalModelDrawer.tsx) |
+| La barra lateral se esconde por debajo de 760 px de ventana, no de 1024 (opcional) | `packages/client/ui-layout` (`columns.ts`) |
 | Prueba de arranque antes de publicar | [`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs) en el workflow |
 
 La app va en inglés (o en chino), como la oficial: no se añade ningún idioma.

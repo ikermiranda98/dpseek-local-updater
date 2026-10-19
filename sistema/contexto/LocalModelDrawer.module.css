@@ -1,0 +1,271 @@
+/* Selector de modelo dentro de la barra (dpseek-local-updater). Bloques como las superficies de la app (radio md,
+   fondo de hover), el elegido con el tinte azul de «Reprompt»; medidas enteras y sin transformaciones que se queden
+   puestas, para que el texto se vea igual de nítido que el de la barra. */
+
+.drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px 2px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  animation: drawer-in 160ms var(--ds-ease-in-out, ease);
+}
+
+@keyframes drawer-in {
+  from { opacity: 0; }
+}
+
+.top {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;
+}
+
+.blocks {
+  flex: 1 1 auto;
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.block {
+  position: relative;
+  min-width: 0;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-interactive-bg-hover);
+  transition: background-color 120ms ease;
+}
+
+.block:hover {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+}
+
+.on,
+.on:hover {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 16%, transparent);
+}
+
+.idle .name,
+.idle .meta {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.pick {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 34px 8px 12px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: default;
+}
+
+.pick:focus-visible {
+  outline: var(--dsw-focus-ring-width) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
+  outline-offset: -2px;
+}
+
+.name {
+  max-width: 100%;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.check {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  color: var(--dsw-alias-state-business-primary);
+}
+
+/* Herramientas del modelo: en la esquina, solo al pasar el ratón (o con el teclado dentro). */
+.tools {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.block:hover .tools,
+.block:focus-within .tools {
+  opacity: 1;
+}
+
+.more {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  cursor: default;
+  transition: background-color 120ms ease;
+}
+
+.more:hover {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+}
+
+.moreCount {
+  font-weight: 600;
+}
+
+.context {
+  flex: 0 0 220px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.label {
+  padding-left: 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* «+N»: buscador y una tira de bloques que se desplaza. */
+.search {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.back {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--dsw-specific-selector);
+  color: var(--dsw-alias-label-primary);
+  cursor: default;
+}
+
+.query {
+  flex: 0 0 180px;
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  outline: none;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+}
+
+.query::placeholder {
+  color: var(--dsw-alias-label-caption);
+}
+
+.strip {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.strip::-webkit-scrollbar {
+  display: none;
+}
+
+.strip .block {
+  flex: 0 0 160px;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+  padding: 0 2px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* El interruptor de la limpieza, sin el relleno que lleva como fila de menú. */
+.cleanup > * {
+  min-height: 0;
+  padding: 0;
+  gap: 8px;
+  font-size: 12px;
+}
+
+/* Su texto, igual que el recordatorio de la rueda: pequeño y en gris. */
+.cleanup span {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.icon {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* El chip de la barra: el modelo en el tono del texto (como en la maqueta) y, con la fila abierta, el fondo de
+   hover fijo, como cualquier botón de la app con su menú abierto. */
+:global(button[data-local-chip]) {
+  gap: 6px;
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+:global(button[data-local-chip='open']) {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .drawer {
+    animation: none;
+  }
+}

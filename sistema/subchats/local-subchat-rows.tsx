@@ -16,7 +16,7 @@ import type { ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ISessions, SessionTarget } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { Button, IconChevronDownOutlineRegular, IconTreeCornerRegular, Menu, Modal, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconChevronDownOutlineRegular, IconTreeCornerRegular, Menu, Modal, Tooltip, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import { deliverLocalSubchat, openSubchatAside } from './local-subchat-start.ts'
 import {
   collapsedSnapshot, forgetSubchat, setSubchatsCollapsed, subchatsSnapshot, subscribeSubchats, updateSubchat,
@@ -218,8 +218,9 @@ export function LocalSubchatRows({ parentId, currentId }: { parentId: string; cu
         const kind = kinds[index] ?? 'done'
         const summary = byId[entry.childId]
         return (
-          <div key={entry.childId} className={css.row} role="treeitem" data-row-key={`subchat:${entry.childId}`}
-            aria-selected={entry.childId === currentId} title={tooltip(entry, kind, summary, anyOtherRunning(entry.childId))}
+          <Tooltip key={entry.childId} label={() => tooltip(entry, kind, summary, anyOtherRunning(entry.childId))} side="right" delayMs={600} maxWidth={320}>
+          <div className={css.row} role="treeitem" data-row-key={`subchat:${entry.childId}`}
+            aria-selected={entry.childId === currentId}
             onClick={() => { if (renaming !== entry.childId) openSession?.(target(entry)) }}
             onContextMenu={(event) => {
               event.preventDefault()
@@ -235,6 +236,7 @@ export function LocalSubchatRows({ parentId, currentId }: { parentId: string; cu
               }} />
               : <span className={css.label}>{entry.label}</span>}
           </div>
+          </Tooltip>
         )
       })}
       {menu !== null && (

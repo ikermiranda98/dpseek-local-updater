@@ -11,6 +11,7 @@
 import clsx from 'clsx'
 import type { CSSProperties, KeyboardEvent } from 'react'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
+import { Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import css from './ContextSlider.module.css'
 
 const VARIANT = /(:|-)dsh-ctx-(auto|\d+)$/
@@ -92,6 +93,47 @@ function stepsFor(models: readonly NamedModel[], current: string): Step[] {
 }
 
 /**
+ * Nombre corto de un modelo para el chip de la barra y sus bloques: «Qwen3.6-35B-A3B-Uncensored» → «Qwen3.6»,
+ * «qwen2.5:1.5b» → «qwen2.5», «Gemma-3-12B» → «Gemma 3» (si la primera parte no lleva número, también la segunda).
+ */
+export function contextShortName(name: string): string {
+  const plain = name.replace(AUTO_NAME, '').replace(/ · \d+K?$/, '')
+  const parts = plain.split(/[-:_ ]+/).filter(Boolean)
+  const first = parts[0] ?? plain
+  return /\d/.test(first) || parts.length < 2 ? first : `${first} ${parts[1] ?? ''}`
+}
+
+/** Tamaño de un modelo para mostrarlo («128K»): el de su variante, o el recomendado si es la automática. */
+export function contextLabel(model: NamedModel): string | undefined {
+  const ctx = contextOf(model.id)
+  if (typeof ctx === 'number') return kilo(ctx)
+  return ctx === 'auto' ? AUTO_NAME.exec(model.name)?.[1] : undefined
+}
+
+/** Texto del chip de la barra: «Qwen3.6 · 128K». */
+export function contextChipLabel(model: NamedModel): string {
+  const size = contextLabel(model)
+  return size === undefined ? contextShortName(model.name) : `${contextShortName(model.name)} · ${size}`
+}
+
+/** La rueda sobre el chip: un paso por cada empujón, no más de uno cada 250 ms (las ruedas finas mandan muchos). */
+let lastWheel = 0
+export function contextWheelStep(models: readonly NamedModel[], current: string | undefined, deltaY: number): string | undefined {
+  if (current === undefined || contextOf(current) === undefined || deltaY === 0) return undefined
+  const now = Date.now()
+  if (now - lastWheel < 250) return undefined
+  const steps = stepsFor(models, current)
+  if (steps.length < 2) return undefined
+  const value = contextOf(current)
+  const index = Math.max(0, steps.findIndex(step => (value === 'auto' ? step.recommended : step.ctx === value)))
+  // Hacia arriba, más contexto; hacia abajo, menos.
+  const next = steps[index + (deltaY < 0 ? 1 : -1)]
+  if (next === undefined) return undefined
+  lastWheel = now
+  return next.id
+}
+
+/**
  * Contexto bajo el nombre del modelo: un botón por tamaño, con el fondo que se desliza al elegido y un punto en el
  * recomendado (el óptimo medido para el equipo, que elige la variante automática).
  * @param props - modelos del proveedor actual, modelo elegido y la acción de elegir otro.
@@ -105,7 +147,23 @@ export function ContextSlider({ models, current, disabled, onSelect, t }: {
 } & Pick<PropsLocale<'model'>, 't'>) {
   if (current === undefined || contextOf(current) === undefined) return null
   const steps = stepsFor(models, current)
-  if (steps.length < 2) return null
+  if (steps.length === 0) return null
+  // Un modelo que no pasa del tamaño más pequeño (qwen2.5 1.5B: 32K) solo tiene uno: se ve igual, sin elegir.
+  if (steps.length === 1) {
+    const only = steps[0] as Step
+    return (
+      <Tooltip label={t('local.context.only')} side="top" delayMs={300} portal>
+        <div className={clsx(css.root, css.single)} role="radiogroup" aria-label={t('local.context.label')}
+          style={{ '--context-steps': '1', '--context-index': '0' } as CSSProperties}>
+          <span className={css.thumb} aria-hidden="true" />
+          <button type="button" role="radio" aria-checked aria-disabled className={clsx(css.step, css.selected)}
+            aria-label={`${t('local.context.label')} ${kilo(only.ctx)} (${t('local.context.only')})`}>
+            {kilo(only.ctx)}
+          </button>
+        </div>
+      </Tooltip>
+    )
+  }
   const value = contextOf(current)
   const index = Math.max(0, steps.findIndex(step => (value === 'auto' ? step.recommended : step.ctx === value)))
   const choose = (next: number): void => {
@@ -131,7 +189,6 @@ export function ContextSlider({ models, current, disabled, onSelect, t }: {
           role="radio"
           aria-checked={i === index}
           aria-label={`${t('local.context.label')} ${kilo(step.ctx)}${step.recommended ? ` (${t('local.context.recommended')})` : ''}`}
-          title={step.recommended ? t('local.context.recommended') : undefined}
           tabIndex={i === index ? 0 : -1}
           className={clsx(css.step, i === index && css.selected, step.recommended && css.recommended)}
           disabled={disabled}

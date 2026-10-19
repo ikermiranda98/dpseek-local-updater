@@ -759,6 +759,11 @@ optional('barra de contexto en el selector de modelo', (tx) => {
     'local.context.more': 'More context',
     'local.context.recommended': 'Recommended',
   })
+  addLocaleKeys(tx, locales, 'ModelKey', {
+    'local.context.only': '此模型只支持这一种大小',
+  }, {
+    'local.context.only': 'The only size this model allows',
+  })
 })
 
 // ── 9. Seleccionar chats como en el Explorador, borrarlos y moverlos ──────────
@@ -2839,6 +2844,128 @@ optional('el esfuerzo de razonamiento como un cerebro en la barra', (tx) => {
     'local.think.on': 'Think',
     'local.think.hard': 'Think hard',
   })
+  addLocaleKeys(tx, locales, 'ModelKey', {
+    'local.think.none': '此模型不支持推理',
+  }, {
+    'local.think.none': 'This model does not reason',
+  })
+})
+
+// ── 33. El selector de modelo, dentro de la barra ───────────────────────────────────
+// El botón del selector es un chip con el modelo y el contexto («Qwen3.6 · 128K»): la
+// rueda del ratón encima cambia el contexto, y al pulsarlo no se abre el menú flotante
+// sino una fila dentro de la propia barra, encima del texto, con un bloque por modelo
+// (el actual y los usados hace menos; «+N» abre un buscador), los tamaños de contexto a
+// la derecha y, debajo, la limpieza automática. Interfaz: sistema/contexto/LocalModelDrawer.tsx.
+
+optional('el selector de modelo dentro de la barra', (tx) => {
+  const dir = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client')
+  const select = join(dir, 'ModelSelect.tsx')
+  let text = tx.read(select)
+  if (!text.includes('<ContextSlider') || !text.includes('<LocalCleanupSwitch')) {
+    skip('necesita el contexto y las herramientas de modelos en el selector, que no se han aplicado')
+  }
+  tx.copy(join(here, 'contexto', 'LocalModelDrawer.tsx'), join(dir, 'LocalModelDrawer.tsx'))
+  tx.copy(join(here, 'contexto', 'LocalModelDrawer.module.css'), join(dir, 'LocalModelDrawer.module.css'))
+  tx.replace(select, "import css from './ModelSelect.module.css'\n",
+    "import css from './ModelSelect.module.css'\n"
+      + "import { LocalModelDrawer } from './LocalModelDrawer.tsx'\n"
+      + "import { contextChipLabel, contextWheelStep } from './ContextSlider.tsx'\n"
+      + "import { Tooltip as LocalTooltip } from '@deepseek-ai/dsh-client-ui-primitives'\n",
+    "from './LocalModelDrawer.tsx'")
+  text = tx.read(select)
+  if (!text.includes('<LocalModelDrawer')) {
+    const edits = [
+      ['  const [open, setOpen] = useState(false)\n',
+        '  const [open, setOpen] = useState(false)\n  // Local build: the model row inside the composer (LocalModelDrawer.tsx).\n  const [localDrawer, setLocalDrawer] = useState(false)\n'],
+      [[
+        '        onClick={() => {',
+        '          if (open) {',
+        '            close(true)',
+        '          } else {',
+        '            show()',
+        '          }',
+        '        }}',
+        '',
+      ].join('\n'), [
+        '        // Local build: the model row opens inside the composer (Shift+click: the original menu, with its',
+        '        // keyboard navigation), and the wheel steps the context.',
+        '        onClick={(event) => {',
+        '          if (event.shiftKey) {',
+        '            setLocalDrawer(false)',
+        '            if (open) close(true)',
+        '            else show()',
+        '            return',
+        '          }',
+        '          if (open) close(true)',
+        '          setLocalDrawer(current => !current)',
+        '        }}',
+        '        onWheel={(event) => {',
+        '          if (state.current === null || busy) return',
+        '          const next = contextWheelStep(groups.find(group => group.id === state.current?.provider)?.models ?? [], state.current.model, event.deltaY)',
+        '          if (next === undefined) return',
+        '          const { provider, reasoningEffort } = state.current',
+        '          choose({ provider, model: next, ...reasoningEffort === undefined ? {} : { reasoningEffort } })',
+        '        }}',
+        '',
+      ].join('\n')],
+      ['        title={triggerLabel}\n', "        data-local-chip={localDrawer ? 'open' : ''}\n"],
+      ["{currentChoice === undefined ? modelLabel : renderModelLabel(currentChoice.group.provider, currentChoice.model, 'trigger', true)}",
+        '{currentChoice === undefined ? modelLabel : contextChipLabel(currentChoice.model)}'],
+    ]
+    for (const [from, to] of edits) {
+      if (!text.includes(from)) skip(`no se encuentra en ${rel(select)}: ${from.trim().split('\n')[0]}`)
+      text = text.replace(from, to)
+    }
+    // El aviso de la app en el chip (antes, el recuadro de Windows del title).
+    const start = text.indexOf('      <button\n        ref={triggerRef}')
+    const end = start < 0 ? -1 : text.indexOf('      </button>\n', start)
+    if (end < 0) skip(`no se encuentra el botón del selector en ${rel(select)}`)
+    const close = end + '      </button>\n'.length
+    text = text.slice(0, start)
+      + '      <LocalTooltip label={`${triggerLabel} · Scroll: context · Click: models`} side="top" delayMs={500} disabled={localDrawer}>\n'
+      + text.slice(start, close)
+      + '      </LocalTooltip>\n'
+      + text.slice(close)
+    const portal = text.indexOf("      {/* Portaled to body (Menu primitive's portal mode)")
+    if (portal < 0) skip(`no se encuentra el menú del selector en ${rel(select)}`)
+    text = text.slice(0, portal) + [
+      '      {/* Local build: the model row inside the composer (LocalModelDrawer.tsx). */}',
+      '      <LocalModelDrawer',
+      '        open={localDrawer}',
+      '        onClose={() => { setLocalDrawer(false) }}',
+      '        anchor={rootRef.current}',
+      '        groups={groups}',
+      '        current={state.current}',
+      '        busy={busy}',
+      '        onChoose={(provider, model) => {',
+      '          choose({ provider, model })',
+      '          setLocalDrawer(false)',
+      '        }}',
+      '        onContext={(model) => {',
+      '          if (state.current === null) return',
+      '          const { provider, reasoningEffort } = state.current',
+      '          choose({ provider, model, ...reasoningEffort === undefined ? {} : { reasoningEffort } })',
+      '        }}',
+      '        t={t}',
+      '      />',
+      '',
+    ].join('\n') + text.slice(portal)
+    tx.write(select, text)
+  }
+})
+
+// ── 32. La barra lateral se esconde más tarde al estrechar la ventana ──────────────
+// La oficial la recoge por debajo de 1024 px de la ventana (en píxeles de la app): con el
+// escalado de Windows al 150 % son unos 1.500 píxeles reales, y se escondía enseguida. Cabe
+// junto al chat mientras haya sitio para los dos (barra 280 + chat 400): se recoge por
+// debajo de 760.
+
+optional('la barra lateral se esconde más tarde al estrechar la ventana', (tx) => {
+  const columns = join(repo, 'packages', 'client', 'ui-layout', 'src', 'client', 'columns.ts')
+  tx.replace(columns, 'export const SIDEBAR_AUTO_COLLAPSE = 1024\n',
+    '// Local build: collapse only when the sidebar and the chat no longer fit side by side.\nexport const SIDEBAR_AUTO_COLLAPSE = 760\n',
+    'SIDEBAR_AUTO_COLLAPSE = 760')
 })
 
 console.log('\nCambios aplicados:')
