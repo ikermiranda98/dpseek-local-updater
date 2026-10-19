@@ -368,8 +368,8 @@ function piAiBlock(models) {
     '    retryPolicy:',
     '      mode: normal',
     '      maxRetries: 2',
-    '    # Esfuerzo de razonamiento de un chat que no ha elegido otro: alto (solo en modelos que razonan).',
-    '    reasoning: high',
+    '    # Esfuerzo de razonamiento de un chat que no ha elegido otro: medio, el «Pensar» del cerebro (solo en modelos que razonan).',
+    '    reasoning: medium',
     `    models: !!js ${yamlString(runtimeModelsExpression(models.map(toPiAi)))}`,
   ]
 }
@@ -2793,14 +2793,14 @@ optional('con la ventana cerrada, la app no retiene el modelo', (tx) => {
 // cerebro junto al selector cambia el modo con un clic: Pensar (lo de «Default»),
 // Pensar a fondo (nivel high) y Sin pensar (off). El menú del selector ya no tiene
 // la fila «Effort». Interfaz: sistema/contexto/LocalThinkButton.tsx.
-// Los chats nuevos empiezan en «a fondo» (reasoning: high del proveedor, sección 1) y el
+// Los chats nuevos empiezan en «Pensar» (reasoning: medium del proveedor, sección 1) y el
 // cambio en un chat se queda en ese chat: ya no se guarda como valor de los chats nuevos.
 
 optional('el esfuerzo de razonamiento como un cerebro en la barra', (tx) => {
   // El modelo elegido en un chat sigue siendo el de los chats nuevos; su esfuerzo, no.
   tx.replace(join(hostDir, 'commands.ts'),
     '        void this.ctx.agentDefaultModel.saveSelection(selected).catch((error: unknown) => {\n',
-    '        // Local build: new chats keep the provider\'s default effort (high); a chat\'s effort stays in that chat.\n'
+    '        // Local build: new chats keep the provider\'s default effort (medium); a chat\'s effort stays in that chat.\n'
       + '        void this.ctx.agentDefaultModel.saveSelection({ provider: selected.provider, model: selected.model }).catch((error: unknown) => {\n',
     "saveSelection({ provider: selected.provider, model: selected.model })")
   const dir = join(repo, 'packages', 'client', 'ui-model-selection', 'src', 'client')

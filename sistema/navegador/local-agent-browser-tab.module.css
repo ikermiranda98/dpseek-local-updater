@@ -53,14 +53,6 @@
   .step[data-status='running'] .stepDot { animation: none; }
 }
 
-/* Menú de tamaño de página. */
-.chevron { width: 12px; height: 12px; margin-left: 2px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
-.modeMenu { right: 120px; width: 240px; padding: 4px; }
-.modeItem { display: grid; grid-template-columns: 16px 1fr auto; gap: 6px; align-items: center; width: 100%; min-height: 32px; padding: 0 8px; border: 0; border-radius: var(--dsw-radius-md); background: transparent; color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); text-align: left; cursor: default; }
-.modeItem:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.modeCheck { color: var(--dsw-alias-state-business-primary); }
-.modeHint { color: var(--dsw-alias-label-tertiary); font-size: 12px; }
-
 /* «Saved passwords», dentro de la misma ventanita. */
 .passwords { margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--dsw-alias-border-l3); }
 .secretSite { color: var(--dsw-alias-label-tertiary); }

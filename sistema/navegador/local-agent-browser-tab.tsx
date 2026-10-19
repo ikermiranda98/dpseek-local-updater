@@ -11,9 +11,9 @@
  * un código o resolver un captcha; mientras, las acciones del agente en el navegador esperan. Lo que se escribe va
  * directo a la página por el Host, nunca al chat ni al modelo.
  *
- * La imagen ocupa todo el sitio del panel (sin deformarse) y llega con sus píxeles justos (los del panel por la
- * densidad de la pantalla), así que se ve nítida al cambiar el tamaño de la ventana o de pantalla. El menú de tamaño
- * cambia la página: ajustada al panel, escritorio, pantalla ancha, tableta o móvil.
+ * La página se adapta sola al panel, como una ventana de navegador: toma su tamaño y la densidad de la pantalla, así que
+ * llena el sitio y se ve nítida al cambiar el tamaño de la ventana o pasarla a otra pantalla (con el panel estrecho, la
+ * web ve un móvil).
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
@@ -40,26 +40,7 @@ interface Frame {
   readonly image: string | null
   readonly control: boolean
   readonly viewport: { readonly width: number; readonly height: number }
-  readonly mode: Mode
-}
-
-/** Tamaños de página que ofrece el menú. */
-type Mode = 'fit' | 'desktop' | 'wide' | 'tablet' | 'mobile'
-const MODES: readonly { readonly id: Mode; readonly label: string; readonly hint: string }[] = [
-  { id: 'fit', label: 'Fit to panel', hint: 'The page takes the size of this panel' },
-  { id: 'desktop', label: 'Desktop', hint: '1280 × 800' },
-  { id: 'wide', label: 'Wide screen', hint: '1920 × 1080' },
-  { id: 'tablet', label: 'Tablet', hint: '768 × 1024' },
-  { id: 'mobile', label: 'Mobile', hint: '375 × 812, touch' },
-]
-const MODE_KEY = 'dpseek-local-updater.agent-browser.mode'
-const readMode = (): Mode => {
-  try {
-    const saved = localStorage.getItem(MODE_KEY)
-    return MODES.some(mode => mode.id === saved) ? saved as Mode : 'desktop'
-  } catch {
-    return 'desktop'
-  }
+  readonly mode: string
 }
 
 /** El sitio para la imagen, en píxeles CSS, y la densidad de la pantalla (cambia al moverla a otro monitor). */
@@ -414,33 +395,6 @@ function SavedPasswords(): ReactNode {
   )
 }
 
-/** Menú de tamaños de página. */
-function ModeMenu({ mode, onChoose, onClose }: { mode: Mode; onChoose: (mode: Mode) => void; onClose: () => void }): ReactNode {
-  const box = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    const down = (event: MouseEvent): void => { if (box.current?.contains(event.target as Node) !== true) onClose() }
-    const key = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
-    document.addEventListener('mousedown', down, true)
-    document.addEventListener('keydown', key, true)
-    return () => {
-      document.removeEventListener('mousedown', down, true)
-      document.removeEventListener('keydown', key, true)
-    }
-  }, [onClose])
-  return (
-    <div ref={box} className={`${css.popover} ${css.modeMenu}`} role="menu" aria-label="Page size">
-      {MODES.map(item => (
-        <button key={item.id} type="button" role="menuitemradio" aria-checked={item.id === mode} className={css.modeItem}
-          onClick={() => { onChoose(item.id) }}>
-          <span className={css.modeCheck}>{item.id === mode ? '✓' : ''}</span>
-          <span className={css.modeLabel}>{item.label}</span>
-          <span className={css.modeHint}>{item.hint}</span>
-        </button>
-      ))}
-    </div>
-  )
-}
-
 function AgentBrowserTab({ sessionId }: PropsRuntime<'sidebar.right.pane.tab'>): ReactNode {
   const view = useRef<HTMLDivElement | null>(null)
   const [viewElement, setViewElement] = useState<HTMLDivElement | null>(null)
@@ -448,23 +402,16 @@ function AgentBrowserTab({ sessionId }: PropsRuntime<'sidebar.right.pane.tab'>):
   const [frame, refresh] = useFrame(area)
   const live = useSyncExternalStore(subscribeLive, () => liveSnapshot(sessionId))
   const control = frame?.control === true
-  const [mode, setMode] = useState<Mode>(readMode)
-  const [modeMenu, setModeMenu] = useState(false)
-  // El modo (y, ajustada al panel, su tamaño) se le dice al Host; el tamaño, con un poco de espera al redimensionar.
+  // La página toma el tamaño del panel (y la densidad de la pantalla); al redimensionar, con un poco de espera.
   useEffect(() => {
+    if (area.width === 0) return
     const timer = setTimeout(() => {
       if (localCtx === undefined) return
-      const fit = mode === 'fit' && area.width > 0 ? { width: area.width, height: area.height, dpr: area.dpr } : undefined
-      void localCtx.remote.session.localAgentBrowserViewport({ mode, ...fit === undefined ? {} : { fit } })
+      void localCtx.remote.session.localAgentBrowserViewport({ mode: 'fit', fit: { width: area.width, height: area.height, dpr: area.dpr } })
         .then(() => { refresh() }).catch(() => undefined)
-    }, mode === 'fit' ? 300 : 0)
+    }, 250)
     return () => { clearTimeout(timer) }
-  }, [mode, mode === 'fit' ? area.width : 0, mode === 'fit' ? area.height : 0, mode === 'fit' ? area.dpr : 0])
-  const chooseMode = (next: Mode): void => {
-    setMode(next)
-    setModeMenu(false)
-    try { localStorage.setItem(MODE_KEY, next) } catch { /* sin almacenamiento: solo para esta vez */ }
-  }
+  }, [area.width, area.height, area.dpr])
   // La imagen, lo más grande que quepa sin deformarse.
   const aspect = frame === undefined || frame.viewport.height === 0 ? 1280 / 800 : frame.viewport.width / frame.viewport.height
   const shown = area.width === 0 ? undefined : area.width / area.height > aspect
@@ -527,11 +474,6 @@ function AgentBrowserTab({ sessionId }: PropsRuntime<'sidebar.right.pane.tab'>):
             {control ? 'Give back to agent' : 'Take control'}
           </button>
         </Tooltip>
-        <button type="button" className={css.tool} aria-expanded={modeMenu} aria-haspopup="menu" onClick={() => { setModeMenu(open => !open) }}>
-          {MODES.find(item => item.id === mode)?.label ?? 'Desktop'}
-          <svg className={css.chevron} viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 7.5 9 4.5" /></svg>
-        </button>
-        {modeMenu && <ModeMenu mode={mode} onChoose={chooseMode} onClose={() => { setModeMenu(false) }} />}
         <button type="button" className={css.tool} aria-expanded={saved} onClick={() => { setSaved(open => !open) }}>Saved sign-ins</button>
         {saved && <SavedSignIns onClose={() => { setSaved(false) }} />}
       </div>

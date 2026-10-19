@@ -69,7 +69,7 @@ export function LocalThinkButton({ efforts, effort, disabled, onChange, t }: {
 } & Pick<PropsLocale<'model'>, 't'>) {
   const offId = efforts?.find(level => level.id === 'off')?.id
   const highId = efforts?.find(level => level.id === 'high')?.id
-  // «Pensar» pide el nivel medio: sin nivel, el chat usaría el de por defecto, que ahora es «a fondo».
+  // «Pensar» pide el nivel medio explícitamente (es también el de por defecto de los chats nuevos).
   const mediumId = efforts?.find(level => level.id === 'medium')?.id
   const actual: Mode = effort !== undefined && effort === offId ? 0 : effort !== undefined && effort === highId ? 2 : 1
   // El cambio se ve al momento; la selección real llega un instante después (o no, si falla: entonces vuelve).
