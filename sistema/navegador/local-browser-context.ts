@@ -126,7 +126,9 @@ export function setupLocalBrowserContext(ctx: Context, toolPrefix: string): void
           // Sin el fichero, se queda el enlace.
         }
       }
-      content.push({ type: 'text', text } satisfies TextBlock)
+      // Acciones como browser_type solo devuelven el eco del código: sin él no queda nada, y un resultado vacío hacía que
+      // el modelo se parase.
+      content.push({ type: 'text', text: text.trim() === '' ? 'Done.' : text } satisfies TextBlock)
     }
     return { ...decision, content }
   })

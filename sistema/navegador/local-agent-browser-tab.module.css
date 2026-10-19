@@ -37,7 +37,7 @@
 
 /* «Saved sign-ins»: una ventanita como los menús de la app. */
 /* Encima de la página (casi siempre blanca), así que el material del menú va sobre el fondo de la app, no transparente. */
-.popover { position: absolute; top: 34px; right: 6px; z-index: 10; box-sizing: border-box; width: 300px; max-height: min(560px, calc(100% - 44px)); padding: 8px; overflow-y: auto; border-radius: var(--dsw-radius-lg); background: linear-gradient(var(--dsw-specific-menu), var(--dsw-specific-menu)), var(--dsw-alias-bg-layer-1); backdrop-filter: var(--dsw-menu-backdrop-filter); box-shadow: var(--dsw-elevation-panel); color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); }
+.popover { position: absolute; top: 34px; right: 6px; z-index: 10; box-sizing: border-box; width: 300px; max-height: min(560px, 70vh); padding: 8px; overflow-y: auto; border-radius: var(--dsw-radius-lg); background: linear-gradient(var(--dsw-specific-menu), var(--dsw-specific-menu)), var(--dsw-alias-bg-layer-1); backdrop-filter: var(--dsw-menu-backdrop-filter); box-shadow: var(--dsw-elevation-panel); color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); }
 .popoverTitle { padding: 2px 4px 4px; color: var(--dsw-alias-label-primary); font-weight: 500; }
 .popoverHint { margin: 0; padding: 0 4px 6px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
 .sites { margin: 0; padding: 0; list-style: none; }
