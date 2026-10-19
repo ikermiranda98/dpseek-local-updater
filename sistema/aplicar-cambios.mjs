@@ -3495,6 +3495,19 @@ optional('control de Windows para el agente (abrir apps y moverse por ellas)', (
   }
 })
 
+// ── 39. Una respuesta que solo «piensa» se repite ───────────────────────────────────
+// Qwen, a veces, termina una respuesta con solo su razonamiento: sin texto ni acción. La app la
+// daba por buena y el turno acababa sin nada para el usuario. Ahora cuenta como respuesta vacía
+// (EMPTY_RESPONSE), que la política de reintentos ya repite.
+
+optional('una respuesta que solo piensa se repite', (tx) => {
+  const stream = join(repo, 'packages', 'llm', 'llm-pi-ai', 'src', 'stream.ts')
+  tx.replace(stream, '      if (message.content.length === 0) {\n',
+    '      // Local build: a stop that only carries reasoning (no text, no tool call) also gives the user nothing.\n'
+      + "      if (message.content.length === 0 || message.content.every(block => block.type === 'thinking')) {\n",
+    "message.content.every(block => block.type === 'thinking')")
+})
+
 console.log('\nCambios aplicados:')
 for (const line of done) console.log(`  - ${line}`)
 if (omitted.length > 0) {
