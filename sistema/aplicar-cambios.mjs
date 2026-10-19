@@ -1633,7 +1633,7 @@ optional('código en vivo en el panel derecho y deshacer por fichero', (tx) => {
   const running = join(chatDir, 'chat', 'RunningStatus.tsx')
   tx.replace(running, "import { RunningWhaleTail } from './RunningWhaleTail.tsx'\n",
     "import { RunningWhaleTail } from './RunningWhaleTail.tsx'\nimport { LocalLiveCodeButton } from './local-live-watch.tsx'\n",
-    "import { LocalLiveCodeButton } from './local-live-watch.tsx'")
+    "LocalLiveCodeButton } from './local-live-watch.tsx'")
   tx.replace(running, '        <TextShimmer active className={css.runningText}>{label}</TextShimmer>\n',
     '        <TextShimmer active className={css.runningText}>{label}</TextShimmer>\n'
       + '        <LocalLiveCodeButton placement="running" />\n',
@@ -1641,7 +1641,7 @@ optional('código en vivo en el panel derecho y deshacer por fichero', (tx) => {
   const processView = join(chatDir, 'chat', 'TurnProcessNodeView.tsx')
   tx.replace(processView, "import css from './TurnProcessNodeView.module.css'\n",
     "import css from './TurnProcessNodeView.module.css'\nimport { LocalLiveCodeButton } from './local-live-watch.tsx'\n",
-    "import { LocalLiveCodeButton } from './local-live-watch.tsx'")
+    "LocalLiveCodeButton } from './local-live-watch.tsx'")
   tx.replace(processView, '  return (\n    <>\n      <span className={a11yCss.visuallyHidden}',
     "  return (\n    <div style={{ position: 'relative' }}>\n      <span className={a11yCss.visuallyHidden}",
     "<div style={{ position: 'relative' }}>")
@@ -3201,10 +3201,10 @@ optional('la barra lateral se esconde más tarde al estrechar la ventana', (tx) 
 })
 
 // ── 36. El arranque reintenta la entrada a la interfaz ──────────────────────────────
-// Recién encendido el PC o recién instalada una versión, la app fallaba durante unos minutos
-// con «desktop welcome: Web authentication failed»: el Host ya ha dado la entrada (303) pero
-// aún no sirve la página, y la app la pedía una sola vez. Ahora la pide durante 30 s antes de
-// rendirse, y el aviso dice qué respondió el Host.
+// La app fallaba a ratos con «desktop welcome: Web authentication failed». El código HTTP (431)
+// dio la causa: cookies de acceso acumuladas, una por arranque, hasta pasar el límite de
+// cabeceras. Ahora se borran las viejas al arrancar; además la entrada se reintenta 30 s y, si
+// falla, el aviso dice qué respondió el Host.
 
 optional('el arranque reintenta la entrada a la interfaz', (tx) => {
   const welcome = join(repo, 'apps', 'desktop', 'src', 'welcome-backend.ts')
@@ -3228,6 +3228,22 @@ optional('el arranque reintenta la entrada a la interfaz', (tx) => {
       '  }',
     ].join('\n'),
     'desktop welcome: Web authentication failed (HTTP')
+
+  // La causa del 431: cada arranque deja una cookie de acceso de 30 días con el puerto del Host en el nombre, y el
+  // navegador las manda todas a 127.0.0.1 sea cual sea el puerto; unas 70 pasan de los 16 KB de cabecera que acepta
+  // Node. Se borran las viejas antes de entrar (el Host da una nueva en seguida).
+  const main = join(repo, 'apps', 'desktop', 'src', 'main.ts')
+  tx.replace(main, '        hostCookie = await authenticateWebHost(ready.url)\n',
+    [
+      '        // Local build: drop the access cookies earlier launches left behind (one per Host port, 30 days each);',
+      '        // about 70 of them overflow the 16 KB request-header limit and the Host answers 431.',
+      "        for (const cookie of await session.defaultSession.cookies.get({ domain: '127.0.0.1' })) {",
+      "          if (cookie.name.startsWith('dsh-auth-')) await session.defaultSession.cookies.remove(new URL(ready.url).origin, cookie.name)",
+      '        }',
+      '        hostCookie = await authenticateWebHost(ready.url)',
+      '',
+    ].join('\n'),
+    "cookie.name.startsWith('dsh-auth-')")
 })
 
 console.log('\nCambios aplicados:')
