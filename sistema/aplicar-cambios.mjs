@@ -3467,9 +3467,13 @@ optional('control de Windows para el agente (abrir apps y moverse por ellas)', (
   let rows = tx.read(bundle)
   if (!rows.includes('serverName: desktop')) {
     const script = readFileSync(join(here, 'escritorio', 'desktop-mcp.mjs'), 'utf8')
-    // El SDK se busca desde el Host (process.argv[1] es la entrada del Host, dentro de node_modules); si no está, el
-    // servidor responde con error y la app sigue sin estas herramientas.
-    const args = "(() => { let sdk = ''; try { sdk = process.getBuiltinModule('node:module').createRequire(process.argv[1]).resolve('@trycua/cua-driver') } catch {} "
+    // El SDK se busca subiendo desde la entrada del Host (process.argv[1], dentro de node_modules) por cada carpeta
+    // node_modules: solo se exporta para import, así que require.resolve no lo encuentra. Si no está, el servidor
+    // responde con error y la app sigue sin estas herramientas.
+    const args = "(() => { const path = process.getBuiltinModule('node:path'); const fs = process.getBuiltinModule('node:fs'); let sdk = ''; "
+      + "try { let dir = path.dirname(process.argv[1] ?? ''); for (let i = 0; i < 14 && sdk === ''; i++) { "
+      + "const candidate = path.join(dir, 'node_modules', '@trycua', 'cua-driver', 'dist', 'index.js'); "
+      + "if (fs.existsSync(candidate)) sdk = candidate; const up = path.dirname(dir); if (up === dir) break; dir = up } } catch {} "
       + `return ['--input-type=module', '-e', ${JSON.stringify(script)}, '--', sdk] })()`
     rows = rows.trimEnd() + '\n\n' + [
       '# Local build (dpseek-local-updater): Windows desktop control for the agent (sistema/escritorio/desktop-mcp.mjs).',
@@ -3483,6 +3487,7 @@ optional('control de Windows para el agente (abrir apps y moverse por ellas)', (
       `        args: !!js ${JSON.stringify(args)}`,
       '        env:',
       "          ELECTRON_RUN_AS_NODE: '1'",
+      "          LOCALAPPDATA: !!js process.env.LOCALAPPDATA ?? ''",
       '        toolCallTimeoutMs: 60000',
       '',
     ].join('\n')

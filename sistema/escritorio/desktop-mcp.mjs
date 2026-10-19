@@ -5,6 +5,9 @@
 // (texto: vale para un modelo sin visión), pulsar, escribir, teclas y atajos, poner un valor, desplazar, menús, traer
 // al frente y el portapapeles. Pulsa por elemento, sin robar el foco ni mover el ratón del usuario.
 // Argumentos: <ruta de @trycua/cua-driver (su index.js)>
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 import { pathToFileURL } from 'node:url'
 
@@ -51,11 +54,39 @@ const INSTRUCTIONS = [
   'Never type passwords you were not given; for sign-ins, ask the user to do it themselves.',
 ].join('\n')
 
+/**
+ * En la app empaquetada el SDK está dentro de app.asar, y su librería nativa se carga por ruta: Windows no puede abrirla
+ * ahí. La primera vez se copian el SDK y sus dependencias a una carpeta normal (unos 27 MB) y se carga desde allí.
+ */
+const loadablePath = (sdk) => {
+  if (!/\.asar[\\/]/i.test(sdk)) return sdk
+  const modules = dirname(dirname(dirname(dirname(sdk)))) // …/node_modules (desde @trycua/cua-driver/dist/index.js)
+  const version = JSON.parse(readFileSync(join(modules, '@trycua', 'cua-driver', 'package.json'), 'utf8')).version
+  const target = join(process.env.LOCALAPPDATA ?? tmpdir(), 'dpseek-local-updater', 'desktop-runtime', version, 'node_modules')
+  const done = join(target, '.complete')
+  if (!existsSync(done)) {
+    // Copia a mano: el fs de Electron lee dentro del asar, pero cpSync no sabe recorrerlo.
+    const copy = (from, to) => {
+      mkdirSync(to, { recursive: true })
+      for (const entry of readdirSync(from, { withFileTypes: true })) {
+        const source = join(from, entry.name)
+        if (entry.isDirectory()) copy(source, join(to, entry.name))
+        else writeFileSync(join(to, entry.name), readFileSync(source))
+      }
+    }
+    for (const name of ['@trycua/cua-driver', '@trycua/cua-driver-win32-x64-msvc', '@ubjs/core', '@ubjs/node']) {
+      copy(join(modules, ...name.split('/')), join(target, ...name.split('/')))
+    }
+    writeFileSync(done, new Date().toISOString())
+  }
+  return join(target, '@trycua', 'cua-driver', 'dist', 'index.js')
+}
+
 let driver
 const getDriver = async () => {
   if (driver !== undefined) return driver
   if (sdkPath === '') throw new Error('Cua Driver is not installed in this build')
-  const sdk = await import(pathToFileURL(sdkPath).href)
+  const sdk = await import(pathToFileURL(loadablePath(sdkPath)).href)
   driver = sdk.CuaDriver.create(undefined)
   return driver
 }
