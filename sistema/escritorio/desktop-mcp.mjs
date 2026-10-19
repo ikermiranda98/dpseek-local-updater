@@ -50,6 +50,7 @@ const INSTRUCTIONS = [
   '1. list_windows (or list_apps, then launch_app) to find the app and its pid/window_id.',
   '2. get_window_state(pid, window_id) returns the window as a tree of numbered elements; act with element_index from the latest get_window_state of that window, then read it again to check the result.',
   '3. Prefer element_index over coordinates; type_text types into the focused element; hotkey sends shortcuts like ["ctrl","s"].',
+  '4. Always pass window_id together with pid (an app can own several windows).',
   'Ask the user before closing apps, deleting files or data, sending messages or emails, making purchases or changing system settings.',
   'Never type passwords you were not given; for sign-ins, ask the user to do it themselves.',
 ].join('\n')
@@ -80,6 +81,29 @@ const loadablePath = (sdk) => {
     writeFileSync(done, new Date().toISOString())
   }
   return join(target, '@trycua', 'cua-driver', 'dist', 'index.js')
+}
+
+/**
+ * El controlador exige, con element_index, el snapshot_id de la lectura de la que salió (para no pulsar un elemento que
+ * ya no es el mismo). El modelo solo maneja números: aquí se recuerda la última lectura de cada ventana y se añade.
+ */
+const snapshots = new Map()
+const rememberSnapshot = (args, result) => {
+  try {
+    const state = JSON.parse(result.structuredJson ?? '{}')
+    if (typeof state.snapshot_id !== 'string') return
+    if (state.window_id !== undefined) snapshots.set(`w:${String(state.window_id)}`, state.snapshot_id)
+    if ((state.pid ?? args.pid) !== undefined) snapshots.set(`p:${String(state.pid ?? args.pid)}`, state.snapshot_id)
+  } catch { /* sin datos estructurados */ }
+}
+const withSnapshot = (name, args) => {
+  // Leer una ventana sin captura de imagen: más rápido, y el modelo trabaja con el árbol de texto.
+  if (name === 'get_window_state' && args.include_screenshot === undefined) args.include_screenshot = false
+  if (args.element_index !== undefined && args.snapshot_id === undefined && args.element_token === undefined) {
+    const snapshot = snapshots.get(`w:${String(args.window_id)}`) ?? snapshots.get(`p:${String(args.pid)}`)
+    if (snapshot !== undefined) args.snapshot_id = snapshot
+  }
+  return args
 }
 
 let driver
@@ -125,7 +149,9 @@ const handle = async (message) => {
     } else if (method === 'tools/call') {
       const name = params?.name
       if (!ALLOWED.has(name)) { fail(id, -32602, `unknown tool: ${String(name)}`); return }
-      const result = await (await getDriver()).callTool(name, JSON.stringify(params?.arguments ?? {}))
+      const args = withSnapshot(name, { ...params?.arguments ?? {} })
+      const result = await (await getDriver()).callTool(name, JSON.stringify(args))
+      if (name === 'get_window_state') rememberSnapshot(args, result)
       // Solo texto: las capturas no le sirven a un modelo sin visión y llenan el contexto.
       reply(id, { content: [{ type: 'text', text: result.text || (result.isError ? 'The action failed.' : 'Done.') }], isError: result.isError === true })
     } else {

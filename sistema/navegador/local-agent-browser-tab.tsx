@@ -454,12 +454,12 @@ function AgentBrowserTab({ sessionId }: PropsRuntime<'sidebar.right.pane.tab'>):
   useEffect(() => {
     const timer = setTimeout(() => {
       if (localCtx === undefined) return
-      const fit = mode === 'fit' && area.width > 0 ? { width: area.width, height: area.height } : undefined
+      const fit = mode === 'fit' && area.width > 0 ? { width: area.width, height: area.height, dpr: area.dpr } : undefined
       void localCtx.remote.session.localAgentBrowserViewport({ mode, ...fit === undefined ? {} : { fit } })
         .then(() => { refresh() }).catch(() => undefined)
     }, mode === 'fit' ? 300 : 0)
     return () => { clearTimeout(timer) }
-  }, [mode, mode === 'fit' ? area.width : 0, mode === 'fit' ? area.height : 0])
+  }, [mode, mode === 'fit' ? area.width : 0, mode === 'fit' ? area.height : 0, mode === 'fit' ? area.dpr : 0])
   const chooseMode = (next: Mode): void => {
     setMode(next)
     setModeMenu(false)

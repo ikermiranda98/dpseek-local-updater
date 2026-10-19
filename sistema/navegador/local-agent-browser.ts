@@ -76,20 +76,9 @@ interface ControlState {
   active: boolean
   timer?: ReturnType<typeof setTimeout>
   mode?: LocalAgentBrowserMode
-  /** Ajustada al panel: su tamaño en píxeles CSS. */
-  fit?: { width: number; height: number }
+  /** Ajustada al panel: su tamaño en píxeles CSS y la densidad de la pantalla (para que se vea nítida). */
+  fit?: { width: number; height: number; dpr: number }
 }
-
-/**
- * La emulación de tamaño vive mientras dura la conexión que la pidió: se guarda una abierta por página. Siempre hay una
- * (también en escritorio): al cerrarla, Edge sin ventana no recupera su tamaño.
- */
-interface Emulation {
-  readonly targetUrl: string
-  readonly key: string
-  readonly socket: WebSocket
-}
-let emulation: Emulation | undefined
 
 /** Sin gestos durante este tiempo, el control vuelve solo al agente (para que no se quede esperando para siempre). */
 const CONTROL_IDLE_MS = 5 * 60_000
@@ -107,35 +96,104 @@ const armIdle = (): void => {
  * @param active - true para tomarlo.
  * @returns el estado resultante.
  */
-export function localAgentBrowserViewport(mode: LocalAgentBrowserMode, fit?: { width: number; height: number }): { readonly mode: LocalAgentBrowserMode } {
+export function localAgentBrowserViewport(mode: LocalAgentBrowserMode, fit?: { width: number; height: number; dpr?: number }): { readonly mode: LocalAgentBrowserMode } {
   control.mode = mode
-  if (fit !== undefined) control.fit = { width: Math.max(320, Math.round(fit.width)), height: Math.max(240, Math.round(fit.height)) }
+  if (fit !== undefined) {
+    control.fit = {
+      width: Math.max(320, Math.round(fit.width)), height: Math.max(240, Math.round(fit.height)),
+      dpr: Math.min(3, Math.max(1, fit.dpr ?? 1)),
+    }
+  }
   return { mode }
 }
 
-/** Pone a la página el tamaño del modo elegido (o se lo quita, en escritorio). */
-async function applyEmulation(targetUrl: string): Promise<void> {
+/**
+ * Conexión persistente con la página que se ve. La emulación de tamaño, las medidas, las capturas y los gestos van todos
+ * por ella: con conexiones de un solo uso, cada captura deshacía el tamaño pedido por otra (la página se quedaba en
+ * 320 × 200) y, al cerrar la de la emulación, Edge sin ventana no recuperaba su tamaño.
+ */
+class PageSession {
+  private next = 0
+  private readonly pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>()
+  private open = true
+  /** Lo último que se le pidió de tamaño (para no repetirlo en cada imagen). */
+  emulationKey = ''
+
+  private constructor(readonly url: string, private readonly socket: WebSocket) {
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(String(event.data)) as { id?: number; result?: unknown; error?: { message: string } }
+      if (message.id === undefined) return
+      const waiting = this.pending.get(message.id)
+      if (waiting === undefined) return
+      this.pending.delete(message.id)
+      if (message.error !== undefined) waiting.reject(new Error(message.error.message))
+      else waiting.resolve(message.result)
+    })
+    socket.addEventListener('close', () => {
+      this.open = false
+      for (const waiting of this.pending.values()) waiting.reject(new Error('conexión cerrada'))
+      this.pending.clear()
+    })
+  }
+
+  static connect(url: string): Promise<PageSession> {
+    return new Promise((resolve, reject) => {
+      const socket = new WebSocket(url)
+      socket.addEventListener('open', () => { resolve(new PageSession(url, socket)) }, { once: true })
+      socket.addEventListener('error', () => { reject(new Error('no se puede conectar con la página')) }, { once: true })
+    })
+  }
+
+  get alive(): boolean { return this.open }
+
+  call<T>(method: string, params: Record<string, unknown> = {}, timeoutMs = 8000): Promise<T> {
+    if (!this.open) return Promise.reject(new Error('conexión cerrada'))
+    const id = ++this.next
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`${method}: sin respuesta`)) }, timeoutMs)
+      this.pending.set(id, {
+        resolve: (value) => { clearTimeout(timer); resolve(value as T) },
+        reject: (error) => { clearTimeout(timer); reject(error) },
+      })
+      this.socket.send(JSON.stringify({ id, method, params }))
+    })
+  }
+
+  close(): void { this.socket.close() }
+}
+
+let session: PageSession | undefined
+let opening: Promise<PageSession> | undefined
+
+/** La conexión con esa página (la misma mientras siga siendo la que se ve). */
+async function sessionFor(url: string): Promise<PageSession> {
+  if (session?.url === url && session.alive) return session
+  if (opening !== undefined) {
+    const pending = await opening.catch(() => undefined)
+    if (pending?.url === url && pending.alive) return pending
+  }
+  session?.close()
+  opening = PageSession.connect(url)
+  try {
+    session = await opening
+    return session
+  } finally {
+    opening = undefined
+  }
+}
+
+/** Pone a la página el tamaño del modo elegido (por su conexión persistente: dura lo que dure ella). */
+async function applyEmulation(page: PageSession): Promise<void> {
   const mode = control.mode ?? 'desktop'
   const spec = mode === 'fit'
-    ? control.fit === undefined ? MODES.desktop : { ...control.fit, scale: 1, mobile: control.fit.width < 768 }
+    ? control.fit === undefined ? MODES.desktop : { width: control.fit.width, height: control.fit.height, scale: control.fit.dpr, mobile: control.fit.width < 768 }
     : MODES[mode]
-  const key = spec === undefined ? '' : JSON.stringify(spec)
-  if (emulation?.targetUrl === targetUrl && emulation.key === key) return
-  emulation?.socket.close()
-  emulation = undefined
-  if (spec === undefined) return
-  const socket = new WebSocket(targetUrl)
-  await new Promise<void>((resolve, reject) => {
-    socket.addEventListener('open', () => { resolve() }, { once: true })
-    socket.addEventListener('error', () => { reject(new Error('emulación: no se puede conectar')) }, { once: true })
-  })
-  let id = 0
-  const send = (method: string, params: Record<string, unknown>): void => { socket.send(JSON.stringify({ id: ++id, method, params })) }
-  send('Emulation.setDeviceMetricsOverride', { width: spec.width, height: spec.height, deviceScaleFactor: spec.scale, mobile: spec.mobile })
-  send('Emulation.setTouchEmulationEnabled', { enabled: spec.mobile, maxTouchPoints: spec.mobile ? 5 : 1 })
-  if (spec.mobile) send('Emulation.setUserAgentOverride', { userAgent: MOBILE_UA, platform: 'Android' })
-  emulation = { targetUrl, key, socket }
-  socket.addEventListener('close', () => { if (emulation?.socket === socket) emulation = undefined })
+  const key = JSON.stringify(spec)
+  if (page.emulationKey === key) return
+  await page.call('Emulation.setDeviceMetricsOverride', { width: spec.width, height: spec.height, deviceScaleFactor: spec.scale, mobile: spec.mobile })
+  await page.call('Emulation.setTouchEmulationEnabled', { enabled: spec.mobile, ...spec.mobile ? { maxTouchPoints: 5 } : {} })
+  await page.call('Emulation.setUserAgentOverride', spec.mobile ? { userAgent: MOBILE_UA, platform: 'Android' } : { userAgent: '' })
+  page.emulationKey = key
 }
 
 export function localAgentBrowserControl(active: boolean): { readonly control: boolean } {
@@ -229,7 +287,7 @@ function currentPage(targets: readonly CdpTarget[]): CdpTarget | undefined {
  * La página que está usando el agente, para la barra lateral.
  * @returns su dirección, título e imagen; `running: false` si el Edge del agente no está en marcha.
  */
-export async function localAgentBrowserFrame(size?: { width: number; height: number }): Promise<LocalAgentBrowserFrame> {
+export async function localAgentBrowserFrame(_size?: { width: number; height: number }): Promise<LocalAgentBrowserFrame> {
   const idle = { running: false, url: '', title: '', image: null, control: control.active, viewport: { width: 1280, height: 800 }, mode: control.mode ?? 'desktop' }
   const state = readState()
   if (state === undefined) return idle
@@ -239,18 +297,12 @@ export async function localAgentBrowserFrame(size?: { width: number; height: num
   if (page?.webSocketDebuggerUrl === undefined) return { ...idle, running: true }
   const base = { ...idle, running: true, url: page.url, title: page.title }
   try {
-    await applyEmulation(page.webSocketDebuggerUrl).catch(() => undefined)
-    const metrics = await cdp<{ cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number } }>(
-      page.webSocketDebuggerUrl, 'Page.getLayoutMetrics')
-    const view = metrics.cssVisualViewport
-    const viewport = { width: Math.round(view.clientWidth), height: Math.round(view.clientHeight) }
-    // Escala para que la imagen tenga justo los píxeles del panel (sin pasar de 3× ni bajar de 0,2×).
-    const wanted = size === undefined ? 1 : Math.min(size.width / view.clientWidth, size.height / view.clientHeight)
-    const scale = Math.min(3, Math.max(0.2, Number.isFinite(wanted) && wanted > 0 ? wanted : 1))
-    const shot = await cdp<{ data: string }>(page.webSocketDebuggerUrl, 'Page.captureScreenshot', {
-      format: 'webp', quality: 90, captureBeyondViewport: false,
-      clip: { x: view.pageX, y: view.pageY, width: view.clientWidth, height: view.clientHeight, scale },
-    })
+    const live = await sessionFor(page.webSocketDebuggerUrl)
+    await applyEmulation(live).catch(() => undefined)
+    const metrics = await live.call<{ cssVisualViewport: { clientWidth: number; clientHeight: number } }>('Page.getLayoutMetrics')
+    const viewport = { width: Math.round(metrics.cssVisualViewport.clientWidth), height: Math.round(metrics.cssVisualViewport.clientHeight) }
+    // Sin recorte escalado: con él, Chromium aplica una emulación temporal que deshace la del modo elegido.
+    const shot = await live.call<{ data: string }>('Page.captureScreenshot', { format: 'webp', quality: 90 })
     return { ...base, image: shot.data, viewport }
   } catch {
     return base
@@ -270,39 +322,34 @@ export async function localAgentBrowserInput(input: LocalAgentBrowserInput): Pro
   const targets = state === undefined ? undefined : await json<CdpTarget[]>(state, '/json/list')
   const url = targets === undefined ? undefined : currentPage(targets)?.webSocketDebuggerUrl
   if (url === undefined) return { sent: false }
+  const live = await sessionFor(url)
   if (input.kind === 'text') {
-    await cdp(url, 'Input.insertText', { text: input.text })
+    await live.call('Input.insertText', { text: input.text })
     return { sent: true }
   }
   if (input.kind === 'key') {
     const base = { key: input.key, code: input.code, windowsVirtualKeyCode: input.keyCode, nativeVirtualKeyCode: input.keyCode, modifiers: input.modifiers }
-    await cdpSequence(url, [
-      { method: 'Input.dispatchKeyEvent', params: { ...base, type: 'rawKeyDown' } },
-      { method: 'Input.dispatchKeyEvent', params: { ...base, type: 'keyUp' } },
-    ])
+    await live.call('Input.dispatchKeyEvent', { ...base, type: 'rawKeyDown' })
+    await live.call('Input.dispatchKeyEvent', { ...base, type: 'keyUp' })
     return { sent: true }
   }
   // Las posiciones del panel (0..1 sobre la imagen) pasan a píxeles CSS de la ventana de la página.
-  const metrics = await cdp<{ cssVisualViewport: { clientWidth: number; clientHeight: number } }>(url, 'Page.getLayoutMetrics')
+  const metrics = await live.call<{ cssVisualViewport: { clientWidth: number; clientHeight: number } }>('Page.getLayoutMetrics')
   const x = Math.round(Math.min(1, Math.max(0, input.x)) * metrics.cssVisualViewport.clientWidth)
   const y = Math.round(Math.min(1, Math.max(0, input.y)) * metrics.cssVisualViewport.clientHeight)
   if (input.kind === 'wheel') {
-    await cdp(url, 'Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: input.deltaX, deltaY: input.deltaY })
+    await live.call('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX: input.deltaX, deltaY: input.deltaY })
     return { sent: true }
   }
   if ((control.mode === 'mobile' || (control.mode === 'fit' && (control.fit?.width ?? 1000) < 768)) && input.button === 'left') {
-    await cdpSequence(url, [
-      { method: 'Input.dispatchTouchEvent', params: { type: 'touchStart', touchPoints: [{ x, y }] } },
-      { method: 'Input.dispatchTouchEvent', params: { type: 'touchEnd', touchPoints: [] } },
-    ])
+    await live.call('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+    await live.call('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
     return { sent: true }
   }
   const click = { x, y, button: input.button, clickCount: input.clickCount }
-  await cdpSequence(url, [
-    { method: 'Input.dispatchMouseEvent', params: { type: 'mouseMoved', x, y } },
-    { method: 'Input.dispatchMouseEvent', params: { ...click, type: 'mousePressed' } },
-    { method: 'Input.dispatchMouseEvent', params: { ...click, type: 'mouseReleased' } },
-  ])
+  await live.call('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y })
+  await live.call('Input.dispatchMouseEvent', { ...click, type: 'mousePressed' })
+  await live.call('Input.dispatchMouseEvent', { ...click, type: 'mouseReleased' })
   return { sent: true }
 }
 
