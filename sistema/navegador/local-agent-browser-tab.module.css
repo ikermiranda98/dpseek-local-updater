@@ -1,0 +1,43 @@
+/* Navegador del agente (dpseek-local-updater): mismos tonos, letra y medidas que «Live code» y el resto del panel. */
+
+.root { position: relative; display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; color: var(--dsw-alias-label-primary); }
+
+.header { position: relative; display: flex; flex: 0 0 auto; gap: 8px; align-items: center; box-sizing: border-box; height: 38px; padding: 0 6px 0 12px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-label-tertiary); }
+.dot[data-running] { background: var(--dsw-alias-file-diff-added-marker); }
+.address { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); text-overflow: ellipsis; white-space: nowrap; }
+.tool { display: inline-flex; flex: none; align-items: center; height: 26px; padding: 0 8px; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); white-space: nowrap; cursor: default; }
+.tool:hover, .tool[aria-expanded='true'] { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+
+/* La página, a todo el ancho del panel. */
+.view { flex: 1 1 auto; min-height: 0; overflow: auto; background: var(--dsw-alias-bg-base); }
+.image { display: block; width: 100%; height: auto; user-select: none; }
+.empty { margin: 0; padding: 16px; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); line-height: 20px; }
+
+/* El paso a paso del turno. */
+.steps { flex: 0 0 auto; max-height: 34%; margin: 0; padding: 6px 0; overflow-y: auto; border-top: 0.5px solid var(--dsw-alias-border-l3); list-style: none; }
+.step { display: flex; gap: 8px; align-items: center; min-height: 26px; padding: 0 12px; font: var(--dsw-font-xs-13); color: var(--dsw-alias-label-secondary); }
+.step:last-child { color: var(--dsw-alias-label-primary); }
+.stepDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-file-diff-added-marker); }
+.step[data-status='running'] .stepDot { background: var(--dsw-alias-state-business-primary); animation: pulse 1s ease-in-out infinite; }
+.step[data-status='failed'] .stepDot { background: var(--dsw-alias-state-error-primary); }
+.stepText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@keyframes pulse { 50% { opacity: 0.35; } }
+
+/* «Saved sign-ins»: una ventanita como los menús de la app. */
+/* Encima de la página (casi siempre blanca), así que el material del menú va sobre el fondo de la app, no transparente. */
+.popover { position: absolute; top: 34px; right: 6px; z-index: 10; box-sizing: border-box; width: 280px; max-height: 320px; padding: 8px; overflow-y: auto; border-radius: var(--dsw-radius-lg); background: linear-gradient(var(--dsw-specific-menu), var(--dsw-specific-menu)), var(--dsw-alias-bg-layer-1); backdrop-filter: var(--dsw-menu-backdrop-filter); box-shadow: var(--dsw-elevation-panel); color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); }
+.popoverTitle { padding: 2px 4px 4px; color: var(--dsw-alias-label-primary); font-weight: 500; }
+.popoverHint { margin: 0; padding: 0 4px 6px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+.sites { margin: 0; padding: 0; list-style: none; }
+.site { display: flex; gap: 8px; align-items: center; min-height: 34px; padding: 0 4px 0 8px; border-radius: var(--dsw-radius-md); }
+.site:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.siteName { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remove { flex: none; height: 26px; padding: 0 8px; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-state-error-primary); font: inherit; cursor: default; }
+.remove:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-danger); }
+.remove:disabled { opacity: 0.5; }
+.error { margin: 6px 4px 0; color: var(--dsw-alias-state-error-primary); font-size: 12px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .step[data-status='running'] .stepDot { animation: none; }
+}

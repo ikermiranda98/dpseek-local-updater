@@ -2857,7 +2857,8 @@ optional('el esfuerzo de razonamiento como un cerebro en la barra', (tx) => {
 // proveedor de navegador (Playwright MCP), pero la empaquetada no lo incluía: solo estaba
 // en el modo desarrollo. Aquí entra en el paquete (dependencias de apps/cli y sus 6 líneas
 // del fichero de bloqueo, que la compilación instala con --frozen-lockfile) y se activa con
-// el Edge de Windows, sin ventana y con un perfil en memoria.
+// el Edge de Windows, sin ventana: uno compartido por todos los chats, con su propio perfil
+// (las sesiones iniciadas se guardan) y visible en la barra lateral (sección 35).
 
 const LOCAL_BROWSER_PACKAGES = [
   ['@deepseek-ai/dsh-browser-use', 'packages/browser-use/browser-use'],
@@ -2910,7 +2911,7 @@ optional('un navegador de verdad para el agente (Playwright con Edge)', (tx) => 
   if (!rows.includes('browser-use-playwright-mcp')) {
     rows = rows.trimEnd() + '\n\n' + [
       '# Local build (dpseek-local-updater): a real browser for the agent. Playwright MCP',
-      '# drives the Windows Edge headless with an in-memory profile; the model reads pages as',
+      '# drives one shared headless Windows Edge with its own profile; the model reads pages as',
       '# accessibility snapshots, which a text-only local model handles.',
       '- insert:',
       '    - id: browser-use',
@@ -2924,6 +2925,161 @@ optional('un navegador de verdad para el agente (Playwright con Edge)', (tx) => 
       '',
     ].join('\n')
     tx.write(bundle, rows)
+  }
+
+  // Un Edge compartido en vez de uno por chat: el servidor de Playwright arranca con un lanzador propio
+  // (sistema/navegador/agent-browser-launcher.mjs, ejecutado con node -e) que abre ese Edge si hace falta, con su
+  // perfil en <DSH_HOME>/storages/agent-browser (las sesiones iniciadas se guardan) y lo anota para la barra lateral.
+  const provider = join(repo, 'packages', 'experimental', 'browser-use-playwright-mcp', 'src', 'index.ts')
+  let source = tx.read(provider)
+  if (!source.includes('LOCAL_AGENT_BROWSER_LAUNCHER')) {
+    const launcher = readFileSync(join(here, 'navegador', 'agent-browser-launcher.mjs'), 'utf8')
+    const original = [
+      '  } else {',
+      "    args.push('--isolated')",
+      "    if (config.headless) args.push('--headless')",
+      "    if (config.executablePath !== undefined) args.push('--executable-path', config.executablePath)",
+      '  }',
+    ].join('\n')
+    if (!source.includes(original)) skip(`no se encuentra el arranque del navegador en ${rel(provider)}`)
+    source = source.replace(original, [
+      '  } else if (config.executablePath !== undefined) {',
+      '    // Local build: one shared Edge for every Session (sign-ins kept in its own profile), started on demand by the',
+      '    // launcher, which then loads the Playwright server connected to it; the app shows its pages in the sidebar.',
+      "    const home = process.env.DSH_HOME ?? join(homedir(), '.dsh')",
+      "    args.splice(0, args.length, '--input-type=module', '-e', LOCAL_AGENT_BROWSER_LAUNCHER, '--', cli, config.executablePath,",
+      "      join(home, 'storages', 'agent-browser'), join(home, 'storages', 'local-agent-browser.json'))",
+      original.replace('  } else {', '  } else {'),
+    ].join('\n'))
+    source = source.replace("import { dirname, join } from 'node:path'\n",
+      "import { homedir } from 'node:os'\nimport { dirname, join } from 'node:path'\n")
+    source = source.trimEnd() + '\n\n'
+      + '/** Local build (dpseek-local-updater): sistema/navegador/agent-browser-launcher.mjs, run with node -e. */\n'
+      + `const LOCAL_AGENT_BROWSER_LAUNCHER = ${JSON.stringify(launcher)}\n`
+    tx.write(provider, source)
+  }
+})
+
+// ── 35. Lo que hace el agente en el navegador, en el panel derecho ──────────────────
+// Pestaña «Agent browser» junto a «Live code»: la página del Edge del agente en directo, el
+// paso a paso del turno y «Saved sign-ins» para borrar las sesiones guardadas que ya no
+// quieras. La línea de estado del turno lleva «View browser» cuando el agente navega.
+// Código: sistema/navegador/ (y los pasos, en sistema/codigo-vivo/local-live-watch.tsx).
+
+optional('ver el navegador del agente en el panel derecho', (tx) => {
+  const nav = join(here, 'navegador')
+  const chatDir = join(repo, 'packages', 'client', 'ui-chat', 'src', 'client', 'chat')
+  const deliverablesDir = join(repo, 'packages', 'client', 'ui-deliverables', 'src', 'client')
+  const deliverablesIndex = join(deliverablesDir, 'index.ts')
+  const provider = join(repo, 'packages', 'experimental', 'browser-use-playwright-mcp', 'src', 'index.ts')
+  if (!tx.read(provider).includes('LOCAL_AGENT_BROWSER_LAUNCHER')) skip('falta el navegador compartido (sección 34)')
+  if (!existsSync(join(chatDir, 'local-live-watch.tsx'))) skip('falta el código en vivo (sección 19)')
+
+  // Chat: «View browser» junto a «View code» en las dos líneas de estado del turno.
+  const running = join(chatDir, 'RunningStatus.tsx')
+  tx.replace(running, "import { LocalLiveCodeButton } from './local-live-watch.tsx'\n",
+    "import { LocalBrowserButton, LocalLiveCodeButton } from './local-live-watch.tsx'\n",
+    'LocalBrowserButton, LocalLiveCodeButton }')
+  tx.replace(running, '        <LocalLiveCodeButton placement="running" />\n',
+    '        <LocalLiveCodeButton placement="running" />\n        <LocalBrowserButton placement="running" />\n',
+    '<LocalBrowserButton placement="running" />')
+  const processView = join(chatDir, 'TurnProcessNodeView.tsx')
+  tx.replace(processView, "import { LocalLiveCodeButton } from './local-live-watch.tsx'\n",
+    "import { LocalBrowserButton, LocalLiveCodeButton } from './local-live-watch.tsx'\n",
+    'LocalBrowserButton, LocalLiveCodeButton }')
+  tx.replace(processView, '      <LocalLiveCodeButton turn={node.data.turn} placement="process" />\n',
+    '      <LocalLiveCodeButton turn={node.data.turn} placement="process" />\n'
+      + '      <LocalBrowserButton turn={node.data.turn} placement="process" />\n',
+    '<LocalBrowserButton turn={node.data.turn} placement="process" />')
+
+  // Panel derecho: la pestaña.
+  tx.copy(join(nav, 'local-agent-browser-tab.tsx'), join(deliverablesDir, 'local-agent-browser-tab.tsx'))
+  tx.copy(join(nav, 'local-agent-browser-tab.module.css'), join(deliverablesDir, 'local-agent-browser-tab.module.css'))
+  tx.replace(deliverablesIndex, "import { setLocalLive } from './local-live-code.tsx'\n",
+    "import { setLocalLive } from './local-live-code.tsx'\nimport { setLocalAgentBrowser } from './local-agent-browser-tab.tsx'\n",
+    "import { setLocalAgentBrowser } from './local-agent-browser-tab.tsx'")
+  tx.replace(deliverablesIndex, '  setLocalLive(ctx)\n',
+    '  setLocalLive(ctx)\n  // Local build: «Agent browser» tab (local-agent-browser-tab.tsx).\n  setLocalAgentBrowser(ctx)\n',
+    'setLocalAgentBrowser(ctx)')
+
+  // Host: imágenes de la página y sesiones guardadas del Edge del agente.
+  const hostIndex = join(hostDir, 'index.ts')
+  const hostTypes = join(hostDir, 'types.ts')
+  tx.copy(join(nav, 'local-agent-browser.ts'), join(hostDir, 'local-agent-browser.ts'))
+  tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-agent-browser.ts')
+  let types = tx.read(hostTypes)
+  if (!types.includes('interface SessionLocalBrowserFrame')) {
+    types = types.trimEnd() + '\n\n' + [
+      "/** Local build: the page the agent's browser shows now. */",
+      'export interface SessionLocalBrowserFrame {',
+      '  readonly running: boolean',
+      '  readonly url: string',
+      '  readonly title: string',
+      '  /** JPEG in base64, or null if there is no page to show. */',
+      '  readonly image: string | null',
+      '}',
+      '',
+      "/** Local build: sites with a saved sign-in in the agent's browser. */",
+      'export interface SessionLocalBrowserSites {',
+      '  readonly sites: readonly { readonly domain: string; readonly cookies: number }[]',
+      '}',
+      '',
+      "/** Local build: forget a site's sign-in in the agent's browser. */",
+      'export interface SessionLocalBrowserForgetRequest {',
+      '  readonly domain: string',
+      '}',
+      '',
+      '/** Local build: how many cookies were removed. */',
+      'export interface SessionLocalBrowserForgetValue {',
+      '  readonly removed: number',
+      '}',
+    ].join('\n')
+    tx.write(hostTypes, types)
+  }
+  tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n",
+    "import { ApiSessionList } from './list.ts'\n"
+      + "import { localAgentBrowserForget, localAgentBrowserFrame, localAgentBrowserSites } from './local-agent-browser.ts'\n"
+      + 'import type {\n  SessionLocalBrowserForgetRequest, SessionLocalBrowserForgetValue, SessionLocalBrowserFrame, SessionLocalBrowserSites,\n'
+      + "} from './types.ts'\n",
+    'SessionLocalBrowserForgetRequest, SessionLocalBrowserForgetValue')
+  let host = tx.read(hostIndex)
+  if (!host.includes("@Remote('localAgentBrowserFrame')")) {
+    const at = host.indexOf("  @Remote('list')")
+    const doc = at < 0 ? -1 : host.lastIndexOf('  /**', at)
+    if (doc < 0) skip(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
+    host = host.slice(0, doc) + [
+      '  /**',
+      "   * Local build: a picture of the page the agent's browser shows now, with its address.",
+      '   * @param _request - no fields are required.',
+      '   * @returns the frame, with no image if the browser is not running.',
+      '   */',
+      "  @Remote('localAgentBrowserFrame')",
+      '  async localAgentBrowserFrame(_request: SessionLocalEmptyRequest): Promise<SessionLocalBrowserFrame> {',
+      '    return localAgentBrowserFrame()',
+      '  }',
+      '',
+      '  /**',
+      "   * Local build: sites with a saved sign-in in the agent's browser.",
+      '   * @param _request - no fields are required.',
+      '   * @returns one row per site.',
+      '   */',
+      "  @Remote('localAgentBrowserSites')",
+      '  async localAgentBrowserSites(_request: SessionLocalEmptyRequest): Promise<SessionLocalBrowserSites> {',
+      '    return localAgentBrowserSites()',
+      '  }',
+      '',
+      '  /**',
+      "   * Local build: sign the agent's browser out of one site (its cookies and stored data).",
+      '   * @param request - the site.',
+      '   * @returns how many cookies were removed.',
+      '   */',
+      "  @Remote('localAgentBrowserForget')",
+      '  async localAgentBrowserForget(request: SessionLocalBrowserForgetRequest): Promise<SessionLocalBrowserForgetValue> {',
+      '    return localAgentBrowserForget(request.domain)',
+      '  }',
+      '',
+    ].join('\n') + host.slice(doc)
+    tx.write(hostIndex, host)
   }
 })
 

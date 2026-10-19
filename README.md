@@ -281,12 +281,20 @@ empaquetada no lo incluía: el agente solo tenía `web_fetch`, que baja el HTML 
 puede iniciar sesión, pulsar botones ni ver lo que una web dibuja con JavaScript. Ahora va en
 la app y se activa solo: el agente abre páginas, las lee como un árbol de texto (botones,
 campos y textos con su referencia), rellena formularios, hace clic y espera a que carguen,
-con el **Edge de Windows** sin ventana y un perfil en memoria (no guarda sesiones).
+con el **Edge de Windows** sin ventana. Es un solo Edge para todos los chats, con su propio
+perfil (`~/.dsh/storages/agent-browser`): las sesiones que inicia se quedan guardadas.
+
+**Lo que hace, a la vista.** Mientras el agente navega, la línea de estado del turno lleva
+**Browsing · N steps** (al terminar, **View browser**), que abre la pestaña **Browser** del
+panel derecho, junto a **Live code**. La pestaña muestra la página en directo con su dirección,
+el paso a paso del turno («Opened…», «Clicked Botón Entrar», «Filled in the form»…; nunca lo
+que escribe en un campo) y **Saved sign-ins**: una ventanita con las webs donde el navegador
+del agente tiene sesión guardada, con **Remove** para cerrarla (borra sus cookies y datos).
 
 Probado con una web local cuyo formulario y datos solo existen con JavaScript: el agente
-entró, inició sesión y leyó el saldo y los movimientos en unos 90 s (con Qwen3.6-35B).
-Ojo: lo que el agente escribe en un formulario (también una contraseña) queda en el
-registro del chat; para cuentas reales, mejor iniciar sesión tú.
+entró, inició sesión y leyó el saldo y los movimientos en unos 2 minutos (con Qwen3.6-35B), y la
+pestaña enseñó la página y los 14 pasos. Ojo: lo que pones en el prompt (también una contraseña)
+queda en el registro del chat; para cuentas reales, mejor iniciar sesión tú.
 
 ## Contexto de cada chat
 
@@ -532,7 +540,8 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | El esfuerzo de razonamiento como un cerebro en la barra, sin la fila «Effort» del selector (opcional) | `packages/client/ui-model-selection` (`ModelSelect.tsx`) + [`sistema/contexto/LocalThinkButton.tsx`](sistema/contexto/LocalThinkButton.tsx) |
 | El selector de modelo como chip («Qwen3.6 · 128K», la rueda cambia el contexto) que abre una fila de modelos dentro de la barra (opcional) | `packages/client/ui-model-selection` (`ModelSelect.tsx`) + [`sistema/contexto/LocalModelDrawer.tsx`](sistema/contexto/LocalModelDrawer.tsx) |
 | La barra lateral se esconde por debajo de 760 px de ventana, no de 1024 (opcional) | `packages/client/ui-layout` (`columns.ts`) |
-| Un navegador de verdad para el agente: Playwright MCP con Edge, incluido en la app empaquetada (opcional) | `apps/cli/package.json`, `pnpm-lock.yaml`, `packages/bundle/web-app/cordis.patch.yml` |
+| Un navegador de verdad para el agente: Playwright MCP con un Edge compartido que guarda las sesiones, incluido en la app empaquetada (opcional) | `apps/cli/package.json`, `pnpm-lock.yaml`, `packages/bundle/web-app/cordis.patch.yml`, `packages/experimental/browser-use-playwright-mcp` + [`sistema/navegador/agent-browser-launcher.mjs`](sistema/navegador/agent-browser-launcher.mjs) |
+| Pestaña «Browser» en el panel derecho (página en directo, paso a paso y «Saved sign-ins») y «View browser» en la línea de estado del turno (opcional) | `packages/client/ui-deliverables`, `packages/client/ui-chat`, `packages/api/session-controller` + [`sistema/navegador/`](sistema/navegador/) |
 | Prueba de arranque antes de publicar | [`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs) en el workflow |
 
 La app va en inglés (o en chino), como la oficial: no se añade ningún idioma.

@@ -33,18 +33,44 @@ export interface LiveTurn {
   readonly files: readonly LiveFile[]
   /** Evento `workspace/changes` del turno, cuando ya ha terminado y hay cambios que revisar. */
   readonly changesSeq?: number
+  /** Pasos del turno con el navegador del agente (abrir, leer, escribir, pulsar…), en orden. */
+  readonly browser?: readonly LiveBrowserStep[]
+}
+
+/** Un paso del agente con el navegador. */
+export interface LiveBrowserStep {
+  readonly callId: string
+  /** Nombre de la herramienta sin el prefijo del servidor: «navigate», «click»… */
+  readonly action: string
+  /** Qué hace, en pocas palabras (la dirección, el elemento…); nunca lo que escribe en un campo. */
+  readonly detail: string
+  readonly status: 'running' | 'done' | 'failed'
 }
 
 interface LiveStore {
   readonly turns: Map<string, LiveTurn>
   readonly listeners: Set<() => void>
   readonly openers: Set<(sessionId: string) => void>
+  browserOpeners?: Set<(sessionId: string) => void>
 }
 
 const KEY = Symbol.for('dpseek-local-updater.live-code')
 const store = ((globalThis as Record<symbol, unknown>)[KEY] ??= {
   turns: new Map(), listeners: new Set(), openers: new Set(),
 }) as LiveStore
+store.browserOpeners ??= new Set()
+const browserOpeners = store.browserOpeners
+
+/** El chat pide abrir la pestaña «Agent browser». */
+export function requestBrowserOpen(sessionId: string): void {
+  for (const opener of browserOpeners) opener(sessionId)
+}
+
+/** @returns cómo dejar de atender las peticiones de abrir la pestaña «Agent browser». */
+export function onBrowserOpen(opener: (sessionId: string) => void): () => void {
+  browserOpeners.add(opener)
+  return () => { browserOpeners.delete(opener) }
+}
 
 /** @param turn - estado nuevo del turno de un chat. */
 export function publishLive(turn: LiveTurn): void {

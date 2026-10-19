@@ -14,7 +14,10 @@ import type { ReactNode } from 'react'
 import { LinkIconMedium, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ToolCallBlock } from '../contract/snapshot.ts'
 import type { UseChat } from '../contract/slots.ts'
-import { liveSnapshot, publishLive, requestLiveOpen, subscribeLive, type LiveEdit, type LiveFile } from './local-live-store.ts'
+import {
+  liveSnapshot, publishLive, requestBrowserOpen, requestLiveOpen, subscribeLive,
+  type LiveBrowserStep, type LiveEdit, type LiveFile,
+} from './local-live-store.ts'
 import css from './local-live-watch.module.css'
 
 const TICK_MS = 150
@@ -71,10 +74,36 @@ function filesOf(blocks: readonly ToolCallBlock[]): LiveFile[] {
   return [...files].map(([path, edits]) => ({ path, edits }))
 }
 
+/** Herramientas del navegador del agente (servidor Playwright MCP). */
+const BROWSER_PREFIX = 'mcp__playwright-mcp__browser_'
+
+/** Pasos del turno con el navegador: qué herramienta y sobre qué, sin lo que escribe en los campos. */
+function browserSteps(blocks: readonly ToolCallBlock[]): LiveBrowserStep[] {
+  const steps: LiveBrowserStep[] = []
+  for (const block of blocks) {
+    if (!block.name.startsWith(BROWSER_PREFIX)) continue
+    const args = block.args
+    const text = (key: string): string | undefined => args.complete(key) ? args.text(key) : undefined
+    const action = block.name.slice(BROWSER_PREFIX.length)
+    const status: LiveBrowserStep['status'] = 'kind' in block ? block.isError ? 'failed' : 'done' : 'running'
+    // `text` solo se lee en find y wait_for (lo que busca o espera); en type es lo que escribe y no se enseña.
+    const detail = action === 'navigate' ? text('url')
+      : action === 'find' ? text('text') ?? text('regex')
+        : action === 'wait_for' ? text('text') ?? text('textGone')
+          : action === 'press_key' ? text('key')
+            : action === 'tabs' ? text('action')
+              : text('element')
+    steps.push({ callId: block.callId, action, detail: (detail ?? '').slice(0, 120), status })
+  }
+  return steps
+}
+
 /** Firma barata para no republicar si nada ha cambiado. */
-function signature(running: boolean, files: readonly LiveFile[], changesSeq: number | undefined): string {
+function signature(running: boolean, files: readonly LiveFile[], changesSeq: number | undefined,
+  browser: readonly LiveBrowserStep[] = []): string {
   return `${String(running)}|${String(changesSeq)}|${files.map((file) =>
-    `${file.path}:${file.edits.map((edit) => `${edit.callId}${edit.status}${String(edit.text.length)}`).join(',')}`).join(';')}`
+    `${file.path}:${file.edits.map((edit) => `${edit.callId}${edit.status}${String(edit.text.length)}`).join(',')}`).join(';')}|${
+    browser.map((step) => `${step.callId}${step.status}${step.detail}`).join(',')}`
 }
 
 /**
@@ -94,13 +123,19 @@ export function LocalLiveWatcher({ sessionId, useChat }: { sessionId: string; us
     if (turn === undefined || source === undefined) return
     let last = ''
     const read = (): void => {
-      const files = filesOf(source.getSnapshot().map((data) => data.root))
+      const blocks = source.getSnapshot().map((data) => data.root)
+      const files = filesOf(blocks)
+      const browser = browserSteps(blocks)
       const data = location.current
       const changes = (data?.get('deliverables') as { changes?: { seq: number } } | undefined)?.changes
-      const now = signature(running, files, changes?.seq)
+      const now = signature(running, files, changes?.seq, browser)
       if (now === last) return
       last = now
-      publishLive({ sessionId, turn, running, files, ...changes === undefined ? {} : { changesSeq: changes.seq } })
+      publishLive({
+        sessionId, turn, running, files,
+        ...changes === undefined ? {} : { changesSeq: changes.seq },
+        ...browser.length === 0 ? {} : { browser },
+      })
     }
     read()
     const unsubscribe = source.subscribe(read)
@@ -156,6 +191,33 @@ export function LocalLiveCodeButton({ turn, placement }: { turn?: number; placem
         <LinkIconMedium kind="code" className={css.icon} />
         <span>{writing ? 'Writing code' : 'View code'}</span>
         <span className={css.count}>{count === 1 ? '1 file' : `${String(count)} files`}</span>
+      </button>
+    </Tooltip>
+  )
+}
+
+/**
+ * «View browser» en la línea de estado del turno: abre la pestaña «Agent browser» con lo que hace el agente.
+ * @param props - turno de la línea (sin él, el que está en marcha) y dónde va.
+ * @returns el botón, o nada si ese turno no ha usado el navegador.
+ */
+export function LocalBrowserButton({ turn, placement }: { turn?: number; placement: 'running' | 'process' }) {
+  const sessionId = useContext(LiveSession)
+  const live = useSyncExternalStore(subscribeLive, () => sessionId === undefined ? undefined : liveSnapshot(sessionId))
+  const steps = live?.browser ?? []
+  if (sessionId === undefined || live === undefined || steps.length === 0) return null
+  if (turn === undefined ? !live.running : live.turn !== turn) return null
+  const busy = live.running && steps.at(-1)?.status === 'running'
+  return (
+    <Tooltip label="See what the agent is doing in the browser" side="top" delayMs={500}>
+      <button type="button" className={css.button} data-placement={placement} data-browser-button
+        onClick={(event) => {
+          event.stopPropagation()
+          requestBrowserOpen(sessionId)
+        }}>
+        <LinkIconMedium kind="url" className={css.icon} />
+        <span>{busy ? 'Browsing' : 'View browser'}</span>
+        <span className={css.count}>{steps.length === 1 ? '1 step' : `${String(steps.length)} steps`}</span>
       </button>
     </Tooltip>
   )
