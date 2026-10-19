@@ -2851,6 +2851,82 @@ optional('el esfuerzo de razonamiento como un cerebro en la barra', (tx) => {
   })
 })
 
+// ── 34. Un navegador de verdad para el agente ───────────────────────────────────────
+// Sin esto el agente solo tiene web_fetch, que baja el HTML como texto: no puede iniciar
+// sesión, pulsar botones ni ver lo que una web dibuja con JavaScript. La app trae un
+// proveedor de navegador (Playwright MCP), pero la empaquetada no lo incluía: solo estaba
+// en el modo desarrollo. Aquí entra en el paquete (dependencias de apps/cli y sus 6 líneas
+// del fichero de bloqueo, que la compilación instala con --frozen-lockfile) y se activa con
+// el Edge de Windows, sin ventana y con un perfil en memoria.
+
+const LOCAL_BROWSER_PACKAGES = [
+  ['@deepseek-ai/dsh-browser-use', 'packages/browser-use/browser-use'],
+  ['@deepseek-ai/dsh-experimental-browser-use-playwright-mcp', 'packages/experimental/browser-use-playwright-mcp'],
+]
+
+optional('un navegador de verdad para el agente (Playwright con Edge)', (tx) => {
+  const cliPackage = join(repo, 'apps', 'cli', 'package.json')
+  const lockFile = join(repo, 'pnpm-lock.yaml')
+  const bundle = join(repo, 'packages', 'bundle', 'web-app', 'cordis.patch.yml')
+  for (const [, path] of LOCAL_BROWSER_PACKAGES) {
+    if (!existsSync(join(repo, path, 'package.json'))) skip(`no está el paquete ${path}`)
+  }
+
+  // Dependencias del paquete raíz de la app: el empaquetado recorre las suyas.
+  const manifest = JSON.parse(tx.read(cliPackage))
+  let changed = false
+  for (const [name] of LOCAL_BROWSER_PACKAGES) {
+    if (manifest.dependencies?.[name] !== undefined) continue
+    manifest.dependencies = { ...manifest.dependencies, [name]: 'workspace:*' }
+    changed = true
+  }
+  if (changed) tx.write(cliPackage, JSON.stringify(manifest, null, 2) + '\n')
+
+  // Las mismas entradas en el fichero de bloqueo, en su sitio (orden alfabético dentro de
+  // las dependencias de apps/cli), como las escribiría pnpm.
+  let lock = tx.read(lockFile)
+  const start = lock.indexOf('\n  apps/cli:\n')
+  const depsAt = start < 0 ? -1 : lock.indexOf('\n    dependencies:\n', start)
+  if (depsAt < 0) skip(`no se encuentran las dependencias de apps/cli en ${rel(lockFile)}`)
+  for (const [name, path] of LOCAL_BROWSER_PACKAGES) {
+    const body = depsAt + '\n    dependencies:\n'.length
+    // Fin del bloque: la primera línea con menos de 6 espacios.
+    const rest = lock.slice(body)
+    const endRel = rest.search(/\n(?! {6})/)
+    const end = endRel < 0 ? lock.length : body + endRel + 1
+    const block = lock.slice(body, end)
+    if (block.includes(`      '${name}':\n`) || block.includes(`      ${name}:\n`)) continue
+    const entry = `      '${name}':\n        specifier: workspace:*\n        version: link:../../${path}\n`
+    // Antes de la primera entrada que va detrás en orden alfabético.
+    const keys = [...block.matchAll(/^ {6}'?([^'\n:]+(?::[^'\n]+)?)'?:\n/gm)]
+    const after = keys.find(match => (match[1] ?? '').localeCompare(name) > 0)
+    const at = after === undefined ? end : body + (after.index ?? 0)
+    lock = lock.slice(0, at) + entry + lock.slice(at)
+  }
+  tx.write(lockFile, lock)
+
+  // Activado en la composición del escritorio (bundle dsh-web-app).
+  let rows = tx.read(bundle)
+  if (!rows.includes('browser-use-playwright-mcp')) {
+    rows = rows.trimEnd() + '\n\n' + [
+      '# Local build (dpseek-local-updater): a real browser for the agent. Playwright MCP',
+      '# drives the Windows Edge headless with an in-memory profile; the model reads pages as',
+      '# accessibility snapshots, which a text-only local model handles.',
+      '- insert:',
+      '    - id: browser-use',
+      "      name: '@deepseek-ai/dsh-browser-use'",
+      '    - id: browser-use-playwright-mcp',
+      "      name: '@deepseek-ai/dsh-experimental-browser-use-playwright-mcp'",
+      '      config:',
+      '        mode: launch',
+      '        headless: true',
+      "        executablePath: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'",
+      '',
+    ].join('\n')
+    tx.write(bundle, rows)
+  }
+})
+
 // ── 33. El selector de modelo, dentro de la barra ───────────────────────────────────
 // El botón del selector es un chip con el modelo y el contexto («Qwen3.6 · 128K»): la
 // rueda del ratón encima cambia el contexto, y al pulsarlo no se abre el menú flotante

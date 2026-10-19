@@ -274,6 +274,20 @@ Lo escribe el **modelo del chat**, en su misma variante de contexto: Ollama no l
 recarga y, medido, el siguiente mensaje tarda lo mismo que sin usar el botón (unos 2–5 s
 la sugerencia con Qwen3.6-35B; el prompt de un documento, unos 5–10 s).
 
+## Navegador del agente
+
+La app de DeepSeek trae un proveedor de navegador (Playwright MCP), pero la versión
+empaquetada no lo incluía: el agente solo tenía `web_fetch`, que baja el HTML como texto y no
+puede iniciar sesión, pulsar botones ni ver lo que una web dibuja con JavaScript. Ahora va en
+la app y se activa solo: el agente abre páginas, las lee como un árbol de texto (botones,
+campos y textos con su referencia), rellena formularios, hace clic y espera a que carguen,
+con el **Edge de Windows** sin ventana y un perfil en memoria (no guarda sesiones).
+
+Probado con una web local cuyo formulario y datos solo existen con JavaScript: el agente
+entró, inició sesión y leyó el saldo y los movimientos en unos 90 s (con Qwen3.6-35B).
+Ojo: lo que el agente escribe en un formulario (también una contraseña) queda en el
+registro del chat; para cuentas reales, mejor iniciar sesión tú.
+
 ## Contexto de cada chat
 
 El selector de modelo de la barra es un **chip con el modelo y el contexto**
@@ -518,6 +532,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | El esfuerzo de razonamiento como un cerebro en la barra, sin la fila «Effort» del selector (opcional) | `packages/client/ui-model-selection` (`ModelSelect.tsx`) + [`sistema/contexto/LocalThinkButton.tsx`](sistema/contexto/LocalThinkButton.tsx) |
 | El selector de modelo como chip («Qwen3.6 · 128K», la rueda cambia el contexto) que abre una fila de modelos dentro de la barra (opcional) | `packages/client/ui-model-selection` (`ModelSelect.tsx`) + [`sistema/contexto/LocalModelDrawer.tsx`](sistema/contexto/LocalModelDrawer.tsx) |
 | La barra lateral se esconde por debajo de 760 px de ventana, no de 1024 (opcional) | `packages/client/ui-layout` (`columns.ts`) |
+| Un navegador de verdad para el agente: Playwright MCP con Edge, incluido en la app empaquetada (opcional) | `apps/cli/package.json`, `pnpm-lock.yaml`, `packages/bundle/web-app/cordis.patch.yml` |
 | Prueba de arranque antes de publicar | [`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs) en el workflow |
 
 La app va en inglés (o en chino), como la oficial: no se añade ningún idioma.
