@@ -3437,9 +3437,10 @@ optional('la app arranca con Windows, en la bandeja', (tx) => {
       + '  // Local build: start with Windows, hidden in the tray, so scheduled tasks run without opening the app.\n'
       + "  let localHiddenStart = process.argv.includes('--hidden')\n"
       + '  // Only the installed copy registers itself (not test copies started with their own profile).\n'
+      + '  // The registry value needs an explicit name: the app sets no AppUserModelId, and without one nothing is written.\n'
       + "  if (app.isPackaged && process.platform === 'win32' && !process.argv.some(arg => arg.startsWith('--user-data-dir'))\n"
       + '    && /\\\\AppData\\\\Local\\\\Programs\\\\/i.test(process.execPath)) {\n'
-      + "    try { app.setLoginItemSettings({ openAtLogin: true, args: ['--hidden'] }) } catch (error) { console.warn('local login item:', error) }\n"
+      + "    try { app.setLoginItemSettings({ openAtLogin: true, args: ['--hidden'], name: 'DeepSeek Harness' }) } catch (error) { console.warn('local login item:', error) }\n"
       + '  }\n',
     "process.argv.includes('--hidden')")
   tx.replace(main, '    if (activate) window.show()\n    else window.showInactive()\n',
