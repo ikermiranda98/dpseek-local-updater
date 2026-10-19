@@ -3200,6 +3200,36 @@ optional('la barra lateral se esconde más tarde al estrechar la ventana', (tx) 
     'SIDEBAR_AUTO_COLLAPSE = 760')
 })
 
+// ── 36. El arranque reintenta la entrada a la interfaz ──────────────────────────────
+// Recién encendido el PC o recién instalada una versión, la app fallaba durante unos minutos
+// con «desktop welcome: Web authentication failed»: el Host ya ha dado la entrada (303) pero
+// aún no sirve la página, y la app la pedía una sola vez. Ahora la pide durante 30 s antes de
+// rendirse, y el aviso dice qué respondió el Host.
+
+optional('el arranque reintenta la entrada a la interfaz', (tx) => {
+  const welcome = join(repo, 'apps', 'desktop', 'src', 'welcome-backend.ts')
+  tx.replace(welcome,
+    [
+      "  const authenticated = await send(authenticatedUrl, { credentials: 'include' })",
+      '  await authenticated.body?.cancel()',
+      "  if (!authenticated.ok) throw new Error('desktop welcome: Web authentication failed')",
+    ].join('\n'),
+    [
+      '  // Local build: a Host that has just started (cold boot, freshly installed files) may hand out the cookie',
+      '  // before it serves the page; ask again for a while instead of failing the whole launch.',
+      '  let status = 0',
+      '  for (let attempt = 0; ; attempt++) {',
+      "    const authenticated = await send(authenticatedUrl, { credentials: 'include' })",
+      '    await authenticated.body?.cancel()',
+      '    if (authenticated.ok) break',
+      '    status = authenticated.status',
+      '    if (attempt >= 30) throw new Error(`desktop welcome: Web authentication failed (HTTP ${String(status)})`)',
+      '    await new Promise(resolve => setTimeout(resolve, 1000))',
+      '  }',
+    ].join('\n'),
+    'desktop welcome: Web authentication failed (HTTP')
+})
+
 console.log('\nCambios aplicados:')
 for (const line of done) console.log(`  - ${line}`)
 if (omitted.length > 0) {
