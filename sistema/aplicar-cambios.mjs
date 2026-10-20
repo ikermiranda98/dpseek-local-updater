@@ -3443,6 +3443,20 @@ optional('la app arranca con Windows, en la bandeja', (tx) => {
       + "    try { app.setLoginItemSettings({ openAtLogin: true, args: ['--hidden'], name: 'DeepSeek Harness' }) } catch (error) { console.warn('local login item:', error) }\n"
       + '  }\n',
     "process.argv.includes('--hidden')")
+  // El acceso directo del menú Inicio, a esta copia: Windows lo reasigna a otro .exe con el mismo nombre (una compilación
+  // de la app en otra carpeta) si el destino falta un momento, por ejemplo al reinstalar, y se abría esa otra copia.
+  const loginItem = "    try { app.setLoginItemSettings({ openAtLogin: true, args: ['--hidden'], name: 'DeepSeek Harness' }) } catch (error) { console.warn('local login item:', error) }\n"
+  tx.replace(main, loginItem, loginItem
+    + '    // The Start menu shortcut points to this copy: Windows retargets it to another exe with the same name (a build of\n'
+    + '    // the app elsewhere) when the target is missing for a moment, e.g. while reinstalling.\n'
+    + '    try {\n'
+    + "      const link = join(process.env.APPDATA ?? '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'DeepSeek Harness.lnk')\n"
+    + '      const current = shell.readShortcutLink(link)\n'
+    + '      if (current.target.toLowerCase() !== process.execPath.toLowerCase()) {\n'
+    + "        shell.writeShortcutLink(link, 'update', { target: process.execPath, cwd: join(process.execPath, '..'), icon: process.execPath, iconIndex: 0 })\n"
+    + '      }\n'
+    + '    } catch { /* without the shortcut there is nothing to fix */ }\n',
+    'The Start menu shortcut points to this copy')
   tx.replace(main, '    if (activate) window.show()\n    else window.showInactive()\n',
     '    // Local build: a start at Windows sign-in stays in the tray; the next show (tray, relaunch) is normal.\n'
       + '    if (localHiddenStart) localHiddenStart = false\n'

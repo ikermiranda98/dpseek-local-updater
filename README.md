@@ -363,7 +363,9 @@ La app se abre sola al iniciar sesión en Windows, oculta en la bandeja (`--hidd
 tareas programadas (`schedule_create`: a una hora, cada día, cada semana o con cron) se
 cumplen aunque no la hayas abierto. Al abrirla tú, se enseña como siempre. Con el control de
 Windows, una tarea programada puede, por ejemplo, abrir otra app y escribir en ella. Se puede
-quitar del inicio en el Administrador de tareas › Aplicaciones de arranque.
+quitar del inicio en el Administrador de tareas › Aplicaciones de arranque. Al arrancar, la app
+comprueba también que su acceso directo del menú Inicio apunta a ella: Windows lo reasigna a
+otra copia de la app con el mismo nombre si falta un momento (por ejemplo al reinstalar).
 
 ## Esfuerzo de razonamiento por defecto
 
