@@ -17,7 +17,7 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceChangedFile } from '@deepseek-ai/dsh-workspace-changes/types'
 import { changesReviewAddress } from '../changes.ts'
-import { liveSnapshot, onLiveOpen, subscribeLive, type LiveEdit, type LiveFile } from './local-live-store.ts'
+import { liveChoice, liveSnapshot, onLiveOpen, subscribeLive, type LiveEdit, type LiveFile } from './local-live-store.ts'
 import css from './local-live-code.module.css'
 
 /** Tipo de pestaña y su identidad en el sistema de pestañas. */
@@ -48,6 +48,11 @@ export function setLocalLive(ctx: Context): void {
     { name: 'sidebar.right.pane.tab', key: LIVE_ID },
     LiveCodeTab,
   )), 'local: live code body')
+  // El título de la pestaña lleva su icono, como las demás («Files», la terminal).
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register(
+    { name: 'sidebar.right.pane.tab.title', key: LIVE_ID },
+    LiveCodeTitle,
+  )), 'local: live code title')
   ctx.effect(() => onLiveOpen((sessionId) => {
     const right = ctx.sidebarRight as typeof ctx.sidebarRight & {
       openTabIn?: (sessionId: SessionId, kind: string) => void
@@ -59,6 +64,11 @@ export function setLocalLive(ctx: Context): void {
       console.warn('local live code:', error)
     }
   }), 'local: live code open')
+}
+
+/** El icono de código y «Live code» en la pestaña. */
+function LiveCodeTitle(): ReactNode {
+  return <><IconCodeOutlineRegular className={css.titleIcon} />Live code</>
 }
 
 /** El fichero que conviene ver: el que se está escribiendo o, si no, el último. */
@@ -132,6 +142,9 @@ function LiveCodeTab({ sessionId, useTabInfo }: PropsRuntime<'sidebar.right.pane
   // Una pestaña elegida a mano deja de seguir al modelo hasta que pulses «Follow» o empiece otro turno.
   const turn = live?.turn
   useEffect(() => { setChosen(undefined) }, [turn])
+  // Un fichero pulsado en la lista de la flecha, en el chat: se enseña ese.
+  const choice = useSyncExternalStore(subscribeLive, () => liveChoice(sessionId))
+  useEffect(() => { if (choice !== undefined) setChosen(choice.path) }, [choice?.at])
   const following = chosen === undefined || !files.some((file) => file.path === chosen)
   const path = following ? currentPath(files) : chosen
   const file = files.find((entry) => entry.path === path)

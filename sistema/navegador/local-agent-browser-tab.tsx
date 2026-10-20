@@ -3,7 +3,8 @@
  *
  * Sustituye a la pestaña «Browser» de la app (mismo tipo, `browser`): los enlaces del chat se abren aquí. Enseña en
  * directo el Edge que usa el agente (fotogramas que da el Host, local-agent-browser.ts, en cuanto la página cambia) con
- * su barra: atrás, adelante, recargar y dirección editable, con una etiqueta de quién lo maneja («Agent» o «You»).
+ * su barra: atrás, adelante, recargar, «Fix the view» (vuelve a la página de verdad, no a una ventana emergente, con el
+ * tamaño del panel) y dirección editable, con una etiqueta de quién lo maneja («Agent» o «You»).
  *
  * El usuario usa la página directamente: al pulsar, desplazar o escribir en ella toma el control (borde ámbar, «You» y
  * una píldora «You're browsing — the agent waits · Resume agent»); mientras, las acciones del agente en el navegador
@@ -21,7 +22,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExter
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import {
-  GuideArtworkBrowser, IconChevronDownOutlineRegular, IconChevronLeftOutlineRegular, IconChevronRightOutlineRegular,
+  GuideArtworkBrowser, IconChevronDownOutlineRegular, IconGlobeOutlineRegular, IconChevronLeftOutlineRegular, IconChevronRightOutlineRegular,
   IconRefreshOutlineRegular, MenuSurface, SegmentedControl, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
@@ -99,6 +100,11 @@ export function setLocalAgentBrowser(ctx: Context): void {
     { name: 'sidebar.right.pane.tab', key: BROWSER_ID },
     BrowserTab,
   )), 'local: shared browser body')
+  // El título de la pestaña lleva su icono, como las demás («Files», la terminal).
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register(
+    { name: 'sidebar.right.pane.tab.title', key: BROWSER_ID },
+    BrowserTitle,
+  )), 'local: shared browser title')
   ctx.effect(() => onBrowserOpen((sessionId) => {
     const right = ctx.sidebarRight as typeof ctx.sidebarRight & {
       openTabIn?: (sessionId: SessionId, kind: string) => void
@@ -116,6 +122,11 @@ export function setLocalAgentBrowser(ctx: Context): void {
   }
   document.addEventListener('visibilitychange', lock)
   ctx.effect(() => () => { document.removeEventListener('visibilitychange', lock) }, 'local: shared browser lock')
+}
+
+/** El globo y «Browser» en la pestaña. */
+function BrowserTitle(): ReactNode {
+  return <><IconGlobeOutlineRegular className={css.titleIcon} />Browser</>
 }
 
 const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
@@ -338,6 +349,23 @@ function BrowserTab({ useTabInfo, sessionId }: PropsRuntime<'sidebar.right.pane.
     setAddress(null)
     view.current?.focus()
   }
+  // «Fix the view»: la página de verdad (no una ventana emergente), con el tamaño del panel y un fotograma nuevo.
+  const [repairing, setRepairing] = useState(false)
+  const repair = async (): Promise<void> => {
+    if (localCtx === undefined) return
+    setRepairing(true)
+    setError(null)
+    try {
+      unwrap(await localCtx.remote.session.localAgentBrowserRepair({}))
+      sentSize.current = ''
+      lastSent.current = Date.now()
+      void localCtx.remote.session.localAgentBrowserViewport({ width: area.width, height: area.height, dpr: area.dpr }).catch(() => undefined)
+    } catch (reason) {
+      setError(messageOf(reason))
+    } finally {
+      setRepairing(false)
+    }
+  }
   // Los enlaces del chat llegan como navegación de la pestaña.
   const revision = tab.navigation.revision
   const wantedUrl = (tab.navigation.params as { url?: unknown } | undefined)?.url
@@ -464,6 +492,10 @@ function BrowserTab({ useTabInfo, sessionId }: PropsRuntime<'sidebar.right.pane.
         <Tooltip label="Reload" side="bottom" delayMs={500}>
           <button type="button" className={css.icon} aria-label="Reload" disabled={!running}
             onClick={() => { void navigate({ action: 'reload' }) }}><IconRefreshOutlineRegular /></button>
+        </Tooltip>
+        <Tooltip label="Fix the view" side="bottom" delayMs={500}>
+          <button type="button" className={css.icon} aria-label="Fix the view" disabled={!running || repairing} data-browser-repair
+            onClick={() => { void repair() }}><FitIcon /></button>
         </Tooltip>
         <form className={css.address} onSubmit={submit} data-who={who}>
           {who !== undefined && <span className={css.who} data-who={who}>{who === 'you' ? 'You' : 'Agent'}</span>}
@@ -749,6 +781,16 @@ function ShieldIcon(): ReactNode {
   return (
     <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M10 2.5l6 2.2v4.6c0 3.9-2.6 6.6-6 8.2-3.4-1.6-6-4.3-6-8.2V4.7z" /><path d="M7.5 10l1.8 1.8 3.4-3.6" />
+    </svg>
+  )
+}
+
+/** Cuatro esquinas alrededor de un recuadro: ajustar la vista. */
+function FitIcon(): ReactNode {
+  return (
+    <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 7V4.5A1.5 1.5 0 0 1 4.5 3H7M13 3h2.5A1.5 1.5 0 0 1 17 4.5V7M17 13v2.5a1.5 1.5 0 0 1-1.5 1.5H13M7 17H4.5A1.5 1.5 0 0 1 3 15.5V13" />
+      <rect x="7" y="7" width="6" height="6" rx="1" />
     </svg>
   )
 }

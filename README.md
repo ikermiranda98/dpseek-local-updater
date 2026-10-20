@@ -140,8 +140,9 @@ Como en Hermes Agent Desktop:
 ## Ver el código que escribe y deshacerlo
 
 - Cuando la IA escribe o edita ficheros, la línea de estado del turno («Deep diving…»
-  mientras trabaja, «Completed in…» al acabar) lleva **`</> View code · N files`**.
-  Abre a la derecha la pestaña **Live code**: una pestaña por fichero, con colores
+  mientras trabaja, «Completed in…» al acabar) lleva el icono de código (late mientras
+  escribe) y una flecha que despliega los ficheros del turno; pulsar uno lo abre en la
+  pestaña. El icono abre a la derecha la pestaña **Live code**: una pestaña por fichero, con colores
   y números de línea; las ediciones se ven como diferencias (rojo lo quitado, verde
   lo añadido). «Follow» la mantiene en el fichero que se está escribiendo. El panel
   no se abre solo.
@@ -288,7 +289,8 @@ perfil (`~/.dsh/storages/agent-browser`): las sesiones que inicia se quedan guar
 app, que los enlaces del chat abren) es ahora ese mismo Edge, en directo: **atrás**, **adelante**,
 **recargar** y la **dirección** editable (escribe una web o una búsqueda e Intro), con una etiqueta
 que dice quién lo maneja: **Agent** o **You**. Si la abres antes de que el agente use el
-navegador, el Edge se arranca al escribir una dirección, y luego el agente sigue en él.
+navegador, el Edge se arranca al escribir una dirección, y luego el agente sigue en él. Las ventanas emergentes que abren algunas webs (a veces diminutas) no tapan la página; si la vista se
+queda rara, **Fix the view** (junto a recargar) vuelve a la página buena, con el tamaño del panel.
 
 **Lo que hace, a la vista.** En el chat, la línea de estado del turno lleva solo un **globo**
 (abre la pestaña) y una **flecha** que despliega el paso a paso («Opened…», «Clicked Botón
@@ -547,6 +549,12 @@ repetirlo en [`sistema/rendimiento/`](sistema/rendimiento)):
 
 ## Otras mejoras pequeñas
 
+- **La zona de trabajo como una tarjeta flotante:** el chat y el panel derecho flotan sobre el
+  fondo con un margen a la derecha y abajo, las cuatro esquinas redondeadas (el mismo radio
+  de la app) y una sombra suave, con los mismos colores. El panel derecho proyecta una sombra
+  difusa sobre el chat y lleva un filo de luz, para que se distingan también en oscuro; a
+  pantalla completa mantiene la misma forma. Las pestañas «Live code» y «Browser» llevan su
+  icono, como las demás, y sus cabeceras están alineadas con la del chat.
 - **Aviso si Ollama no responde:** encima del cuadro de texto, «Ollama isn't running, so
   the AI can't answer», con **Open Ollama** (abre su aplicación) y **Check again**. Se
   quita solo cuando Ollama vuelve.
@@ -592,7 +600,8 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Editar mensajes y regenerar respuestas, con versiones (opcional) | `packages/client/ui-chat`; código en [`sistema/regenerar/`](sistema/regenerar) |
 | Aviso de Windows al terminar una respuesta (opcional) | `packages/client/ui-workspace`; código en [`sistema/avisos/`](sistema/avisos) |
 | No volver a ofrecer una versión retirada (opcional) | `apps/desktop/src/update-coordinator.ts` (`local-skip-version.ts`) |
-| Código de cada turno a la derecha («View code») y deshacer por fichero (opcional) | `packages/client/ui-chat`, `ui-deliverables` y `packages/api/session-controller` (`localUndoTurnFile`); código en [`sistema/codigo-vivo/`](sistema/codigo-vivo) |
+| Código de cada turno a la derecha (icono y flecha con los ficheros en la línea de estado) y deshacer por fichero (opcional) | `packages/client/ui-chat`, `ui-deliverables` y `packages/api/session-controller` (`localUndoTurnFile`); código en [`sistema/codigo-vivo/`](sistema/codigo-vivo) |
+| La zona de trabajo como una tarjeta flotante (margen, esquinas redondeadas, sombra y separación chat/panel) (opcional) | `packages/client/ui-layout/src/client/AppFrame.module.css` |
 | Subchats: «Open in subchat», anidados en la barra lateral y sugerencia junto al medidor de contexto (opcional) | `packages/client/ui-chat`, `ui-workspace`, `ui-conversation` y `packages/api/session-controller` (`localStartSubchat`); código en [`sistema/subchats/`](sistema/subchats) |
 | Actualizar Ollama desde la app, en el aviso de actualizaciones de abajo a la izquierda (opcional) | `packages/client/ui-settings-general` (`LocalUpdatesIndicator.tsx`) + `packages/client/ui-model-selection` (`local-ollama-bridge.ts`) + `packages/api/session-controller` (`local-ollama-update.ts`) |
 | Cursor normal (flecha) en toda la interfaz; la mano solo en los enlaces (opcional) | estilos `.css` de `packages/client`, `packages/extensions` y `apps/desktop/renderer` |

@@ -48,3 +48,6 @@
 .undo[data-state='confirm'] { color: var(--dsw-alias-state-error-primary); }
 .undo[data-state='done'] { color: var(--dsw-alias-file-diff-added-marker); }
 .undo:disabled { opacity: 0.6; }
+
+/* El icono del título de la pestaña, como en la pestaña «Browser» original de la app. */
+.titleIcon { flex: 0 0 auto; margin-right: 4px; }

@@ -52,6 +52,8 @@ interface LiveStore {
   readonly listeners: Set<() => void>
   readonly openers: Set<(sessionId: string) => void>
   browserOpeners?: Set<(sessionId: string) => void>
+  /** El último fichero que se pidió ver desde el chat (la lista de la flecha de «Live code»). */
+  liveChoice?: { readonly sessionId: string; readonly path: string; readonly at: number }
 }
 
 const KEY = Symbol.for('dpseek-local-updater.live-code')
@@ -92,6 +94,18 @@ export function subscribeLive(listener: () => void): () => void {
 /** El chat pide abrir la pestaña: el modelo ha empezado a escribir un fichero. */
 export function requestLiveOpen(sessionId: string): void {
   for (const opener of store.openers) opener(sessionId)
+}
+
+/** El chat pide abrir la pestaña «Live code» en un fichero concreto. */
+export function requestLiveFile(sessionId: string, path: string): void {
+  store.liveChoice = { sessionId, path, at: Date.now() }
+  for (const listener of store.listeners) listener()
+  requestLiveOpen(sessionId)
+}
+
+/** @returns el último fichero que se pidió ver en ese chat, si lo hay. */
+export function liveChoice(sessionId: string): { readonly path: string; readonly at: number } | undefined {
+  return store.liveChoice?.sessionId === sessionId ? store.liveChoice : undefined
 }
 
 /** @returns cómo dejar de atender las peticiones de abrir la pestaña. */

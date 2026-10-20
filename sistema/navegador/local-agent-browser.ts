@@ -26,6 +26,7 @@ interface AgentBrowserState {
 }
 
 interface CdpTarget {
+  readonly id: string
   readonly type: string
   readonly url: string
   readonly title: string
@@ -497,9 +498,30 @@ async function cdp<T>(url: string, method: string, params: Record<string, unknow
 }
 
 /** La página que conviene enseñar: la primera con contenido (Edge las lista de la más reciente a la más antigua). */
-function currentPage(targets: readonly CdpTarget[]): CdpTarget | undefined {
+function currentPage(targets: readonly CdpTarget[], popups: ReadonlySet<string>): CdpTarget | undefined {
   const pages = targets.filter(target => target.type === 'page' && target.webSocketDebuggerUrl !== undefined)
-  return pages.find(page => !page.url.startsWith('about:blank') && !page.url.startsWith('edge://')) ?? pages[0]
+  const content = pages.filter(page => !page.url.startsWith('about:blank') && !page.url.startsWith('edge://'))
+  // Las ventanas que abre una web (a veces diminutas, de 360 × 50) no tapan a la página de verdad.
+  return content.find(page => !popups.has(page.id)) ?? content[0] ?? pages[0]
+}
+
+/** Ventanas emergentes: páginas abiertas por otra página (las pestañas normales no tienen quien las abra). */
+let popupCache: { at: number; ids: ReadonlySet<string> } | undefined
+
+async function popupIds(state: AgentBrowserState): Promise<ReadonlySet<string>> {
+  if (popupCache !== undefined && Date.now() - popupCache.at < 2000) return popupCache.ids
+  const ids = new Set<string>()
+  const socket = await browserSocket(state)
+  if (socket !== undefined) {
+    try {
+      const { targetInfos } = await cdp<{ targetInfos: readonly { targetId: string; type: string; openerId?: string }[] }>(socket, 'Target.getTargets')
+      for (const target of targetInfos) if (target.type === 'page' && target.openerId !== undefined) ids.add(target.targetId)
+    } catch {
+      // Sin la lista, ninguna cuenta como emergente.
+    }
+  }
+  popupCache = { at: Date.now(), ids }
+  return ids
 }
 
 /** La última página vista: los gestos seguidos (mover el ratón) no preguntan a Edge cada vez cuál es. */
@@ -515,7 +537,7 @@ async function livePage(state = readState(), fresh = true): Promise<{ page: CdpT
   }
   if (state === undefined) return undefined
   const targets = await json<CdpTarget[]>(state, '/json/list')
-  const page = targets === undefined ? undefined : currentPage(targets)
+  const page = targets === undefined ? undefined : currentPage(targets, await popupIds(state))
   if (page?.webSocketDebuggerUrl === undefined) return undefined
   const live = await sessionFor(page.webSocketDebuggerUrl)
   await prepare(live).catch(() => undefined)
@@ -613,6 +635,28 @@ export async function localAgentBrowserInput(input: LocalAgentBrowserInput): Pro
     type, x, y, button: input.button, buttons: input.buttons, clickCount: input.clickCount, modifiers: input.modifiers,
   })
   return { sent: true }
+}
+
+/**
+ * «Fix the view»: vuelve a elegir la página que se ve (no una ventana emergente), le quita y le vuelve a poner el
+ * tamaño del panel con una conexión nueva y toma un fotograma nuevo.
+ * @returns la dirección de la página que se ve ahora.
+ */
+export async function localAgentBrowserRepair(): Promise<{ readonly url: string }> {
+  popupCache = undefined
+  seenPage = undefined
+  const old = session
+  session = undefined
+  old?.close()
+  const current = await livePage(readState())
+  if (current === undefined) return { url: '' }
+  const { live, page } = current
+  live.emulationKey = ''
+  live.castKey = ''
+  await live.call('Emulation.clearDeviceMetricsOverride').catch(() => undefined)
+  await prepare(live).catch(() => undefined)
+  await live.capture().catch(() => undefined)
+  return { url: page.url }
 }
 
 /** Lo escrito en la barra de dirección: una web (con o sin https://) o, si no lo parece, una búsqueda. */

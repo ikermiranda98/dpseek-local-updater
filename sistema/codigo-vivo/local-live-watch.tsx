@@ -7,8 +7,8 @@
  * se leen unas siete veces por segundo.
  *
  * El panel no se abre solo: la línea de estado del turno («Deep diving…» y
- * «Completed in…») lleva el botón «View code» cuando el turno escribe ficheros, y el globo del navegador (con su
- * paso a paso en una lista desplegable) cuando usa el navegador.
+ * «Completed in…») lleva el icono de «Live code», con la lista de ficheros en una flecha, cuando el turno escribe
+ * ficheros, y el globo del navegador, con su paso a paso en otra flecha, cuando usa el navegador.
  */
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
@@ -19,7 +19,7 @@ import {
 import type { ToolCallBlock } from '../contract/snapshot.ts'
 import type { UseChat } from '../contract/slots.ts'
 import {
-  browserStepText, liveSnapshot, publishLive, requestBrowserOpen, requestLiveOpen, subscribeLive,
+  browserStepText, liveSnapshot, publishLive, requestBrowserOpen, requestLiveFile, requestLiveOpen, subscribeLive,
   type LiveBrowserStep, type LiveEdit, type LiveFile,
 } from './local-live-store.ts'
 import css from './local-live-watch.module.css'
@@ -173,49 +173,28 @@ export function LocalLiveSession({ sessionId, children }: { sessionId: string; c
 }
 
 /**
- * «View code» en la línea de estado del turno: abre la pestaña «Live code».
- * @param props - turno de la línea (sin él, el que está en marcha) y dónde va.
- * @returns el botón, o nada si ese turno no ha escrito ficheros.
+ * Un icono y una flecha en una misma pastilla, en la línea de estado del turno: el icono abre su pestaña del panel
+ * derecho y la flecha despliega una lista. La lista mide el hueco que tiene (hasta la barra de escribir por abajo y
+ * hasta la cabecera por arriba), se abre hacia donde cabe y ajusta su altura; si no cabe entera, se desplaza por dentro.
  */
-export function LocalLiveCodeButton({ turn, placement }: { turn?: number; placement: 'running' | 'process' }) {
-  const sessionId = useContext(LiveSession)
-  const live = useSyncExternalStore(subscribeLive, () => sessionId === undefined ? undefined : liveSnapshot(sessionId))
-  if (sessionId === undefined || live === undefined || live.files.length === 0) return null
-  if (turn === undefined ? !live.running : live.turn !== turn) return null
-  const writing = live.files.some((file) => file.edits.some((edit) => edit.status === 'writing'))
-  const count = live.files.length
-  return (
-    <Tooltip label="Open the code in the right panel" side="top" delayMs={500}>
-      <button type="button" className={css.button} data-placement={placement} data-live-code-button
-        onClick={(event) => {
-          // Dentro de la línea «Completed in…», que pliega el turno: el clic es solo nuestro.
-          event.stopPropagation()
-          requestLiveOpen(sessionId)
-        }}>
-        <LinkIconMedium kind="code" className={css.icon} />
-        <span>{writing ? 'Writing code' : 'View code'}</span>
-        <span className={css.count}>{count === 1 ? '1 file' : `${String(count)} files`}</span>
-      </button>
-    </Tooltip>
-  )
-}
-
-/**
- * El navegador en la línea de estado del turno: el globo abre la pestaña «Browser» y la flecha de al lado despliega el
- * paso a paso del agente. La lista mide el hueco que tiene (hasta la barra de escribir por abajo y hasta la cabecera por
- * arriba), se abre hacia donde cabe y ajusta su altura; si no cabe entera, se desplaza por dentro.
- * @param props - turno de la línea (sin él, el que está en marcha) y dónde va.
- * @returns los dos botones, o nada si ese turno no ha usado el navegador.
- */
-export function LocalBrowserButton({ turn, placement }: { turn?: number; placement: 'running' | 'process' }) {
-  const sessionId = useContext(LiveSession)
-  const live = useSyncExternalStore(subscribeLive, () => sessionId === undefined ? undefined : liveSnapshot(sessionId))
+function TurnIconMenu({ placement, icon, openLabel, onOpen, busy, menuLabel, title, count, data, children }: {
+  placement: 'running' | 'process'
+  icon: ReactNode
+  openLabel: string
+  onOpen: () => void
+  busy: boolean
+  menuLabel: string
+  title: string
+  count: number
+  /** Atributos de datos de la pastilla y de sus botones (para las pruebas). */
+  data: { group: string; open: string; list: string }
+  children: (close: () => void) => ReactNode
+}) {
   const [open, setOpen] = useState(false)
   const group = useRef<HTMLSpanElement | null>(null)
   const panel = useRef<HTMLDivElement | null>(null)
   const list = useRef<HTMLOListElement | null>(null)
-  const [place, setPlace] = useState<StepsPlacement | null>(null)
-  const steps = live?.browser ?? []
+  const [place, setPlace] = useState<MenuPlacement | null>(null)
   useDismissOnOutsidePointer(group, open, setOpen, panel)
   useLayoutEffect(() => {
     if (!open) {
@@ -223,7 +202,7 @@ export function LocalBrowserButton({ turn, placement }: { turn?: number; placeme
       return
     }
     const measure = (): void => {
-      if (group.current !== null && panel.current !== null) setPlace(placeSteps(group.current, panel.current))
+      if (group.current !== null && panel.current !== null) setPlace(placeMenu(group.current, panel.current))
     }
     measure()
     const onKey = (event: KeyboardEvent): void => { if (event.key === 'Escape') setOpen(false) }
@@ -235,44 +214,34 @@ export function LocalBrowserButton({ turn, placement }: { turn?: number; placeme
       window.removeEventListener('scroll', measure, true)
       document.removeEventListener('keydown', onKey)
     }
-  }, [open, steps.length])
-  // El último paso, siempre a la vista.
+  }, [open, count])
+  // Lo último, siempre a la vista.
   useLayoutEffect(() => {
     if (list.current !== null) list.current.scrollTop = list.current.scrollHeight
-  }, [open, steps.length, place?.maxHeight])
-  if (sessionId === undefined || live === undefined || steps.length === 0) return null
-  if (turn === undefined ? !live.running : live.turn !== turn) return null
-  const busy = live.running && steps.at(-1)?.status === 'running'
+  }, [open, count, place?.maxHeight])
   return (
-    <span ref={group} className={css.browserGroup} data-placement={placement} data-browser-button
+    <span ref={group} className={css.iconGroup} data-placement={placement} {...{ [data.group]: '' }}
       // Dentro de la línea «Completed in…», que pliega el turno: los clics son solo nuestros.
       onClick={(event) => { event.stopPropagation() }}>
-      <Tooltip label="Open the browser" side="top" delayMs={500} portal>
-        <button type="button" className={css.groupButton} aria-label="Open the browser" data-browser-open
-          onClick={() => { requestBrowserOpen(sessionId) }}>
-          <IconGlobeOutlineRegular className={css.globe} data-busy={busy || undefined} />
+      <Tooltip label={openLabel} side="top" delayMs={500} portal>
+        <button type="button" className={css.groupButton} aria-label={openLabel} data-busy={busy || undefined} {...{ [data.open]: '' }}
+          onClick={onOpen}>
+          {icon}
         </button>
       </Tooltip>
-      <Tooltip label={open ? 'Hide the steps' : "The agent's steps"} side="top" delayMs={500} disabled={open} portal>
-        <button type="button" className={css.groupButton} aria-label="The agent's steps" aria-expanded={open} data-browser-steps
+      <Tooltip label={menuLabel} side="top" delayMs={500} disabled={open} portal>
+        <button type="button" className={css.groupButton} aria-label={menuLabel} aria-expanded={open} data-list-button {...{ [data.list]: '' }}
           onClick={() => { setOpen(value => !value) }}>
           <IconChevronDownOutlineRegular className={css.chevron} data-up={place?.up === true || undefined} />
         </button>
       </Tooltip>
       {open && createPortal(
-        <MenuSurface ref={panel} className={css.stepsMenu} role="dialog" aria-label="The agent's steps in the browser"
+        <MenuSurface ref={panel} className={css.stepsMenu} role="dialog" aria-label={menuLabel}
           style={place === null
             ? { visibility: 'hidden', left: 0, top: 0 }
             : { left: place.left, top: place.top, bottom: place.bottom, maxHeight: place.maxHeight }}>
-          <div className={css.stepsHead}><span>Agent steps</span><span>{String(steps.length)}</span></div>
-          <ol ref={list} className={css.stepsList}>
-            {steps.map(step => (
-              <li key={step.callId} className={css.step} data-status={step.status}>
-                <span className={css.stepDot} />
-                <span className={css.stepText}>{browserStepText(step)}</span>
-              </li>
-            ))}
-          </ol>
+          <div className={css.stepsHead}><span>{title}</span><span>{String(count)}</span></div>
+          <ol ref={list} className={css.stepsList}>{children(() => { setOpen(false) })}</ol>
         </MenuSurface>,
         document.body,
       )}
@@ -280,7 +249,73 @@ export function LocalBrowserButton({ turn, placement }: { turn?: number; placeme
   )
 }
 
-interface StepsPlacement {
+const fileStatus = (file: LiveFile): LiveEdit['status'] => file.edits.at(-1)?.status ?? 'done'
+const fileName = (path: string): string => path.split(/[\\/]/).at(-1) ?? path
+const fileFolder = (path: string): string => {
+  const parts = path.split(/[\\/]/)
+  return parts.length > 1 ? parts.slice(-3, -1).join('/') : ''
+}
+
+/**
+ * «Live code» en la línea de estado del turno: el icono abre la pestaña y la flecha lista los ficheros del turno
+ * (pulsar uno lo abre en la pestaña).
+ * @param props - turno de la línea (sin él, el que está en marcha) y dónde va.
+ * @returns los dos botones, o nada si ese turno no ha escrito ficheros.
+ */
+export function LocalLiveCodeButton({ turn, placement }: { turn?: number; placement: 'running' | 'process' }) {
+  const sessionId = useContext(LiveSession)
+  const live = useSyncExternalStore(subscribeLive, () => sessionId === undefined ? undefined : liveSnapshot(sessionId))
+  if (sessionId === undefined || live === undefined || live.files.length === 0) return null
+  if (turn === undefined ? !live.running : live.turn !== turn) return null
+  const writing = live.files.some((file) => file.edits.some((edit) => edit.status === 'writing'))
+  return (
+    <TurnIconMenu placement={placement} icon={<LinkIconMedium kind="code" className={css.icon} />}
+      openLabel="Open the code in the right panel" onOpen={() => { requestLiveOpen(sessionId) }} busy={writing}
+      menuLabel="Files written in this turn" title="Files" count={live.files.length}
+      data={{ group: 'data-live-code-button', open: 'data-live-code-open', list: 'data-live-code-files' }}>
+      {(close) => live.files.map((file) => (
+        <li key={file.path}>
+          <button type="button" className={css.fileRow} data-status={fileStatus(file)} title={file.path}
+            onClick={() => { close(); requestLiveFile(sessionId, file.path) }}>
+            <span className={css.stepDot} />
+            <span className={css.stepText}>{fileName(file.path)}</span>
+            <span className={css.fileFolder}>{fileFolder(file.path)}</span>
+          </button>
+        </li>
+      ))}
+    </TurnIconMenu>
+  )
+}
+
+/**
+ * El navegador en la línea de estado del turno: el globo abre la pestaña «Browser» y la flecha despliega el paso a
+ * paso del agente.
+ * @param props - turno de la línea (sin él, el que está en marcha) y dónde va.
+ * @returns los dos botones, o nada si ese turno no ha usado el navegador.
+ */
+export function LocalBrowserButton({ turn, placement }: { turn?: number; placement: 'running' | 'process' }) {
+  const sessionId = useContext(LiveSession)
+  const live = useSyncExternalStore(subscribeLive, () => sessionId === undefined ? undefined : liveSnapshot(sessionId))
+  const steps = live?.browser ?? []
+  if (sessionId === undefined || live === undefined || steps.length === 0) return null
+  if (turn === undefined ? !live.running : live.turn !== turn) return null
+  const busy = live.running && steps.at(-1)?.status === 'running'
+  return (
+    <TurnIconMenu placement={placement} icon={<IconGlobeOutlineRegular className={css.icon} />}
+      openLabel="Open the browser" onOpen={() => { requestBrowserOpen(sessionId) }} busy={busy}
+      menuLabel="The agent's steps" title="Agent steps" count={steps.length}
+      data={{ group: 'data-browser-button', open: 'data-browser-open', list: 'data-browser-steps' }}>
+      {() => steps.map(step => (
+        <li key={step.callId} className={css.step} data-status={step.status}>
+          <span className={css.stepDot} />
+          <span className={css.stepText}>{browserStepText(step)}</span>
+        </li>
+      ))}
+    </TurnIconMenu>
+  )
+}
+
+interface MenuPlacement {
   readonly left: number
   readonly top?: number
   readonly bottom?: number
@@ -296,7 +331,7 @@ const STEPS_COMFORT = 220
 const STEPS_MAX = 420
 
 /** Dónde va la lista: hacia abajo si cabe (hasta la barra de escribir), si no hacia donde haya más sitio. */
-function placeSteps(anchor: HTMLElement, panel: HTMLElement): StepsPlacement {
+function placeMenu(anchor: HTMLElement, panel: HTMLElement): MenuPlacement {
   const rect = anchor.getBoundingClientRect()
   let scroller: HTMLElement | null = anchor.parentElement
   while (scroller !== null && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement

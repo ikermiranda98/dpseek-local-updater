@@ -1,45 +1,12 @@
-/* «View code» en la línea de estado del turno (dpseek-local-updater). Discreto, con el azul del tema. */
-
-.button {
-  display: inline-flex;
-  flex: none;
-  gap: 5px;
-  align-items: center;
-  height: 24px;
-  margin-left: 10px;
-  padding: 0 8px;
-  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 35%, transparent);
-  border-radius: var(--dsw-radius-sm);
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);
-  color: var(--dsw-alias-state-business-primary);
-  font: var(--dsw-font-xs-13);
-  white-space: nowrap;
-  cursor: default;
-}
-
-.button:hover {
-  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent);
-}
-
-/* En «Completed in…» va a la derecha de la línea, que es entera un botón (plegar el turno). */
-.button[data-placement='process'] {
-  position: absolute;
-  top: 0;
-  right: 0;
-  margin-left: 0;
-}
+/* «Live code» y el navegador en la línea de estado del turno (dpseek-local-updater): un icono y una flecha en una
+   misma pastilla, discreta, con el azul del tema. */
 
 .icon {
   width: 14px;
   height: 14px;
 }
 
-.count {
-  color: var(--dsw-alias-label-tertiary);
-}
-
-/* El navegador en la línea de estado: solo el globo y una flecha, en una misma pastilla. */
-.browserGroup {
+.iconGroup {
   display: inline-flex;
   flex: none;
   align-items: stretch;
@@ -51,16 +18,21 @@
   background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);
 }
 
-.browserGroup[data-placement='process'] {
+.iconGroup + .iconGroup {
+  margin-left: 6px;
+}
+
+/* En «Completed in…» van a la derecha de la línea, que es entera un botón (plegar el turno). */
+.iconGroup[data-placement='process'] {
   position: absolute;
   top: 0;
   right: 0;
   margin-left: 0;
 }
 
-/* Con el navegador al lado, «View code» se aparta (la pastilla del navegador mide unos 52 px). */
-.button[data-placement='process']:has(+ .browserGroup[data-placement='process']) {
-  right: 60px;
+/* Dos pastillas (código y navegador): la primera se aparta lo que mide la segunda (unos 52 px) y un hueco. */
+.iconGroup[data-placement='process']:has(+ .iconGroup[data-placement='process']) {
+  right: 58px;
 }
 
 .groupButton {
@@ -75,7 +47,7 @@
   transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
-.groupButton[data-browser-steps] {
+.groupButton[data-list-button] {
   width: 22px;
   border-left: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 30%, transparent);
 }
@@ -85,12 +57,8 @@
   background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent);
 }
 
-.globe {
-  width: 14px;
-  height: 14px;
-}
-
-.globe[data-busy] {
+/* Mientras escribe o navega, el icono late. */
+.groupButton[data-busy] .icon {
   animation: browserBusy 1.2s var(--ds-ease-in-out) infinite;
 }
 
@@ -184,9 +152,60 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .globe[data-busy],
+  .groupButton[data-busy] .icon,
   .step[data-status='running'] .stepDot,
   .stepsMenu {
+    animation: none;
+  }
+}
+
+/* Un fichero en la lista de «Live code»: nombre y carpeta; al pulsarlo se abre en la pestaña. */
+.fileRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  text-align: left;
+  cursor: default;
+  transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.fileRow:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.fileRow[data-status='writing'] .stepDot,
+.fileRow[data-status='running'] .stepDot {
+  background: var(--dsw-alias-state-business-primary);
+  animation: browserBusy 1s var(--ds-ease-in-out) infinite;
+}
+
+.fileRow[data-status='failed'] .stepDot {
+  background: var(--dsw-alias-state-error-primary);
+}
+
+.fileFolder {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fileRow[data-status='writing'] .stepDot,
+  .fileRow[data-status='running'] .stepDot {
     animation: none;
   }
 }

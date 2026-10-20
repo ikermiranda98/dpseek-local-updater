@@ -3025,6 +3025,8 @@ const SHARED_BROWSER_REMOTES = [
     'localAgentBrowserInput(request.input)', 'One mouse, wheel, key or text gesture from the panel to the page; it never reaches the chat or the model.'],
   ['localAgentBrowserNavigate', 'SessionLocalBrowserNavigateRequest', 'SessionLocalBrowserNavigateValue', true,
     'localAgentBrowserNavigate(request)', 'Address bar: open an address (starting the browser if needed), back, forward or reload.'],
+  ['localAgentBrowserRepair', 'SessionLocalEmptyRequest', 'SessionLocalBrowserNavigateValue', true,
+    'localAgentBrowserRepair()', 'Fix the view: show the right page again (not a popup), re-apply the panel size and take a fresh frame.'],
   ['localAgentBrowserSecrets', 'SessionLocalEmptyRequest', 'SessionLocalBrowserSecrets', false,
     'localAgentBrowserSecrets()', 'Saved passwords by name and site (never the values); empty while locked.'],
   ['localAgentBrowserUnlock', 'SessionLocalEmptyRequest', 'SessionLocalBrowserUnlockValue', true,
@@ -3505,6 +3507,82 @@ optional('una respuesta que solo piensa se repite', (tx) => {
     '      // Local build: a stop that only carries reasoning (no text, no tool call) also gives the user nothing.\n'
       + "      if (message.content.length === 0 || message.content.every(block => block.type === 'thinking')) {\n",
     "message.content.every(block => block.type === 'thinking')")
+})
+
+// ── 40. La zona de trabajo, como una tarjeta flotante ─────────────────────────────
+// El chat y el panel derecho forman una tarjeta separada del borde de la ventana por la derecha
+// y por abajo (arriba ya la separa la franja del título), con las cuatro esquinas redondeadas
+// (el mismo radio de 16 px que la app usaba arriba a la izquierda) y una sombra suave en vez de
+// borde; el panel derecho proyecta una sombra difusa sobre el chat y lleva un filo de luz, para
+// que se distingan (en oscuro tienen casi el mismo tono). Mismos colores que la app. Solo en Windows. El panel
+// derecho a pantalla completa (que se sale de su columna) es también una tarjeta con el mismo margen y esquinas.
+
+const FLOATING_CARD_CSS = [
+  '/* local-build: floating card (dpseek-local-updater). The conversation and the right panel form one card set',
+  '   off the window edge on the right and bottom, with all four corners rounded and a soft shadow. */',
+  ':global([data-windows-titlebar]) .frame {',
+  '  --dsh-local-card-gap: 12px;',
+  '  --dsh-local-card-shadow: 0 1px 2px rgb(0 0 0 / 0.1), 0 6px 24px rgb(0 0 0 / 0.14);',
+  '  /* The right panel casts a soft shadow over the conversation and has a fading hairline, so the two read as',
+  '     separate surfaces (in the dark theme their fills are almost the same). */',
+  '  --dsh-local-split-shadow: -10px 0 22px -10px rgb(0 0 0 / 0.13);',
+  '  --dsh-local-split-edge: rgb(0 0 0 / 0.06);',
+  '}',
+  '',
+  ':global(body[data-ds-dark-theme]) .frame {',
+  '  --dsh-local-split-shadow: -12px 0 28px -10px rgb(0 0 0 / 0.7);',
+  '  --dsh-local-split-edge: rgb(255 255 255 / 0.07);',
+  '}',
+  '',
+  ':global([data-windows-titlebar]) .centerCol {',
+  '  margin-bottom: var(--dsh-local-card-gap);',
+  '  border-radius: var(--dsh-windows-content-radius) 0 0 var(--dsh-windows-content-radius);',
+  '  box-shadow: var(--dsh-local-card-shadow);',
+  '}',
+  '',
+  ':global([data-windows-titlebar]) .frame[data-rightbar-collapsed] .centerCol,',
+  ':global([data-windows-titlebar]) .frame[data-rightbar-fullscreen] .centerCol {',
+  '  margin-right: var(--dsh-local-card-gap);',
+  '  border-radius: var(--dsh-windows-content-radius);',
+  '}',
+  '',
+  ':global([data-windows-titlebar]) .frame:not([data-rightbar-collapsed], [data-rightbar-fullscreen]) .rightbarCol {',
+  '  margin: 0 var(--dsh-local-card-gap) var(--dsh-local-card-gap) 0;',
+  '}',
+  '',
+  '/* The round corners and the shadows go on the panel itself, not on its column: the panel starts 12px to the',
+  '   left of the column (its own inner margin), and clipping at the column cut that margin off. */',
+  ":global([data-windows-titlebar]) .frame:not([data-rightbar-collapsed], [data-rightbar-fullscreen]) .rightbarCol :global([data-sidebar-right-panel='push']) {",
+  '  border-radius: 0 var(--dsh-windows-content-radius) var(--dsh-windows-content-radius) 0;',
+  '  corner-shape: round;',
+  '  box-shadow: var(--dsh-local-card-shadow), var(--dsh-local-split-shadow);',
+  '}',
+  '',
+  ":global([data-windows-titlebar]) .frame:not([data-rightbar-collapsed], [data-rightbar-fullscreen]) .rightbarCol :global([data-sidebar-right-panel='push'])::before {",
+  "  content: '';",
+  '  position: absolute;',
+  '  inset: 0 auto 0 0;',
+  '  z-index: 40;',
+  '  width: 0.5px;',
+  '  pointer-events: none;',
+  '  background: linear-gradient(to bottom, transparent, var(--dsh-local-split-edge) 12%, var(--dsh-local-split-edge) 88%, transparent);',
+  '}',
+  '',
+  '/* The right panel in fullscreen keeps the same card shape: the gap on the right and bottom, round corners, shadow. */',
+  ":global([data-windows-titlebar]) .frame[data-rightbar-fullscreen] :global([data-sidebar-right-panel='fullscreen']) {",
+  '  right: var(--dsh-local-card-gap);',
+  '  bottom: var(--dsh-local-card-gap);',
+  '  max-width: calc(100vw - var(--dsh-windows-sidebar-width, 0px) - var(--dsh-local-card-gap));',
+  '  border-radius: var(--dsh-windows-content-radius);',
+  '  box-shadow: var(--dsh-local-card-shadow);',
+  '}',
+].join('\n')
+
+optional('la zona de trabajo como una tarjeta flotante', (tx) => {
+  const frameCss = join(repo, 'packages', 'client', 'ui-layout', 'src', 'client', 'AppFrame.module.css')
+  const css = tx.read(frameCss)
+  if (!css.includes(':global([data-windows-titlebar]) .centerCol {')) skip(`no se encuentra el marco de Windows en ${rel(frameCss)}`)
+  if (!css.includes('local-build: floating card')) tx.write(frameCss, css.trimEnd() + '\n\n' + FLOATING_CARD_CSS + '\n')
 })
 
 console.log('\nCambios aplicados:')
