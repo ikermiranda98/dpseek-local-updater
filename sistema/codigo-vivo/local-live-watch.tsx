@@ -105,9 +105,9 @@ function browserSteps(blocks: readonly ToolCallBlock[]): LiveBrowserStep[] {
 /** Firma barata para no republicar si nada ha cambiado. */
 function signature(running: boolean, files: readonly LiveFile[], changesSeq: number | undefined,
   browser: readonly LiveBrowserStep[] = []): string {
-  return `${String(running)}|${String(changesSeq)}|${files.map((file) =>
-    `${file.path}:${file.edits.map((edit) => `${edit.callId}${edit.status}${String(edit.text.length)}`).join(',')}`).join(';')}|${
-    browser.map((step) => `${step.callId}${step.status}${step.detail}`).join(',')}`
+  return `${String(running)}|${String(changesSeq)}|${files.map(file =>
+    `${file.path}:${file.edits.map(edit => `${edit.callId}${edit.status}${String(edit.text.length)}`).join(',')}`).join(';')}|${
+    browser.map(step => `${step.callId}${step.status}${step.detail}`).join(',')}`
 }
 
 /**
@@ -116,18 +116,19 @@ function signature(running: boolean, files: readonly LiveFile[], changesSeq: num
  * @returns nada visible.
  */
 export function LocalLiveWatcher({ sessionId, useChat }: { sessionId: string; useChat: UseChat }) {
-  const turn = useChat((s) => s.timeline.turnOrder.at(-1))
-  const running = useChat((s) => turn !== undefined && s.timeline.turns.get(turn)?.status === 'open')
-  const source = useChat((s) => turn === undefined ? undefined : s.nodes.turnDataSource(turn, 'tool-call'))
+  const turn = useChat(s => s.timeline.turnOrder.at(-1))
+  const running = useChat(s => turn !== undefined && s.timeline.turns.get(turn)?.status === 'open')
+  const startedAt = useChat(s => turn === undefined ? undefined : s.timeline.turns.get(turn)?.start?.time)
+  const source = useChat(s => turn === undefined ? undefined : s.nodes.turnDataSource(turn, 'tool-call'))
   // La ubicación del turno cambia con cada paso; se lee al vuelo sin reiniciar la lectura.
   const location = useRef<{ get(key: string): unknown } | undefined>(undefined)
-  location.current = useChat((s) => turn === undefined ? undefined
+  location.current = useChat(s => turn === undefined ? undefined
     : s.timeline.turns.get(turn)?.data as unknown as { get(key: string): unknown } | undefined)
   useEffect(() => {
     if (turn === undefined || source === undefined) return
     let last = ''
     const read = (): void => {
-      const blocks = source.getSnapshot().map((data) => data.root)
+      const blocks = source.getSnapshot().map(data => data.root)
       const files = filesOf(blocks)
       const browser = browserSteps(blocks)
       const data = location.current
@@ -137,6 +138,7 @@ export function LocalLiveWatcher({ sessionId, useChat }: { sessionId: string; us
       last = now
       publishLive({
         sessionId, turn, running, files,
+        ...startedAt === undefined ? {} : { startedAt },
         ...changes === undefined ? {} : { changesSeq: changes.seq },
         ...browser.length === 0 ? {} : { browser },
       })
@@ -156,7 +158,7 @@ export function LocalLiveWatcher({ sessionId, useChat }: { sessionId: string; us
       unsubscribe()
       clearInterval(timer)
     }
-  }, [sessionId, turn, running, source])
+  }, [sessionId, turn, running, source, startedAt])
   return null
 }
 
@@ -164,7 +166,7 @@ export function LocalLiveWatcher({ sessionId, useChat }: { sessionId: string; us
 const LiveSession = createContext<string | undefined>(undefined)
 
 /**
- * Da el chat a los botones «View code» de dentro.
+ * Da el chat a los botones de la línea de estado del turno («Live code» y el navegador).
  * @param props - chat y contenido.
  * @returns el contenido.
  */
@@ -267,13 +269,13 @@ export function LocalLiveCodeButton({ turn, placement }: { turn?: number; placem
   const live = useSyncExternalStore(subscribeLive, () => sessionId === undefined ? undefined : liveSnapshot(sessionId))
   if (sessionId === undefined || live === undefined || live.files.length === 0) return null
   if (turn === undefined ? !live.running : live.turn !== turn) return null
-  const writing = live.files.some((file) => file.edits.some((edit) => edit.status === 'writing'))
+  const writing = live.files.some(file => file.edits.some(edit => edit.status === 'writing'))
   return (
     <TurnIconMenu placement={placement} icon={<LinkIconMedium kind="code" className={css.icon} />}
       openLabel="Open the code in the right panel" onOpen={() => { requestLiveOpen(sessionId) }} busy={writing}
       menuLabel="Files written in this turn" title="Files" count={live.files.length}
       data={{ group: 'data-live-code-button', open: 'data-live-code-open', list: 'data-live-code-files' }}>
-      {(close) => live.files.map((file) => (
+      {close => live.files.map(file => (
         <li key={file.path}>
           <button type="button" className={css.fileRow} data-status={fileStatus(file)} title={file.path}
             onClick={() => { close(); requestLiveFile(sessionId, file.path) }}>

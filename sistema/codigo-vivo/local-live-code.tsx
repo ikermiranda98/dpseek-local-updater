@@ -73,7 +73,7 @@ function LiveCodeTitle(): ReactNode {
 
 /** El fichero que conviene ver: el que se está escribiendo o, si no, el último. */
 function currentPath(files: readonly LiveFile[]): string | undefined {
-  const active = files.findLast((file) => file.edits.some((edit) => edit.status === 'writing' || edit.status === 'running'))
+  const active = files.findLast(file => file.edits.some(edit => edit.status === 'writing' || edit.status === 'running'))
   return (active ?? files.at(-1))?.path
 }
 
@@ -82,7 +82,7 @@ const basename = (path: string): string => path.split(/[\\/]/).at(-1) ?? path
 
 /** Ediciones que se ven: desde la última escritura completa del fichero. */
 function visibleEdits(file: LiveFile): readonly LiveEdit[] {
-  const lastWrite = file.edits.findLastIndex((edit) => edit.kind === 'write')
+  const lastWrite = file.edits.findLastIndex(edit => edit.kind === 'write')
   return lastWrite < 0 ? file.edits : file.edits.slice(lastWrite)
 }
 
@@ -145,13 +145,13 @@ function LiveCodeTab({ sessionId, useTabInfo }: PropsRuntime<'sidebar.right.pane
   // Un fichero pulsado en la lista de la flecha, en el chat: se enseña ese.
   const choice = useSyncExternalStore(subscribeLive, () => liveChoice(sessionId))
   useEffect(() => { if (choice !== undefined) setChosen(choice.path) }, [choice?.at])
-  const following = chosen === undefined || !files.some((file) => file.path === chosen)
+  const following = chosen === undefined || !files.some(file => file.path === chosen)
   const path = following ? currentPath(files) : chosen
-  const file = files.find((entry) => entry.path === path)
+  const file = files.find(entry => entry.path === path)
   const highlight = useCodeHighlighter(path === undefined ? undefined : languageForPath(path))
   const body = useRef<HTMLDivElement>(null)
   const edits = file === undefined ? [] : visibleEdits(file)
-  const writing = edits.some((edit) => edit.status === 'writing')
+  const writing = edits.some(edit => edit.status === 'writing')
   const size = edits.reduce((total, edit) => total + edit.text.length, 0)
   // Siguiendo al modelo, la vista baja con lo que escribe, como un editor.
   useLayoutEffect(() => {
@@ -163,7 +163,7 @@ function LiveCodeTab({ sessionId, useTabInfo }: PropsRuntime<'sidebar.right.pane
     <div className={css.root} data-live-code data-live-running={live?.running === true}>
       <div className={css.header}>
         <div className={css.chips} role="tablist" aria-label="Files written in this turn">
-          {files.map((entry) => (
+          {files.map(entry => (
             <Tooltip key={entry.path} label={entry.path} side="bottom" delayMs={500}>
               <button type="button" role="tab" className={css.chip} aria-selected={entry.path === path}
                 onClick={() => { setChosen(entry.path) }}>

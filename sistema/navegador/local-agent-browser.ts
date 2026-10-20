@@ -94,7 +94,7 @@ interface ControlState {
 const CONTROL_IDLE_MS = 2 * 60_000
 
 // Compartido con el proveedor del navegador (local-browser-context.ts), que está en el mismo proceso del Host: sus
-// acciones esperan mientras `active`, y al mandar un mensaje en el chat el control vuelve al agente.
+// acciones esperan mientras `active`. Al mandar un mensaje en el chat, la pestaña devuelve el control al agente.
 const control = ((globalThis as Record<symbol, unknown>)[Symbol.for('dpseek-local-updater.agent-browser-control')] ??= { active: false }) as ControlState
 
 const takeControl = (): void => {
@@ -659,12 +659,18 @@ export async function localAgentBrowserRepair(): Promise<{ readonly url: string 
   return { url: page.url }
 }
 
-/** Lo escrito en la barra de dirección: una web (con o sin https://) o, si no lo parece, una búsqueda. */
+/**
+ * Lo escrito en la barra de dirección (o un enlace del chat): una web, con o sin http(s)://, o, si no lo parece, una
+ * búsqueda. Solo webs: ni file: (abriría ficheros del PC, que el agente podría leer) ni javascript: ni otros esquemas.
+ */
 export function localAddressToUrl(text: string): string {
   const value = text.trim()
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/^[^/]+\.[^/]+:\d/.test(value)) return value
+  if (value === '') return ''
+  if (/^https?:\/\//i.test(value) || value === 'about:blank') return value
+  // localhost:3000 o 127.0.0.1:8080 parecen un esquema («localhost:»), pero son una web local.
   if (/^(localhost|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?(\/.*)?$/i.test(value)) return `http://${value}`
-  if (!/\s/.test(value) && /^[^/]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(value)) return `https://${value}`
+  if (!/\s/.test(value) && /^[^/:]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(value)) return `https://${value}`
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/\s/.test(value)) throw new Error('Only web addresses (http or https) can be opened here.')
   return `https://www.bing.com/search?q=${encodeURIComponent(value)}`
 }
 
@@ -675,13 +681,20 @@ export function localAddressToUrl(text: string): string {
  */
 export async function localAgentBrowserNavigate(navigation: LocalAgentBrowserNavigation): Promise<{ readonly url: string }> {
   takeControl()
+  const url = navigation.action === 'url' ? localAddressToUrl(navigation.url) : ''
+  if (navigation.action === 'url' && url === '') throw new Error('Type an address.')
   const state = await ensureBrowser()
-  const current = await livePage(state)
+  let current = await livePage(state)
+  // Sin ninguna pestaña abierta (las cerró el agente o la web), se abre una.
+  if (current === undefined) {
+    const socket = await browserSocket(state)
+    if (socket !== undefined) await cdp(socket, 'Target.createTarget', { url: 'about:blank' }).catch(() => undefined)
+    popupCache = undefined
+    current = await livePage(state)
+  }
   if (current === undefined) throw new Error('The browser has no page open.')
   const { live } = current
   if (navigation.action === 'url') {
-    const url = localAddressToUrl(navigation.url)
-    if (url === '') throw new Error('Type an address.')
     await live.call('Page.navigate', { url })
     return { url }
   }
@@ -723,18 +736,44 @@ export async function localAgentBrowserSites(): Promise<{ readonly sites: readon
 export async function localAgentBrowserForget(domain: string): Promise<{ readonly removed: number }> {
   const state = readState()
   const socket = state === undefined ? undefined : await browserSocket(state)
-  if (socket === undefined) return { removed: 0 }
+  if (state === undefined || socket === undefined) return { removed: 0 }
   const target = plain(domain)
   const matches = (cookie: CdpCookie): boolean => plain(cookie.domain) === target || plain(cookie.domain).endsWith(`.${target}`)
   const { cookies } = await cdp<{ cookies: CdpCookie[] }>(socket, 'Storage.getCookies')
-  const keep = cookies.filter(cookie => !matches(cookie))
-  // Edge no borra cookies sueltas desde el navegador entero: se vacían y se vuelven a poner las de las demás webs.
-  await cdp(socket, 'Storage.clearCookies')
-  if (keep.length > 0) await cdp(socket, 'Storage.setCookies', { cookies: keep })
+  const gone = cookies.filter(matches)
+  // Cookie a cookie, por una pestaña (Network.deleteCookies): las de las demás webs no se tocan. Antes se vaciaban
+  // todas y se volvían a poner las otras, y si Edge rechazaba alguna se cerraba la sesión de todas las webs.
+  const page = (await json<CdpTarget[]>(state, '/json/list'))?.find(item => item.type === 'page' && item.webSocketDebuggerUrl !== undefined)
+  if (page?.webSocketDebuggerUrl === undefined) throw new Error('Open a page in the browser first.')
+  await cdpMany(page.webSocketDebuggerUrl, gone.map(cookie => ({
+    method: 'Network.deleteCookies', params: { name: cookie.name, domain: cookie.domain, path: cookie.path },
+  })))
   for (const origin of [`https://${target}`, `http://${target}`]) {
     await cdp(socket, 'Storage.clearDataForOrigin', { origin, storageTypes: 'all' }).catch(() => undefined)
   }
-  return { removed: cookies.length - keep.length }
+  const left = (await cdp<{ cookies: CdpCookie[] }>(socket, 'Storage.getCookies')).cookies.filter(matches).length
+  return { removed: gone.length - left }
+}
+
+/** Varias órdenes seguidas por la misma conexión de un solo uso (sin abrir una por cookie). */
+function cdpMany(url: string, commands: readonly { method: string; params: Record<string, unknown> }[]): Promise<void> {
+  if (commands.length === 0) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(url)
+    let answered = 0
+    const timer = setTimeout(() => { socket.close(); reject(new Error('sin respuesta')) }, 10_000)
+    socket.addEventListener('open', () => {
+      commands.forEach((command, index) => { socket.send(JSON.stringify({ id: index + 1, method: command.method, params: command.params })) })
+    })
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(String(event.data)) as { id?: number }
+      if (message.id === undefined || ++answered < commands.length) return
+      clearTimeout(timer)
+      socket.close()
+      resolve()
+    })
+    socket.addEventListener('error', () => { clearTimeout(timer); reject(new Error('no se puede conectar')) })
+  })
 }
 
 /** Una contraseña guardada: su nombre (el que usa el agente), la web y el valor cifrado. */

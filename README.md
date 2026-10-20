@@ -287,9 +287,11 @@ perfil (`~/.dsh/storages/agent-browser`): las sesiones que inicia se quedan guar
 
 **Un solo navegador, tuyo y del agente.** La pestaña **Browser** del panel derecho (la de la
 app, que los enlaces del chat abren) es ahora ese mismo Edge, en directo: **atrás**, **adelante**,
-**recargar** y la **dirección** editable (escribe una web o una búsqueda e Intro), con una etiqueta
-que dice quién lo maneja: **Agent** o **You**. Si la abres antes de que el agente use el
-navegador, el Edge se arranca al escribir una dirección, y luego el agente sigue en él. Las ventanas emergentes que abren algunas webs (a veces diminutas) no tapan la página; si la vista se
+**recargar** y la **dirección** editable (escribe una web, `localhost:3000` o una búsqueda e
+Intro; solo abre webs, no ficheros del PC), con una etiqueta que dice quién lo maneja: **Agent** o
+**You**. **Ctrl+T** la abre, como la pestaña «Browser» original. Si la abres antes de que el agente
+use el navegador, el Edge se arranca al escribir una dirección, y luego el agente sigue en él. Las
+ventanas emergentes que abren algunas webs (a veces diminutas) no tapan la página; si la vista se
 queda rara, **Fix the view** (junto a recargar) vuelve a la página buena, con el tamaño del panel.
 
 **Lo que hace, a la vista.** En el chat, la línea de estado del turno lleva solo un **globo**
@@ -311,8 +313,8 @@ captcha sin pasar nada por el chat, haz clic, desplaza o escribe en la página: 
 ámbar, la etiqueta dice **You** y abajo aparece **You're browsing — the agent waits · Resume
 agent**. Ratón (también pasar por encima y arrastrar), rueda, teclado y pegar van directos a la
 página, nunca al chat ni al modelo. Mientras tanto las acciones del agente en el navegador
-esperan; el control vuelve al agente con **Resume agent**, al mandar un mensaje en el chat o tras
-2 minutos sin tocar nada. El agente sabe que, si una web le pide una contraseña que no tiene,
+esperan; el control vuelve al agente con **Resume agent**, al mandar un mensaje en el chat (si
+tocas la página después de mandarlo, el agente espera) o tras 2 minutos sin tocar nada. El agente sabe que, si una web le pide una contraseña que no tiene,
 debe pedirte que lo hagas tú así.
 
 **Contraseñas y sesiones, en la llave.** El icono de la llave abre **Passwords | Signed-in

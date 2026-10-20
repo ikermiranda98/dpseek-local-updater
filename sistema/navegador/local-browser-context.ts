@@ -39,22 +39,6 @@ const TIPS = [
 const userControl = (): boolean =>
   ((globalThis as Record<symbol, unknown>)[Symbol.for('dpseek-local-updater.agent-browser-control')] as { active?: boolean } | undefined)?.active === true
 
-/** El control vuelve al agente (el usuario ha mandado un mensaje). */
-function releaseUserControl(): void {
-  const state = (globalThis as Record<symbol, unknown>)[Symbol.for('dpseek-local-updater.agent-browser-control')] as
-    { active?: boolean; timer?: ReturnType<typeof setTimeout> } | undefined
-  if (state?.active !== true) return
-  state.active = false
-  clearTimeout(state.timer)
-}
-
-/** Tipo del último suceso visible del chat. */
-function lastEventType(session: Session): string | undefined {
-  let last: number | undefined
-  for (const seq of session.surface.nodes) last = seq
-  return last === undefined ? undefined : session.eventAt(last)?.type
-}
-
 /** Espera a que el usuario devuelva el control; se corta si se cancela la llamada. */
 async function waitForUserControl(signal: AbortSignal): Promise<void> {
   while (userControl()) {
@@ -152,8 +136,6 @@ export function setupLocalBrowserContext(ctx: Context, toolPrefix: string): void
   })
 
   loose.on('agent/pre-step', async ({ agent, signal }, next) => {
-    // Un mensaje nuevo del usuario devuelve el control del navegador al agente.
-    if (lastEventType(agent.session) === 'user/message') releaseUserControl()
     if (!signal.aborted) {
       try {
         pruneOlderSnapshots(agent.session, loose.get('tokenMeter') as { estimateMessage(message: unknown): number } | undefined)

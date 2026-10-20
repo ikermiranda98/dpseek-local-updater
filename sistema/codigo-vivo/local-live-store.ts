@@ -30,6 +30,8 @@ export interface LiveTurn {
   readonly sessionId: string
   readonly turn: number
   readonly running: boolean
+  /** Cuándo empezó el turno (el usuario mandó el mensaje), con el reloj del PC. */
+  readonly startedAt?: number
   readonly files: readonly LiveFile[]
   /** Evento `workspace/changes` del turno, cuando ya ha terminado y hay cambios que revisar. */
   readonly changesSeq?: number
@@ -54,6 +56,8 @@ interface LiveStore {
   browserOpeners?: Set<(sessionId: string) => void>
   /** El último fichero que se pidió ver desde el chat (la lista de la flecha de «Live code»). */
   liveChoice?: { readonly sessionId: string; readonly path: string; readonly at: number }
+  /** Quien quiere saber que un chat empieza un turno (el usuario acaba de mandar un mensaje). */
+  turnStarters?: Set<(sessionId: string, startedAt: number | undefined) => void>
 }
 
 const KEY = Symbol.for('dpseek-local-updater.live-code')
@@ -76,8 +80,20 @@ export function onBrowserOpen(opener: (sessionId: string) => void): () => void {
 
 /** @param turn - estado nuevo del turno de un chat. */
 export function publishLive(turn: LiveTurn): void {
+  const previous = store.turns.get(turn.sessionId)
   store.turns.set(turn.sessionId, turn)
   for (const listener of store.listeners) listener()
+  // Un turno nuevo en marcha: el usuario acaba de mandar un mensaje (también el primero de un chat nuevo).
+  if (turn.running && previous?.turn !== turn.turn) {
+    for (const starter of store.turnStarters ?? []) starter(turn.sessionId, turn.startedAt)
+  }
+}
+
+/** @returns cómo dejar de escuchar cuándo empieza un turno nuevo en un chat. */
+export function onTurnStart(starter: (sessionId: string, startedAt: number | undefined) => void): () => void {
+  store.turnStarters ??= new Set()
+  store.turnStarters.add(starter)
+  return () => { store.turnStarters?.delete(starter) }
 }
 
 /** @returns el turno publicado de ese chat. */

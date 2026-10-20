@@ -27,7 +27,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { browserStepText, liveSnapshot, onBrowserOpen, subscribeLive } from './local-live-store.ts'
+import { browserStepText, liveSnapshot, onBrowserOpen, onTurnStart, subscribeLive } from './local-live-store.ts'
 import css from './local-agent-browser-tab.module.css'
 
 /** El tipo de la pestaña «Browser» de la app: los enlaces del chat (`openTab('browser', { params: { url } })`) llegan aquí. */
@@ -72,9 +72,25 @@ interface Secret {
   readonly site: string
 }
 
+/** El atajo de la app para abrir el navegador (Ctrl+T), el mismo que tenía la pestaña «Browser» original. */
+const BROWSER_COMMAND = 'browser.new'
+
+/** Lo que se usa del servicio de atajos y del panel derecho para registrar Ctrl+T. */
+interface ShortcutScope {
+  effect(setup: () => () => void, label: string): void
+  shortcuts: { register(command: Record<string, unknown>): () => void }
+  /** Del panel derecho de la app (el del plugin, no el del ámbito del servicio de atajos). */
+  sidebarRight: {
+    commandTarget(element: Element | null): unknown
+    openTabFromTarget(kind: string, target: unknown): void
+  }
+}
+
 let localCtx: Context | undefined
 /** El último fotograma, para que la pestaña se vea al momento al volver a montarse (sin «cargando»). */
 let lastFrame: Frame | undefined
+/** Cuándo tocó el usuario la página por última vez (para no devolver el control por un mensaje anterior). */
+let controlTakenAt = 0
 /** Navegaciones ya atendidas por pestaña (los enlaces del chat), para no repetirlas al volver a montarla. */
 const handledNavigation = new Map<string, number>()
 
@@ -91,6 +107,8 @@ export function setLocalAgentBrowser(ctx: Context): void {
     keepMounted: true,
     title: () => 'Browser',
     guide: [{
+      // El atajo (Ctrl+T) se ve junto a la entrada, como en la pestaña «Browser» original.
+      ...({ commandId: BROWSER_COMMAND } as object),
       id: 'shared-browser', order: 30, icon: GuideArtworkBrowser,
       title: () => 'Browser',
       description: () => 'Browse the web together with the agent',
@@ -100,6 +118,28 @@ export function setLocalAgentBrowser(ctx: Context): void {
     { name: 'sidebar.right.pane.tab', key: BROWSER_ID },
     BrowserTab,
   )), 'local: shared browser body')
+  // Ctrl+T abre el navegador, como la pestaña «Browser» original de la app (que ya no se carga). El servicio de atajos
+  // es de otro paquete: se usa por su nombre, sin sus tipos.
+  const scoped = ctx as unknown as { inject(deps: readonly string[], callback: (scope: ShortcutScope) => void): void }
+  scoped.inject(['shortcuts'], (scope) => {
+    scope.effect(() => scope.shortcuts.register({
+      id: BROWSER_COMMAND, label: () => 'Browser', aliases: ['browser', 'new browser tab'],
+      defaults: {
+        'desktop:macos': { code: 'KeyT', modifiers: ['primary'] },
+        'desktop:windows': { code: 'KeyT', modifiers: ['primary'] },
+        'desktop:linux': { code: 'KeyT', modifiers: ['primary'] },
+        'web:macos': { code: 'KeyT', modifiers: ['primary', 'alt'] },
+        'web:windows': { code: 'KeyT', modifiers: ['primary', 'alt'] },
+      },
+      regions: ['page', 'editable', 'terminal'], modals: [],
+      resolve: ({ target: element }: { target: Element | null }) => {
+        const right = ctx.sidebarRight as unknown as ShortcutScope['sidebarRight']
+        const target = right.commandTarget(element)
+        if (target === undefined) return { status: 'blocked', reason: 'Open a session first' }
+        return { status: 'handled', run: () => { right.openTabFromTarget(BROWSER_KIND, target) } }
+      },
+    }), 'local: shared browser shortcut')
+  })
   // El título de la pestaña lleva su icono, como las demás («Files», la terminal).
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register(
     { name: 'sidebar.right.pane.tab.title', key: BROWSER_ID },
@@ -116,6 +156,13 @@ export function setLocalAgentBrowser(ctx: Context): void {
       console.warn('local shared browser:', error)
     }
   }), 'local: shared browser open')
+  // Mandar un mensaje en el chat devuelve el control del navegador al agente (si el usuario toca la página después, el
+  // agente espera: solo cuenta el momento en que empieza el turno).
+  ctx.effect(() => onTurnStart((_sessionId, startedAt) => {
+    // El turno se ve en el chat un poco después de mandar el mensaje: si el usuario tocó la página entre medias, sigue.
+    if (startedAt !== undefined && controlTakenAt > startedAt) return
+    void ctx.remote.session.localAgentBrowserControl({ active: false }).catch(() => undefined)
+  }), 'local: shared browser give back on message')
   // Al ocultar o cerrar la ventana, las contraseñas guardadas se vuelven a bloquear.
   const lock = (): void => {
     if (document.visibilityState === 'hidden') void ctx.remote.session.localAgentBrowserLock({}).catch(() => undefined)
@@ -273,6 +320,7 @@ function BrowserTab({ useTabInfo, sessionId }: PropsRuntime<'sidebar.right.pane.
   }, [frame])
   const markControl = (active: boolean): void => {
     changedAt.current = Date.now()
+    if (active) controlTakenAt = Date.now()
     setControlState(active)
   }
   const resume = async (): Promise<void> => {
@@ -335,6 +383,7 @@ function BrowserTab({ useTabInfo, sessionId }: PropsRuntime<'sidebar.right.pane.
   const navigate = useCallback(async (navigation: { action: 'url'; url: string } | { action: 'back' | 'forward' | 'reload' }): Promise<void> => {
     setError(null)
     changedAt.current = Date.now()
+    controlTakenAt = Date.now()
     setControlState(true)
     try {
       if (localCtx !== undefined) unwrap(await localCtx.remote.session.localAgentBrowserNavigate(navigation))
@@ -426,6 +475,7 @@ function BrowserTab({ useTabInfo, sessionId }: PropsRuntime<'sidebar.right.pane.
       event.preventDefault()
       if (!controlRef.current) {
         changedAt.current = Date.now()
+        controlTakenAt = Date.now()
         setControlState(true)
       }
       const scale = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? picture.clientHeight : 1
