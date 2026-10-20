@@ -1,64 +1,85 @@
-/* Navegador del agente (dpseek-local-updater): mismos tonos, letra y medidas que «Live code» y el resto del panel. */
+/* Navegador compartido (dpseek-local-updater): mismos tonos, letra, medidas y tiempos de animación que el resto del panel. */
 
 .root { position: relative; display: flex; flex-direction: column; box-sizing: border-box; width: 100%; height: 100%; min-height: 0; color: var(--dsw-alias-label-primary); }
 
-.header { position: relative; display: flex; flex: 0 0 auto; gap: 8px; align-items: center; box-sizing: border-box; height: 38px; padding: 0 6px 0 12px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
-.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-label-tertiary); }
-.dot[data-running] { background: var(--dsw-alias-file-diff-added-marker); }
-.address { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); text-overflow: ellipsis; white-space: nowrap; }
-.tool { display: inline-flex; flex: none; align-items: center; height: 26px; padding: 0 8px; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); white-space: nowrap; cursor: default; }
-.tool:hover, .tool[aria-expanded='true'] { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+/* La barra: atrás, adelante, recargar, dirección (con quién maneja la página), pasos y llave. */
+.header { position: relative; display: flex; flex: 0 0 auto; gap: 2px; align-items: center; box-sizing: border-box; height: 40px; padding: 0 6px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); }
+.icon { display: inline-grid; flex: none; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); cursor: default; transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out), color var(--ds-transition-duration-fast) var(--ds-ease-in-out); }
+.icon svg { width: 16px; height: 16px; }
+.icon:hover:not(:disabled), .icon[aria-expanded='true'] { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.icon:disabled { opacity: 0.35; }
+.chevron { transition: transform var(--ds-transition-duration) var(--ds-ease-in-out); }
+.icon[aria-expanded='true'] .chevron { transform: rotate(180deg); }
 
-.tool[data-control] { background: var(--dsw-alias-state-business-primary); color: var(--dsw-alias-label-on-color, #fff); }
-.tool[data-control]:hover { background: var(--dsw-alias-state-business-primary); opacity: 0.9; }
-.tool:disabled { opacity: 0.45; }
+.address { display: flex; flex: 1 1 auto; gap: 6px; align-items: center; min-width: 0; height: 28px; margin: 0 4px; padding: 0 4px 0 6px; border-radius: var(--dsw-radius-md); background: var(--dsw-alias-interactive-bg-hover); transition: box-shadow var(--ds-transition-duration-fast) var(--ds-ease-in-out); }
+.address:focus-within { box-shadow: inset 0 0 0 1px var(--dsw-alias-state-business-primary); }
+.addressInput { flex: 1 1 auto; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); outline: none; text-overflow: ellipsis; }
+.addressInput:focus { color: var(--dsw-alias-label-primary); }
+.addressInput::placeholder { color: var(--dsw-alias-label-tertiary); }
+.who { flex: none; padding: 1px 6px; border-radius: var(--dsw-radius-sm); font-size: 11px; font-weight: 600; line-height: 16px; }
+.who[data-who='agent'] { background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 16%, transparent); color: var(--dsw-alias-state-business-primary); }
+.who[data-who='you'] { background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 18%, transparent); color: var(--dsw-alias-state-warn-primary); }
 
-/* «Take control»: un aviso y la página marcada; el ratón y el teclado van a la página. */
-.notice { flex: none; margin: 0; padding: 7px 12px; border-bottom: 0.5px solid var(--dsw-alias-border-l3); background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 12%, transparent); color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); line-height: 18px; }
+/* La página: llena el sitio sin deformarse (al redimensionar se escala al momento hasta que llega la recolocada). */
+.view { position: relative; display: flex; flex: 1 1 auto; align-items: center; justify-content: center; min-height: 0; overflow: hidden; background: var(--dsw-alias-bg-base); outline: none; }
+.view::after { position: absolute; inset: 0; box-shadow: inset 0 0 0 2px transparent; content: ''; pointer-events: none; transition: box-shadow var(--ds-transition-duration) var(--ds-ease-in-out); }
+.view[data-control]::after { box-shadow: inset 0 0 0 2px var(--dsw-alias-state-warn-primary); }
+.image { display: block; width: 100%; height: 100%; object-fit: contain; user-select: none; touch-action: none; }
+.empty { max-width: 320px; margin: 0; padding: 16px; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); line-height: 20px; text-align: center; }
 
-/* La página, a todo el ancho del panel. */
-.view { display: flex; flex: 1 1 auto; align-items: center; justify-content: center; min-height: 0; overflow: hidden; background: var(--dsw-alias-bg-base); outline: none; }
-.view[data-control] { box-shadow: inset 0 0 0 2px var(--dsw-alias-state-business-primary); }
-.view[data-control] .image { cursor: pointer; }
-.view[data-control]:focus-visible { box-shadow: inset 0 0 0 3px var(--dsw-alias-state-business-primary); }
-/* El tamaño lo calcula el componente (lo más grande que cabe sin deformarse); la imagen llega con sus píxeles justos. */
-.image { display: block; flex: none; max-width: 100%; max-height: 100%; user-select: none; box-shadow: 0 0 0 0.5px var(--dsw-alias-border-l3); }
-.empty { margin: 0; padding: 16px; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); line-height: 20px; }
+/* Con el usuario a los mandos: una píldora abajo, para devolver el control al agente. */
+.pill { position: absolute; bottom: 14px; left: 50%; display: inline-flex; gap: 8px; align-items: center; max-width: calc(100% - 24px); padding: 4px 4px 4px 12px; box-sizing: border-box; border-radius: 999px; background: linear-gradient(var(--dsw-specific-menu), var(--dsw-specific-menu)), var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-elevation-panel); color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); white-space: nowrap; transform: translateX(-50%); animation: pillIn var(--ds-transition-duration) var(--ds-ease-in-out); }
+.pill > span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pillDot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--dsw-alias-state-warn-primary); }
+.pillAction { display: inline-flex; flex: none; gap: 5px; align-items: center; height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--dsw-alias-state-business-primary); color: var(--dsw-alias-label-on-color, #fff); font: inherit; cursor: default; transition: opacity var(--ds-transition-duration-fast) var(--ds-ease-in-out); }
+.pillAction:hover { opacity: 0.9; }
+@keyframes pillIn { from { opacity: 0; transform: translate(-50%, 6px); } }
 
-/* El paso a paso del turno. */
-.steps { flex: 0 0 auto; max-height: 34%; margin: 0; padding: 6px 0; overflow-y: auto; border-top: 0.5px solid var(--dsw-alias-border-l3); list-style: none; }
-.step { display: flex; gap: 8px; align-items: center; min-height: 26px; padding: 0 12px; font: var(--dsw-font-xs-13); color: var(--dsw-alias-label-secondary); }
+.toast { position: absolute; top: 10px; left: 50%; max-width: calc(100% - 24px); margin: 0; padding: 6px 10px; box-sizing: border-box; border-radius: var(--dsw-radius-md); background: linear-gradient(var(--dsw-specific-menu), var(--dsw-specific-menu)), var(--dsw-alias-bg-layer-1); box-shadow: var(--dsw-elevation-panel); color: var(--dsw-alias-state-error-primary); font: var(--dsw-font-xs-13); transform: translateX(-50%); }
+
+/* Ventanitas bajo la barra (pasos y llave): el material de los menús de la app, opaco porque va sobre la página (casi
+   siempre blanca: translúcido, en tema oscuro el texto no se leía). */
+.popover { position: absolute; top: 38px; right: 6px; z-index: 10; display: flex; flex-direction: column; box-sizing: border-box; width: 310px; max-height: min(560px, calc(100vh - 160px)); padding: 6px; box-shadow: var(--dsw-elevation-panel); background: linear-gradient(var(--dsw-specific-menu), var(--dsw-specific-menu)), var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); animation: popIn var(--ds-transition-duration-fast) var(--ds-ease-in-out); }
+.popover[data-kind='keys'] { overflow-y: auto; }
+@keyframes popIn { from { opacity: 0; } }
+
+.stepsHead { display: flex; flex: none; justify-content: space-between; padding: 2px 8px 6px; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.steps { flex: 1 1 auto; min-height: 0; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.step { display: flex; gap: 8px; align-items: center; min-height: 26px; padding: 0 8px; color: var(--dsw-alias-label-secondary); }
 .step:last-child { color: var(--dsw-alias-label-primary); }
 .stepDot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--dsw-alias-file-diff-added-marker); }
-.step[data-status='running'] .stepDot { background: var(--dsw-alias-state-business-primary); animation: pulse 1s ease-in-out infinite; }
+.step[data-status='running'] .stepDot { background: var(--dsw-alias-state-business-primary); animation: pulse 1s var(--ds-ease-in-out) infinite; }
 .step[data-status='failed'] .stepDot { background: var(--dsw-alias-state-error-primary); }
 .stepText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
-/* «Saved sign-ins»: una ventanita como los menús de la app. */
-/* Encima de la página (casi siempre blanca), así que el material del menú va sobre el fondo de la app, no transparente. */
-.popover { position: absolute; top: 34px; right: 6px; z-index: 10; box-sizing: border-box; width: 300px; max-height: min(560px, 70vh); padding: 8px; overflow-y: auto; border-radius: var(--dsw-radius-lg); background: linear-gradient(var(--dsw-specific-menu), var(--dsw-specific-menu)), var(--dsw-alias-bg-layer-1); backdrop-filter: var(--dsw-menu-backdrop-filter); box-shadow: var(--dsw-elevation-panel); color: var(--dsw-alias-label-primary); font: var(--dsw-font-xs-13); }
-.popoverTitle { padding: 2px 4px 4px; color: var(--dsw-alias-label-primary); font-weight: 500; }
-.popoverHint { margin: 0; padding: 0 4px 6px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
-.sites { margin: 0; padding: 0; list-style: none; }
-.site { display: flex; gap: 8px; align-items: center; min-height: 34px; padding: 0 4px 0 8px; border-radius: var(--dsw-radius-md); }
-.site:hover { background: var(--dsw-alias-interactive-bg-hover); }
-.siteName { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.segments { flex: none; margin: 2px 2px 8px; }
+.section { display: grid; gap: 4px; }
+.hint { margin: 0; padding: 2px 6px 4px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+.rows { margin: 0; padding: 0; list-style: none; }
+.row { display: flex; gap: 8px; align-items: center; min-height: 34px; padding: 0 4px 0 8px; border-radius: var(--dsw-radius-md); }
+.row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.rowName { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rowSite { color: var(--dsw-alias-label-tertiary); }
 .remove { flex: none; height: 26px; padding: 0 8px; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-state-error-primary); font: inherit; cursor: default; }
 .remove:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-danger); }
 .remove:disabled { opacity: 0.5; }
-.error { margin: 6px 4px 0; color: var(--dsw-alias-state-error-primary); font-size: 12px; }
+.error { margin: 6px 6px 0; color: var(--dsw-alias-state-error-primary); font-size: 12px; }
+.okNote { margin: 6px 6px 0; color: var(--dsw-alias-label-secondary); font-size: 12px; }
+
+/* Contraseñas bloqueadas: candado, explicación y «Unlock with Windows». */
+.locked { display: grid; gap: 6px; justify-items: center; padding: 14px 10px 10px; text-align: center; }
+.lockIcon { color: var(--dsw-alias-label-secondary); }
+.lockedTitle { font-weight: 600; }
+.primary { display: inline-flex; gap: 6px; align-items: center; justify-content: center; justify-self: end; height: 28px; padding: 0 12px; border: 0; border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-state-business-primary); color: var(--dsw-alias-label-on-color, #fff); font: inherit; cursor: default; transition: opacity var(--ds-transition-duration-fast) var(--ds-ease-in-out); }
+.locked .primary { justify-self: center; margin-top: 4px; }
+.primary:hover:not(:disabled) { opacity: 0.9; }
+.primary:disabled { opacity: 0.45; }
+.secretForm { display: grid; gap: 6px; padding: 6px 4px 2px; }
+.field { box-sizing: border-box; width: 100%; height: 30px; padding: 0 8px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; outline: none; transition: border-color var(--ds-transition-duration-fast) var(--ds-ease-in-out); }
+.field:focus { border-color: var(--dsw-alias-state-business-primary); }
 
 @media (prefers-reduced-motion: reduce) {
-  .step[data-status='running'] .stepDot { animation: none; }
+  .step[data-status='running'] .stepDot, .pill, .popover { animation: none; }
+  .view::after, .chevron { transition: none; }
 }
-
-/* «Saved passwords», dentro de la misma ventanita. */
-.passwords { margin-top: 8px; padding-top: 8px; border-top: 0.5px solid var(--dsw-alias-border-l3); }
-.secretSite { color: var(--dsw-alias-label-tertiary); }
-.secretForm { display: grid; gap: 6px; padding: 6px 4px 2px; }
-.field { box-sizing: border-box; width: 100%; height: 30px; padding: 0 8px; border: 0.5px solid var(--dsw-alias-border-l2); border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-bg-base); color: var(--dsw-alias-label-primary); font: inherit; outline: none; }
-.field:focus { border-color: var(--dsw-alias-state-business-primary); }
-.save { justify-self: end; height: 28px; padding: 0 12px; border: 0; border-radius: var(--dsw-radius-sm); background: var(--dsw-alias-state-business-primary); color: var(--dsw-alias-label-on-color, #fff); font: inherit; cursor: default; }
-.save:disabled { opacity: 0.45; }
-.okNote { margin: 6px 4px 0; color: var(--dsw-alias-label-secondary); font-size: 12px; }

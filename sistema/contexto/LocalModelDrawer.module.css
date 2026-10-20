@@ -10,7 +10,7 @@
   font-size: 13px;
   line-height: 20px;
   color: var(--dsw-alias-label-primary);
-  animation: drawer-in 160ms var(--ds-ease-in-out, ease);
+  animation: drawer-in var(--ds-transition-duration) var(--ds-ease-in-out);
 }
 
 @keyframes drawer-in {
@@ -36,7 +36,7 @@
   min-width: 0;
   border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-interactive-bg-hover);
-  transition: background-color 120ms ease;
+  transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
 .block:hover {
@@ -108,7 +108,7 @@
   align-items: center;
   gap: 2px;
   opacity: 0;
-  transition: opacity 120ms ease;
+  transition: opacity var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
 .block:hover .tools,
@@ -127,7 +127,7 @@
   color: var(--dsw-alias-label-secondary);
   font: inherit;
   cursor: default;
-  transition: background-color 120ms ease;
+  transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
 .more:hover {

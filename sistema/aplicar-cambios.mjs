@@ -2993,24 +2993,193 @@ optional('un navegador de verdad para el agente (Playwright con Edge)', (tx) => 
     "setupLocalBrowserContext(ctx, 'mcp__playwright-mcp__')")
 })
 
-// ── 35. Lo que hace el agente en el navegador, en el panel derecho ──────────────────
-// Pestaña «Agent browser» junto a «Live code»: la página del Edge del agente en directo, el
-// paso a paso del turno y «Saved sign-ins» para borrar las sesiones guardadas que ya no
-// quieras. «Take control» deja usar la página desde el panel (iniciar sesión, códigos,
-// captchas) mientras el agente espera; lo escrito va directo a la página, nunca al chat.
-// La línea de estado del turno lleva «View browser» cuando el agente navega.
+// ── 35. Un navegador compartido por el agente y el usuario, en el panel derecho ─────
+// La pestaña «Browser» de la app pasa a ser el Edge del agente en directo (los enlaces del
+// chat se abren ahí): atrás, adelante, recargar y dirección editable, con «Agent»/«You»
+// según quién lo maneje. Tocar la página da el control al usuario (el agente espera; vuelve
+// con «Resume agent», con un mensaje en el chat o tras un rato). La flecha junto a la
+// dirección despliega el paso a paso; la llave, las contraseñas guardadas (bloqueadas con
+// la contraseña de Windows) y las webs con sesión. En el chat, la línea de estado del turno
+// lleva solo el globo (abre la pestaña) y una flecha con el paso a paso.
 // Código: sistema/navegador/ (y los pasos, en sistema/codigo-vivo/local-live-watch.tsx).
 
-optional('ver el navegador del agente en el panel derecho', (tx) => {
+/** Sustituye el bloque entre `start` y `end` (marcas incluidas) o, si aún no está, lo pone con `insert`. */
+function upsertBlock(text, start, end, block, insert) {
+  const at = text.indexOf(start)
+  if (at < 0) return insert(text, block)
+  const stop = text.indexOf(end, at)
+  if (stop < 0) skip(`bloque sin cierre (${start})`)
+  return text.slice(0, at) + block + text.slice(stop + end.length)
+}
+
+/** Las llamadas del Host para el navegador compartido: nombre, petición, respuesta, si es asíncrona, cuerpo y doc. */
+const SHARED_BROWSER_REMOTES = [
+  ['localAgentBrowserFrame', 'SessionLocalBrowserFrameRequest', 'SessionLocalBrowserFrame', true,
+    'localAgentBrowserFrame(request.after)',
+    "The page of the shared browser: waits briefly for a frame newer than `after` (the browser sends one each time it paints)."],
+  ['localAgentBrowserViewport', 'SessionLocalBrowserViewportRequest', 'SessionLocalBrowserViewportValue', true,
+    'localAgentBrowserViewport(request)', 'Fit the page to the panel (CSS pixels and screen density), like a browser window.'],
+  ['localAgentBrowserControl', 'SessionLocalBrowserControlRequest', 'SessionLocalBrowserControlValue', false,
+    'localAgentBrowserControl(request.active)', "Take or give back control (touching the page already takes it; the agent's browser actions wait)."],
+  ['localAgentBrowserInput', 'SessionLocalBrowserInputRequest', 'SessionLocalBrowserInputValue', true,
+    'localAgentBrowserInput(request.input)', 'One mouse, wheel, key or text gesture from the panel to the page; it never reaches the chat or the model.'],
+  ['localAgentBrowserNavigate', 'SessionLocalBrowserNavigateRequest', 'SessionLocalBrowserNavigateValue', true,
+    'localAgentBrowserNavigate(request)', 'Address bar: open an address (starting the browser if needed), back, forward or reload.'],
+  ['localAgentBrowserSecrets', 'SessionLocalEmptyRequest', 'SessionLocalBrowserSecrets', false,
+    'localAgentBrowserSecrets()', 'Saved passwords by name and site (never the values); empty while locked.'],
+  ['localAgentBrowserUnlock', 'SessionLocalEmptyRequest', 'SessionLocalBrowserUnlockValue', true,
+    'localAgentBrowserUnlock()', 'Unlock saved passwords for five minutes after Windows confirms the user (Windows Security password prompt, or Windows Hello).'],
+  ['localAgentBrowserLock', 'SessionLocalEmptyRequest', 'SessionLocalBrowserLockValue', false,
+    'localAgentBrowserLock()', 'Lock saved passwords again (the window was hidden or closed).'],
+  ['localAgentBrowserSaveSecret', 'SessionLocalBrowserSaveSecretRequest', 'SessionLocalBrowserSaveSecretValue', true,
+    'localAgentBrowserSaveSecret(request.name, request.site, request.value)', 'Save a password, encrypted with Windows DPAPI (needs unlock).'],
+  ['localAgentBrowserRemoveSecret', 'SessionLocalBrowserRemoveSecretRequest', 'SessionLocalBrowserRemoveSecretValue', false,
+    'localAgentBrowserRemoveSecret(request.name)', 'Remove a saved password (needs unlock).'],
+  ['localAgentBrowserSites', 'SessionLocalEmptyRequest', 'SessionLocalBrowserSites', true,
+    'localAgentBrowserSites()', 'Sites with a saved sign-in in the shared browser.'],
+  ['localAgentBrowserForget', 'SessionLocalBrowserForgetRequest', 'SessionLocalBrowserForgetValue', true,
+    'localAgentBrowserForget(request.domain)', "Sign the shared browser out of one site (its cookies and stored data)."],
+]
+
+const SHARED_BROWSER_TYPES = [
+  "/** Local build: the page of the shared browser (agent and user) now. */",
+  'export interface SessionLocalBrowserFrame {',
+  '  readonly running: boolean',
+  '  readonly url: string',
+  '  readonly title: string',
+  '  /** Frame number; ask for the next one with `after`. */',
+  '  readonly seq: number',
+  '  /** JPEG in base64, or null if there is none newer than `after`. */',
+  '  readonly image: string | null',
+  '  /** The user is in control (the agent waits). */',
+  '  readonly control: boolean',
+  '  /** Page size in CSS pixels (the frame covers exactly this). */',
+  '  readonly viewport: { readonly width: number; readonly height: number }',
+  '  readonly canGoBack: boolean',
+  '  readonly canGoForward: boolean',
+  '}',
+  '',
+  '/** Local build: the last frame number the panel has. */',
+  'export interface SessionLocalBrowserFrameRequest {',
+  '  readonly after?: number',
+  '}',
+  '',
+  '/** Local build: the panel size in CSS pixels and the screen density. */',
+  'export interface SessionLocalBrowserViewportRequest {',
+  '  readonly width: number',
+  '  readonly height: number',
+  '  readonly dpr?: number',
+  '}',
+  '',
+  '/** Local build: the page size was applied. */',
+  'export interface SessionLocalBrowserViewportValue {',
+  '  readonly ok: true',
+  '}',
+  '',
+  '/** Local build: take or give back control of the shared browser. */',
+  'export interface SessionLocalBrowserControlRequest {',
+  '  readonly active: boolean',
+  '}',
+  '',
+  '/** Local build: whether the user is in control now. */',
+  'export interface SessionLocalBrowserControlValue {',
+  '  readonly control: boolean',
+  '}',
+  '',
+  '/** Local build: one gesture of the user on the panel; positions go from 0 to 1 over the picture. */',
+  'export interface SessionLocalBrowserInputRequest {',
+  '  readonly input:',
+  '    | {',
+  "      readonly kind: 'mouse'; readonly type: 'down' | 'up' | 'move'; readonly x: number; readonly y: number",
+  "      readonly button: 'left' | 'right' | 'middle' | 'none'; readonly buttons: number; readonly clickCount: number; readonly modifiers: number",
+  '    }',
+  "    | { readonly kind: 'wheel'; readonly x: number; readonly y: number; readonly deltaX: number; readonly deltaY: number; readonly modifiers: number }",
+  "    | { readonly kind: 'text'; readonly text: string }",
+  "    | { readonly kind: 'key'; readonly key: string; readonly code: string; readonly keyCode: number; readonly modifiers: number }",
+  '}',
+  '',
+  '/** Local build: whether the gesture reached the page. */',
+  'export interface SessionLocalBrowserInputValue {',
+  '  readonly sent: boolean',
+  '}',
+  '',
+  '/** Local build: the address bar of the shared browser. */',
+  'export type SessionLocalBrowserNavigateRequest =',
+  "  | { readonly action: 'url'; readonly url: string }",
+  "  | { readonly action: 'back' | 'forward' | 'reload' }",
+  '',
+  '/** Local build: the address opened. */',
+  'export interface SessionLocalBrowserNavigateValue {',
+  '  readonly url: string',
+  '}',
+  '',
+  '/** Local build: saved passwords (names and sites only, never the values), locked until Windows confirms the user. */',
+  'export interface SessionLocalBrowserSecrets {',
+  '  readonly locked: boolean',
+  '  readonly count: number',
+  '  readonly secrets: readonly { readonly name: string; readonly site: string }[]',
+  '}',
+  '',
+  '/** Local build: whether saved passwords are unlocked now, and why not. */',
+  'export interface SessionLocalBrowserUnlockValue {',
+  '  readonly unlocked: boolean',
+  '  readonly message?: string',
+  '}',
+  '',
+  '/** Local build: saved passwords are locked again. */',
+  'export interface SessionLocalBrowserLockValue {',
+  '  readonly locked: true',
+  '}',
+  '',
+  '/** Local build: save a password for the shared browser (stored encrypted with Windows DPAPI). */',
+  'export interface SessionLocalBrowserSaveSecretRequest {',
+  '  readonly name: string',
+  '  readonly site: string',
+  '  readonly value: string',
+  '}',
+  '',
+  '/** Local build: the name the password was saved under. */',
+  'export interface SessionLocalBrowserSaveSecretValue {',
+  '  readonly name: string',
+  '}',
+  '',
+  '/** Local build: remove a saved password. */',
+  'export interface SessionLocalBrowserRemoveSecretRequest {',
+  '  readonly name: string',
+  '}',
+  '',
+  '/** Local build: whether it was removed. */',
+  'export interface SessionLocalBrowserRemoveSecretValue {',
+  '  readonly removed: boolean',
+  '}',
+  '',
+  '/** Local build: sites with a saved sign-in in the shared browser. */',
+  'export interface SessionLocalBrowserSites {',
+  '  readonly sites: readonly { readonly domain: string; readonly cookies: number }[]',
+  '}',
+  '',
+  "/** Local build: forget a site's sign-in in the shared browser. */",
+  'export interface SessionLocalBrowserForgetRequest {',
+  '  readonly domain: string',
+  '}',
+  '',
+  '/** Local build: how many cookies were removed. */',
+  'export interface SessionLocalBrowserForgetValue {',
+  '  readonly removed: number',
+  '}',
+]
+
+optional('un navegador compartido por el agente y el usuario en el panel derecho', (tx) => {
   const nav = join(here, 'navegador')
   const chatDir = join(repo, 'packages', 'client', 'ui-chat', 'src', 'client', 'chat')
   const deliverablesDir = join(repo, 'packages', 'client', 'ui-deliverables', 'src', 'client')
   const deliverablesIndex = join(deliverablesDir, 'index.ts')
   const provider = join(repo, 'packages', 'experimental', 'browser-use-playwright-mcp', 'src', 'index.ts')
+  const bundle = join(repo, 'packages', 'bundle', 'web-app', 'cordis.patch.yml')
   if (!tx.read(provider).includes('LOCAL_AGENT_BROWSER_LAUNCHER')) skip('falta el navegador compartido (sección 34)')
   if (!existsSync(join(chatDir, 'local-live-watch.tsx'))) skip('falta el código en vivo (sección 19)')
 
-  // Chat: «View browser» junto a «View code» en las dos líneas de estado del turno.
+  // Chat: el globo y la flecha del paso a paso junto a «View code», en las dos líneas de estado del turno.
   const running = join(chatDir, 'RunningStatus.tsx')
   tx.replace(running, "import { LocalLiveCodeButton } from './local-live-watch.tsx'\n",
     "import { LocalBrowserButton, LocalLiveCodeButton } from './local-live-watch.tsx'\n",
@@ -3027,239 +3196,68 @@ optional('ver el navegador del agente en el panel derecho', (tx) => {
       + '      <LocalBrowserButton turn={node.data.turn} placement="process" />\n',
     '<LocalBrowserButton turn={node.data.turn} placement="process" />')
 
-  // Panel derecho: la pestaña.
+  // Panel derecho: la pestaña, con el tipo `browser` de la app (la suya queda desactivada).
   tx.copy(join(nav, 'local-agent-browser-tab.tsx'), join(deliverablesDir, 'local-agent-browser-tab.tsx'))
   tx.copy(join(nav, 'local-agent-browser-tab.module.css'), join(deliverablesDir, 'local-agent-browser-tab.module.css'))
   tx.replace(deliverablesIndex, "import { setLocalLive } from './local-live-code.tsx'\n",
     "import { setLocalLive } from './local-live-code.tsx'\nimport { setLocalAgentBrowser } from './local-agent-browser-tab.tsx'\n",
     "import { setLocalAgentBrowser } from './local-agent-browser-tab.tsx'")
   tx.replace(deliverablesIndex, '  setLocalLive(ctx)\n',
-    '  setLocalLive(ctx)\n  // Local build: «Agent browser» tab (local-agent-browser-tab.tsx).\n  setLocalAgentBrowser(ctx)\n',
+    '  setLocalLive(ctx)\n  // Local build: the shared «Browser» tab (local-agent-browser-tab.tsx).\n  setLocalAgentBrowser(ctx)\n',
     'setLocalAgentBrowser(ctx)')
+  tx.replace(bundle,
+    "    - id: ui-sidebar-browser\n      name: '@deepseek-ai/dsh-client-ui-sidebar-browser'\n      disabled: !!js \"ctx.get('profileContext')?.name !== 'desktop'\"\n",
+    "    - id: ui-sidebar-browser\n      name: '@deepseek-ai/dsh-client-ui-sidebar-browser'\n"
+      + "      # local-build: the shared browser of the agent and the user (ui-deliverables) is the «Browser» tab.\n"
+      + '      disabled: true\n',
+    'the shared browser of the agent and the user')
 
-  // Host: imágenes de la página y sesiones guardadas del Edge del agente.
+  // Host: fotogramas, gestos, dirección, contraseñas y sesiones del Edge compartido.
   const hostIndex = join(hostDir, 'index.ts')
   const hostTypes = join(hostDir, 'types.ts')
   tx.copy(join(nav, 'local-agent-browser.ts'), join(hostDir, 'local-agent-browser.ts'))
   tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-agent-browser.ts')
-  let types = tx.read(hostTypes)
-  if (!types.includes('interface SessionLocalBrowserFrame')) {
-    types = types.trimEnd() + '\n\n' + [
-      "/** Local build: the page the agent's browser shows now. */",
-      'export interface SessionLocalBrowserFrame {',
-      '  readonly running: boolean',
-      '  readonly url: string',
-      '  readonly title: string',
-      '  /** JPEG in base64, or null if there is no page to show. */',
-      '  readonly image: string | null',
-      '  /** The user has taken control from the panel (the agent waits). */',
-      '  readonly control: boolean',
-      '  /** Page size in CSS pixels (the picture covers exactly this). */',
-      '  readonly viewport: { readonly width: number; readonly height: number }',
-      "  readonly mode: 'fit' | 'desktop' | 'wide' | 'tablet' | 'mobile'",
-      '}',
-      '',
-      '/** Local build: how many device pixels the panel has for the picture. */',
-      'export interface SessionLocalBrowserFrameRequest {',
-      '  readonly width?: number',
-      '  readonly height?: number',
-      '}',
-      '',
-      "/** Local build: the page size of the agent's browser (fit to the panel, or a fixed desktop, wide, tablet or mobile size). */",
-      'export interface SessionLocalBrowserViewportRequest {',
-      "  readonly mode: 'fit' | 'desktop' | 'wide' | 'tablet' | 'mobile'",
-      '  /** Panel size in CSS pixels and screen density, for fit. */',
-      '  readonly fit?: { readonly width: number; readonly height: number; readonly dpr?: number }',
-      '}',
-      '',
-      '/** Local build: the page size now in use. */',
-      'export interface SessionLocalBrowserViewportValue {',
-      "  readonly mode: 'fit' | 'desktop' | 'wide' | 'tablet' | 'mobile'",
-      '}',
-      '',
-      "/** Local build: the user takes or gives back control of the agent's browser. */",
-      'export interface SessionLocalBrowserControlRequest {',
-      '  readonly active: boolean',
-      '}',
-      '',
-      '/** Local build: whether the user is in control now. */',
-      'export interface SessionLocalBrowserControlValue {',
-      '  readonly control: boolean',
-      '}',
-      '',
-      '/** Local build: one gesture of the user on the panel; positions go from 0 to 1 over the picture. */',
-      'export interface SessionLocalBrowserInputRequest {',
-      '  readonly input:',
-      "    | { readonly kind: 'click'; readonly x: number; readonly y: number; readonly button: 'left' | 'right' | 'middle'; readonly clickCount: number }",
-      "    | { readonly kind: 'wheel'; readonly x: number; readonly y: number; readonly deltaX: number; readonly deltaY: number }",
-      "    | { readonly kind: 'text'; readonly text: string }",
-      "    | { readonly kind: 'key'; readonly key: string; readonly code: string; readonly keyCode: number; readonly modifiers: number }",
-      '}',
-      '',
-      '/** Local build: whether the gesture reached the page. */',
-      'export interface SessionLocalBrowserInputValue {',
-      '  readonly sent: boolean',
-      '}',
-      '',
-      "/** Local build: passwords saved for the agent's browser (names and sites only, never the values). */",
-      'export interface SessionLocalBrowserSecrets {',
-      '  readonly secrets: readonly { readonly name: string; readonly site: string }[]',
-      '}',
-      '',
-      '/** Local build: save a password for the agent\'s browser (stored encrypted with Windows DPAPI). */',
-      'export interface SessionLocalBrowserSaveSecretRequest {',
-      '  readonly name: string',
-      '  readonly site: string',
-      '  readonly value: string',
-      '}',
-      '',
-      '/** Local build: the name the password was saved under. */',
-      'export interface SessionLocalBrowserSaveSecretValue {',
-      '  readonly name: string',
-      '}',
-      '',
-      '/** Local build: remove a saved password. */',
-      'export interface SessionLocalBrowserRemoveSecretRequest {',
-      '  readonly name: string',
-      '}',
-      '',
-      '/** Local build: whether it was removed. */',
-      'export interface SessionLocalBrowserRemoveSecretValue {',
-      '  readonly removed: boolean',
-      '}',
-      '',
-      "/** Local build: sites with a saved sign-in in the agent's browser. */",
-      'export interface SessionLocalBrowserSites {',
-      '  readonly sites: readonly { readonly domain: string; readonly cookies: number }[]',
-      '}',
-      '',
-      "/** Local build: forget a site's sign-in in the agent's browser. */",
-      'export interface SessionLocalBrowserForgetRequest {',
-      '  readonly domain: string',
-      '}',
-      '',
-      '/** Local build: how many cookies were removed. */',
-      'export interface SessionLocalBrowserForgetValue {',
-      '  readonly removed: number',
-      '}',
-    ].join('\n')
-    tx.write(hostTypes, types)
-  }
-  tx.replace(hostIndex, "import { ApiSessionList } from './list.ts'\n",
-    "import { ApiSessionList } from './list.ts'\n"
-      + 'import {\n  localAgentBrowserControl, localAgentBrowserForget, localAgentBrowserFrame, localAgentBrowserInput, localAgentBrowserSites,\n'
-      + '  localAgentBrowserViewport, localAgentBrowserSecrets, localAgentBrowserSaveSecret, localAgentBrowserRemoveSecret,\n'
-      + "} from './local-agent-browser.ts'\n"
-      + 'import type {\n  SessionLocalBrowserControlRequest, SessionLocalBrowserControlValue, SessionLocalBrowserForgetRequest,\n'
-      + '  SessionLocalBrowserForgetValue, SessionLocalBrowserFrame, SessionLocalBrowserInputRequest, SessionLocalBrowserInputValue,\n'
-      + '  SessionLocalBrowserFrameRequest, SessionLocalBrowserSites, SessionLocalBrowserViewportRequest, SessionLocalBrowserViewportValue,\n'
-      + '  SessionLocalBrowserSecrets, SessionLocalBrowserSaveSecretRequest, SessionLocalBrowserSaveSecretValue,\n'
-      + '  SessionLocalBrowserRemoveSecretRequest, SessionLocalBrowserRemoveSecretValue,\n'
-      + "} from './types.ts'\n",
-    'SessionLocalBrowserForgetRequest, SessionLocalBrowserForgetValue')
-  let host = tx.read(hostIndex)
-  if (!host.includes("@Remote('localAgentBrowserFrame')")) {
-    const at = host.indexOf("  @Remote('list')")
-    const doc = at < 0 ? -1 : host.lastIndexOf('  /**', at)
+  const typesStart = '// local-shared-browser:start\n'
+  const typesEnd = '// local-shared-browser:end\n'
+  tx.write(hostTypes, upsertBlock(tx.read(hostTypes), typesStart, typesEnd,
+    typesStart + SHARED_BROWSER_TYPES.join('\n') + '\n' + typesEnd,
+    (text, block) => text.trimEnd() + '\n\n' + block))
+
+  const names = SHARED_BROWSER_REMOTES.map(([name]) => name)
+  const typeNames = [...new Set(SHARED_BROWSER_REMOTES.flatMap(([, request, value]) => [request, value]))]
+    .filter(type => type !== 'SessionLocalEmptyRequest').sort()
+  const importsStart = '// local-shared-browser-imports:start\n'
+  const importsEnd = '// local-shared-browser-imports:end\n'
+  const imports = importsStart
+    + `import {\n  ${names.join(', ')},\n} from './local-agent-browser.ts'\n`
+    + `import type {\n  ${typeNames.join(', ')},\n} from './types.ts'\n`
+    + importsEnd
+  let host = upsertBlock(tx.read(hostIndex), importsStart, importsEnd, imports, (text, block) => {
+    const anchor = "import { ApiSessionList } from './list.ts'\n"
+    if (!text.includes(anchor)) skip(`no se encuentra ${anchor.trim()} en ${rel(hostIndex)}`)
+    return text.replace(anchor, anchor + block)
+  })
+  const remotesStart = '  // local-shared-browser:start\n'
+  const remotesEnd = '  // local-shared-browser:end\n'
+  const remotes = remotesStart + SHARED_BROWSER_REMOTES.map(([name, request, value, isAsync, body, doc]) => [
+    '  /**',
+    `   * Local build: ${doc}`,
+    '   * @param request - see the request type.',
+    '   * @returns see the value type.',
+    '   */',
+    `  @Remote('${name}')`,
+    `  ${isAsync ? 'async ' : ''}${name}(${body.includes('request') ? 'request' : '_request'}: ${request}): ${isAsync ? `Promise<${value}>` : value} {`,
+    `    return ${body}`,
+    '  }',
+    '',
+  ].join('\n')).join('\n') + remotesEnd
+  host = upsertBlock(host, remotesStart, remotesEnd, remotes, (text, block) => {
+    const at = text.indexOf("  @Remote('list')")
+    const doc = at < 0 ? -1 : text.lastIndexOf('  /**', at)
     if (doc < 0) skip(`no se encuentra @Remote('list') en ${rel(hostIndex)}`)
-    host = host.slice(0, doc) + [
-      '  /**',
-      "   * Local build: a picture of the page the agent's browser shows now, with its address, sized to the panel.",
-      '   * @param request - device pixels the panel has for the picture (optional).',
-      '   * @returns the frame, with no image if the browser is not running.',
-      '   */',
-      "  @Remote('localAgentBrowserFrame')",
-      '  async localAgentBrowserFrame(request: SessionLocalBrowserFrameRequest): Promise<SessionLocalBrowserFrame> {',
-      '    return localAgentBrowserFrame(request.width === undefined || request.height === undefined',
-      '      ? undefined : { width: request.width, height: request.height })',
-      '  }',
-      '',
-      '  /**',
-      "   * Local build: change the page size of the agent's browser (fit to the panel, desktop, wide, tablet or mobile).",
-      '   * @param request - the size mode and, for fit, the panel size.',
-      '   * @returns the mode in use.',
-      '   */',
-      "  @Remote('localAgentBrowserViewport')",
-      '  localAgentBrowserViewport(request: SessionLocalBrowserViewportRequest): SessionLocalBrowserViewportValue {',
-      '    return localAgentBrowserViewport(request.mode, request.fit)',
-      '  }',
-      '',
-      '  /**',
-      "   * Local build: passwords saved for the agent's browser, by name and site (never the values).",
-      '   * @param _request - no fields are required.',
-      '   * @returns the saved passwords.',
-      '   */',
-      "  @Remote('localAgentBrowserSecrets')",
-      '  localAgentBrowserSecrets(_request: SessionLocalEmptyRequest): SessionLocalBrowserSecrets {',
-      '    return localAgentBrowserSecrets()',
-      '  }',
-      '',
-      '  /**',
-      "   * Local build: save a password for the agent's browser, encrypted with Windows DPAPI. The agent types its",
-      '   * name and the browser fills the value; the model never sees it. New browser sessions pick it up.',
-      '   * @param request - name, site and value.',
-      '   * @returns the normalized name.',
-      '   */',
-      "  @Remote('localAgentBrowserSaveSecret')",
-      '  async localAgentBrowserSaveSecret(request: SessionLocalBrowserSaveSecretRequest): Promise<SessionLocalBrowserSaveSecretValue> {',
-      '    return localAgentBrowserSaveSecret(request.name, request.site, request.value)',
-      '  }',
-      '',
-      '  /**',
-      '   * Local build: remove a saved password.',
-      '   * @param request - its name.',
-      '   * @returns whether it was removed.',
-      '   */',
-      "  @Remote('localAgentBrowserRemoveSecret')",
-      '  localAgentBrowserRemoveSecret(request: SessionLocalBrowserRemoveSecretRequest): SessionLocalBrowserRemoveSecretValue {',
-      '    return localAgentBrowserRemoveSecret(request.name)',
-      '  }',
-      '',
-      '  /**',
-      "   * Local build: sites with a saved sign-in in the agent's browser.",
-      '   * @param _request - no fields are required.',
-      '   * @returns one row per site.',
-      '   */',
-      "  @Remote('localAgentBrowserSites')",
-      '  async localAgentBrowserSites(_request: SessionLocalEmptyRequest): Promise<SessionLocalBrowserSites> {',
-      '    return localAgentBrowserSites()',
-      '  }',
-      '',
-      '  /**',
-      "   * Local build: sign the agent's browser out of one site (its cookies and stored data).",
-      '   * @param request - the site.',
-      '   * @returns how many cookies were removed.',
-      '   */',
-      "  @Remote('localAgentBrowserForget')",
-      '  async localAgentBrowserForget(request: SessionLocalBrowserForgetRequest): Promise<SessionLocalBrowserForgetValue> {',
-      '    return localAgentBrowserForget(request.domain)',
-      '  }',
-      '',
-      '  /**',
-      "   * Local build: the user takes control of the agent's browser from the panel (its browser actions wait) or",
-      '   * gives it back. Control goes back on its own after five minutes without gestures.',
-      '   * @param request - whether to take control.',
-      '   * @returns whether the user is in control now.',
-      '   */',
-      "  @Remote('localAgentBrowserControl')",
-      '  localAgentBrowserControl(request: SessionLocalBrowserControlRequest): SessionLocalBrowserControlValue {',
-      '    return localAgentBrowserControl(request.active)',
-      '  }',
-      '',
-      '  /**',
-      "   * Local build: one click, wheel, key or text from the panel to the page the agent's browser shows. Text goes",
-      '   * straight to the page; it never reaches the chat or the model.',
-      '   * @param request - the gesture.',
-      '   * @returns whether it reached the page (only while the user is in control).',
-      '   */',
-      "  @Remote('localAgentBrowserInput')",
-      '  async localAgentBrowserInput(request: SessionLocalBrowserInputRequest): Promise<SessionLocalBrowserInputValue> {',
-      '    return localAgentBrowserInput(request.input)',
-      '  }',
-      '',
-    ].join('\n') + host.slice(doc)
-    tx.write(hostIndex, host)
-  }
+    return text.slice(0, doc) + block + '\n' + text.slice(doc)
+  })
+  tx.write(hostIndex, host)
 })
 
 // ── 33. El selector de modelo, dentro de la barra ───────────────────────────────────

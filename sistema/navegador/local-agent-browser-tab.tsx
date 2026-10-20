@@ -1,49 +1,131 @@
 /**
- * Navegador del agente, lado del panel derecho (añadido por dpseek-local-updater).
+ * Navegador compartido del agente y del usuario, lado del panel derecho (añadido por dpseek-local-updater).
  *
- * Pestaña «Agent browser»: la página que está usando el agente, en directo (imágenes del Edge del agente que da el
- * Host, local-agent-browser.ts), y debajo el paso a paso del turno (lo publica el chat, local-live-watch.tsx: abrir,
- * leer, pulsar, rellenar…; nunca lo que escribe en un campo). «Saved sign-ins» enseña las webs con sesión guardada
- * en el perfil del agente y deja borrar cada una. Se abre con «View browser» en la línea de estado del turno, o desde
- * la guía de la barra lateral.
+ * Sustituye a la pestaña «Browser» de la app (mismo tipo, `browser`): los enlaces del chat se abren aquí. Enseña en
+ * directo el Edge que usa el agente (fotogramas que da el Host, local-agent-browser.ts, en cuanto la página cambia) con
+ * su barra: atrás, adelante, recargar y dirección editable, con una etiqueta de quién lo maneja («Agent» o «You»).
  *
- * «Take control»: el usuario usa la página desde la imagen (clic, rueda, teclado y pegar) para iniciar sesión, meter
- * un código o resolver un captcha; mientras, las acciones del agente en el navegador esperan. Lo que se escribe va
- * directo a la página por el Host, nunca al chat ni al modelo.
+ * El usuario usa la página directamente: al pulsar, desplazar o escribir en ella toma el control (borde ámbar, «You» y
+ * una píldora «You're browsing — the agent waits · Resume agent»); mientras, las acciones del agente en el navegador
+ * esperan. El control vuelve al agente con «Resume agent», al mandar un mensaje en el chat o tras un rato sin tocarla.
+ * Lo que se escribe va directo a la página por el Host, nunca al chat ni al modelo.
  *
- * La página se adapta sola al panel, como una ventana de navegador: toma su tamaño y la densidad de la pantalla, así que
- * llena el sitio y se ve nítida al cambiar el tamaño de la ventana o pasarla a otra pantalla (con el panel estrecho, la
- * web ve un móvil).
+ * La página se adapta sola al panel, como una ventana de navegador (su tamaño y la densidad de la pantalla). Al
+ * redimensionar, la imagen se escala al momento y la página se recoloca como mucho cada 100 ms; mientras el panel se
+ * desliza al abrirse o cerrarse, no se cambia nada (como el resto de animaciones de la app).
+ *
+ * La flecha junto a la dirección despliega el paso a paso del agente (oculto por defecto). La llave abre las contraseñas
+ * guardadas (bloqueadas hasta confirmar la contraseña de Windows) y las webs con sesión iniciada.
  */
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
-import { IconGlobeOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  GuideArtworkBrowser, IconChevronDownOutlineRegular, IconChevronLeftOutlineRegular, IconChevronRightOutlineRegular,
+  IconRefreshOutlineRegular, MenuSurface, SegmentedControl, Tooltip,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import { liveSnapshot, onBrowserOpen, subscribeLive, type LiveBrowserStep } from './local-live-store.ts'
+import { browserStepText, liveSnapshot, onBrowserOpen, subscribeLive } from './local-live-store.ts'
 import css from './local-agent-browser-tab.module.css'
 
-/** Tipo de pestaña y su identidad en el sistema de pestañas. */
-export const BROWSER_KIND = 'local-agent-browser'
-const BROWSER_ID = 'dpseek-local-updater/agent-browser'
-/** Imágenes por segundo mientras el navegador está en marcha (y si no, una comprobación cada dos segundos). */
-const FRAME_MS = 400
-const IDLE_MS = 2000
-/** Con el usuario a los mandos, más seguidas para que se note lo que hace. */
-const CONTROL_MS = 200
+/** El tipo de la pestaña «Browser» de la app: los enlaces del chat (`openTab('browser', { params: { url } })`) llegan aquí. */
+export const BROWSER_KIND = 'browser'
+const BROWSER_ID = 'dpseek-local-updater/shared-browser'
+/** Sin navegador en marcha, cada cuánto se vuelve a mirar. */
+const IDLE_MS = 1500
+/** Al redimensionar, la página se recoloca como mucho con esta frecuencia (la imagen se escala mientras tanto). */
+const RESIZE_MS = 100
+/** Lo que dura el deslizamiento del panel (--ds-transition-duration-slow) y un poco más: sin cambios mientras tanto. */
+const SLIDE_MS = 350
 
 interface Frame {
   readonly running: boolean
   readonly url: string
   readonly title: string
+  readonly seq: number
   readonly image: string | null
   readonly control: boolean
   readonly viewport: { readonly width: number; readonly height: number }
-  readonly mode: string
+  readonly canGoBack: boolean
+  readonly canGoForward: boolean
 }
 
-/** El sitio para la imagen, en píxeles CSS, y la densidad de la pantalla (cambia al moverla a otro monitor). */
+/** Un gesto para la página (posiciones de 0 a 1 sobre la imagen), como lo espera el Host. */
+type Gesture =
+  | {
+    readonly kind: 'mouse'; readonly type: 'down' | 'up' | 'move'; readonly x: number; readonly y: number
+    readonly button: 'left' | 'right' | 'middle' | 'none'; readonly buttons: number; readonly clickCount: number; readonly modifiers: number
+  }
+  | { readonly kind: 'wheel'; readonly x: number; readonly y: number; readonly deltaX: number; readonly deltaY: number; readonly modifiers: number }
+  | { readonly kind: 'text'; readonly text: string }
+  | { readonly kind: 'key'; readonly key: string; readonly code: string; readonly keyCode: number; readonly modifiers: number }
+
+interface Site {
+  readonly domain: string
+  readonly cookies: number
+}
+
+interface Secret {
+  readonly name: string
+  readonly site: string
+}
+
+let localCtx: Context | undefined
+/** El último fotograma, para que la pestaña se vea al momento al volver a montarse (sin «cargando»). */
+let lastFrame: Frame | undefined
+/** Navegaciones ya atendidas por pestaña (los enlaces del chat), para no repetirlas al volver a montarla. */
+const handledNavigation = new Map<string, number>()
+
+/**
+ * Registra la pestaña, su cuerpo y su apertura desde el chat.
+ * @param ctx - contexto del plugin de entregables.
+ */
+export function setLocalAgentBrowser(ctx: Context): void {
+  localCtx = ctx
+  ctx.effect(() => ctx.sidebarRightTabs.register({
+    id: BROWSER_ID,
+    kind: BROWSER_KIND,
+    // Montada aunque no se vea: al volver a ella está tal cual (sin parpadeo); oculta no pide fotogramas.
+    keepMounted: true,
+    title: () => 'Browser',
+    guide: [{
+      id: 'shared-browser', order: 30, icon: GuideArtworkBrowser,
+      title: () => 'Browser',
+      description: () => 'Browse the web together with the agent',
+    }],
+  }), 'local: shared browser type')
+  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
+    { name: 'sidebar.right.pane.tab', key: BROWSER_ID },
+    BrowserTab,
+  )), 'local: shared browser body')
+  ctx.effect(() => onBrowserOpen((sessionId) => {
+    const right = ctx.sidebarRight as typeof ctx.sidebarRight & {
+      openTabIn?: (sessionId: SessionId, kind: string) => void
+    }
+    try {
+      if (right.openTabIn) right.openTabIn(sessionId as SessionId, BROWSER_KIND)
+      else right.openTab(BROWSER_KIND)
+    } catch (error) {
+      console.warn('local shared browser:', error)
+    }
+  }), 'local: shared browser open')
+  // Al ocultar o cerrar la ventana, las contraseñas guardadas se vuelven a bloquear.
+  const lock = (): void => {
+    if (document.visibilityState === 'hidden') void ctx.remote.session.localAgentBrowserLock({}).catch(() => undefined)
+  }
+  document.addEventListener('visibilitychange', lock)
+  ctx.effect(() => () => { document.removeEventListener('visibilitychange', lock) }, 'local: shared browser lock')
+}
+
+const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
+  if (!result.ok) throw new Error(result.error.message)
+  return result.value
+}
+
+const messageOf = (reason: unknown): string => reason instanceof Error ? reason.message : String(reason)
+
+/** El sitio de la página en el panel, en píxeles CSS, y la densidad de la pantalla (cambia al moverla a otro monitor). */
 function useViewSize(element: HTMLElement | null): { width: number; height: number; dpr: number } {
   const [size, setSize] = useState({ width: 0, height: 0, dpr: window.devicePixelRatio || 1 })
   useEffect(() => {
@@ -72,156 +154,274 @@ function useViewSize(element: HTMLElement | null): { width: number; height: numb
   return size
 }
 
-/** Un gesto para la página (posiciones de 0 a 1 sobre la imagen), como lo espera el Host. */
-type Gesture =
-  | { readonly kind: 'click'; readonly x: number; readonly y: number; readonly button: 'left' | 'right' | 'middle'; readonly clickCount: number }
-  | { readonly kind: 'wheel'; readonly x: number; readonly y: number; readonly deltaX: number; readonly deltaY: number }
-  | { readonly kind: 'text'; readonly text: string }
-  | { readonly kind: 'key'; readonly key: string; readonly code: string; readonly keyCode: number; readonly modifiers: number }
-
-interface Site {
-  readonly domain: string
-  readonly cookies: number
-}
-
-interface Secret {
-  readonly name: string
-  readonly site: string
-}
-
-let localCtx: Context | undefined
-
 /**
- * Registra la pestaña, su cuerpo y su apertura desde el chat.
- * @param ctx - contexto del plugin de entregables.
+ * Los fotogramas en directo mientras la pestaña se ve: el Host responde en cuanto hay uno nuevo (o al poco, si la página
+ * está quieta), así que se piden uno tras otro sin esperas.
  */
-export function setLocalAgentBrowser(ctx: Context): void {
-  localCtx = ctx
-  ctx.effect(() => ctx.sidebarRightTabs.register({
-    id: BROWSER_ID,
-    kind: BROWSER_KIND,
-    // En la barra de pestañas cabe poco: «Browser»; en la guía, el nombre completo.
-    title: () => 'Browser',
-    guide: [{
-      id: 'agent-browser', order: 16, icon: IconGlobeOutlineRegular,
-      title: () => 'Agent browser',
-      description: () => 'What the agent sees and does in its browser',
-    }],
-  }), 'local: agent browser type')
-  ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register(
-    { name: 'sidebar.right.pane.tab', key: BROWSER_ID },
-    AgentBrowserTab,
-  )), 'local: agent browser body')
-  ctx.effect(() => onBrowserOpen((sessionId) => {
-    const right = ctx.sidebarRight as typeof ctx.sidebarRight & {
-      openTabIn?: (sessionId: SessionId, kind: string) => void
-    }
-    try {
-      if (right.openTabIn) right.openTabIn(sessionId as SessionId, BROWSER_KIND)
-      else right.openTab(BROWSER_KIND)
-    } catch (error) {
-      console.warn('local agent browser:', error)
-    }
-  }), 'local: agent browser open')
-}
-
-const unwrap = <T,>(result: { ok: true; value: T } | { ok: false; error: { message: string } }): T => {
-  if (!result.ok) throw new Error(result.error.message)
-  return result.value
-}
-
-/** Cómo se dice cada paso, en pocas palabras. */
-function stepText(step: LiveBrowserStep): string {
-  const on = step.detail === '' ? '' : ` ${step.detail}`
-  switch (step.action) {
-    case 'navigate': return `Opened${on}`
-    case 'navigate_back': return 'Went back'
-    case 'snapshot': return 'Read the page'
-    case 'click': return `Clicked${on}`
-    case 'hover': return `Hovered${on}`
-    case 'type': return `Typed in${on}`
-    case 'fill_form': return 'Filled in the form'
-    case 'select_option': return `Chose an option in${on}`
-    case 'press_key': return `Pressed${on}`
-    case 'wait_for': return step.detail === '' ? 'Waited' : `Waited for «${step.detail}»`
-    case 'take_screenshot': return 'Took a screenshot'
-    case 'tabs': return `Tabs: ${step.detail}`
-    case 'close': return 'Closed the page'
-    case 'evaluate': case 'run_code_unsafe': return 'Ran a script on the page'
-    case 'file_upload': return 'Uploaded a file'
-    case 'find': return step.detail === '' ? 'Searched the page' : `Searched the page for «${step.detail}»`
-    case 'network_requests': return 'Checked the network requests'
-    case 'network_request': return 'Read a network request'
-    case 'console_messages': return 'Read the console'
-    case 'handle_dialog': return 'Answered a dialog'
-    case 'drag': return `Dragged${on}`
-    case 'resize': return 'Resized the window'
-    default: return `${step.action.replace(/_/g, ' ')}${on}`
-  }
-}
-
-/** La imagen en directo: se piden mientras la pestaña está a la vista. */
-function useFrame(wanted: { width: number; height: number; dpr: number }): [Frame | undefined, () => void] {
-  const [frame, setFrame] = useState<Frame | undefined>(undefined)
-  const kick = useRef<() => void>(() => undefined)
-  const size = useRef(wanted)
-  size.current = wanted
+function useFrames(visible: boolean): Frame | undefined {
+  const [frame, setFrame] = useState<Frame | undefined>(lastFrame)
   useEffect(() => {
+    if (!visible) return
     let stopped = false
-    let timer: ReturnType<typeof setTimeout> | undefined
-    kick.current = () => {
-      clearTimeout(timer)
-      void tick()
-    }
-    const tick = async (): Promise<void> => {
-      let next: Frame | undefined
-      try {
-        if (localCtx !== undefined && document.visibilityState === 'visible') {
-          // Los píxeles justos del sitio de la imagen (como mínimo los de una ventana pequeña, para que no salga borrosa).
-          const { width, height, dpr } = size.current
-          next = unwrap(await localCtx.remote.session.localAgentBrowserFrame({
-            width: Math.max(320, Math.round(width * dpr)), height: Math.max(240, Math.round(height * dpr)),
-          }))
-          if (!stopped) setFrame(previous => next?.image === null && previous?.image != null && next.running ? { ...next, image: previous.image } : next)
+    const loop = async (): Promise<void> => {
+      while (!stopped) {
+        let next: Frame | undefined
+        try {
+          if (localCtx !== undefined && document.visibilityState === 'visible') {
+            next = unwrap(await localCtx.remote.session.localAgentBrowserFrame({ after: lastFrame?.image == null ? 0 : lastFrame.seq }))
+          }
+        } catch {
+          // Sin Host o sin respuesta: se vuelve a intentar.
         }
-      } catch {
-        // Sin Host o sin respuesta: se vuelve a intentar.
-      }
-      if (!stopped) {
-        clearTimeout(timer)
-        timer = setTimeout(() => { void tick() }, next?.control === true ? CONTROL_MS : next?.running === true ? FRAME_MS : IDLE_MS)
+        if (stopped) return
+        if (next !== undefined) {
+          const kept = next.image === null && next.running && lastFrame?.image != null ? { ...next, image: lastFrame.image, seq: lastFrame.seq } : next
+          lastFrame = kept
+          setFrame(kept)
+        }
+        if (next?.running !== true) await new Promise(resolve => setTimeout(resolve, IDLE_MS))
       }
     }
-    void tick()
-    return () => {
-      stopped = true
-      clearTimeout(timer)
-    }
-  }, [])
-  return [frame, () => { kick.current() }]
+    void loop()
+    return () => { stopped = true }
+  }, [visible])
+  return frame
 }
 
 /** Modificadores como los cuenta el protocolo de depuración: Alt 1, Ctrl 2, Meta 4, Mayús 8. */
 const modifiersOf = (event: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): number =>
   (event.altKey ? 1 : 0) | (event.ctrlKey ? 2 : 0) | (event.metaKey ? 4 : 0) | (event.shiftKey ? 8 : 0)
 
-/** Teclado, ratón y pegar sobre la imagen, en orden y con el texto agrupado (una llamada por ráfaga, no por letra). */
-function useGestures(onSent: () => void): {
-  send: (gesture: Gesture) => void
-  onMouseDown: (event: ReactMouseEvent<HTMLElement>) => void
-  onKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => void
-} {
-  const chain = useRef<Promise<void>>(Promise.resolve())
+/**
+ * Cola de gestos hacia la página: en orden, uno tras otro, y los movimientos del ratón sin acumularse (si hay uno
+ * esperando, el nuevo lo sustituye).
+ */
+function useGestureQueue(onError: (message: string) => void): (gesture: Gesture) => void {
+  const queue = useRef<Gesture[]>([])
+  const busy = useRef(false)
+  const pump = useCallback(async (): Promise<void> => {
+    if (busy.current) return
+    busy.current = true
+    try {
+      for (let gesture = queue.current.shift(); gesture !== undefined; gesture = queue.current.shift()) {
+        try {
+          if (localCtx !== undefined) unwrap(await localCtx.remote.session.localAgentBrowserInput({ input: gesture }))
+        } catch (error) {
+          onError(messageOf(error))
+        }
+      }
+    } finally {
+      busy.current = false
+    }
+  }, [onError])
+  return useCallback((gesture: Gesture) => {
+    const last = queue.current.at(-1)
+    if (gesture.kind === 'mouse' && gesture.type === 'move' && last?.kind === 'mouse' && last.type === 'move') queue.current[queue.current.length - 1] = gesture
+    else queue.current.push(gesture)
+    void pump()
+  }, [pump])
+}
+
+/** Posición (0..1) de un punto sobre la imagen, descontando las bandas si la imagen no llena su caja. */
+function pointOn(image: HTMLImageElement, clientX: number, clientY: number): { x: number; y: number } {
+  const box = image.getBoundingClientRect()
+  const natural = { width: image.naturalWidth || box.width, height: image.naturalHeight || box.height }
+  const scale = Math.min(box.width / natural.width, box.height / natural.height)
+  const width = natural.width * scale
+  const height = natural.height * scale
+  return { x: (clientX - box.left - (box.width - width) / 2) / width, y: (clientY - box.top - (box.height - height) / 2) / height }
+}
+
+const BUTTONS = ['left', 'middle', 'right'] as const
+
+function BrowserTab({ useTabInfo, sessionId }: PropsRuntime<'sidebar.right.pane.tab'>): ReactNode {
+  const { tab, sidebar } = useTabInfo()
+  const visible = tab.visible
+  const frame = useFrames(visible)
+  const running = frame?.running === true
+  const [viewElement, setViewElement] = useState<HTMLDivElement | null>(null)
+  const view = useRef<HTMLDivElement | null>(null)
+  const image = useRef<HTMLImageElement | null>(null)
+  const area = useViewSize(viewElement)
+  const live = useSyncExternalStore(subscribeLive, () => liveSnapshot(sessionId))
+  const steps = live?.browser ?? []
+  const [error, setError] = useState<string | null>(null)
+  const send = useGestureQueue(setError)
+  // El aviso de error se va solo.
+  useEffect(() => {
+    if (error === null) return
+    const timer = setTimeout(() => { setError(null) }, 6000)
+    return () => { clearTimeout(timer) }
+  }, [error])
+
+  // Quién maneja la página: lo que diga el Host, salvo justo después de un cambio hecho aquí (llega con retraso).
+  const [control, setControlState] = useState(frame?.control === true)
+  const changedAt = useRef(0)
+  useEffect(() => {
+    if (frame !== undefined && Date.now() - changedAt.current > 1500) setControlState(frame.control)
+  }, [frame])
+  const markControl = (active: boolean): void => {
+    changedAt.current = Date.now()
+    setControlState(active)
+  }
+  const resume = async (): Promise<void> => {
+    markControl(false)
+    try {
+      if (localCtx !== undefined) unwrap(await localCtx.remote.session.localAgentBrowserControl({ active: false }))
+    } catch (reason) {
+      setError(messageOf(reason))
+    }
+  }
+
+  // Tamaño de la página = el del panel. Al montarse y mientras el panel se desliza, quieto; al redimensionar, como
+  // mucho cada RESIZE_MS (la imagen se escala entre medias).
+  const frozenUntil = useRef(Date.now() + SLIDE_MS)
+  const expanded = sidebar.expanded
+  useLayoutEffect(() => { frozenUntil.current = Date.now() + SLIDE_MS }, [expanded, visible])
+  const sentSize = useRef('')
+  const sizeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const lastSent = useRef(0)
+  useEffect(() => {
+    if (!visible || area.width < 50 || area.height < 50) return
+    const key = `${String(area.width)}x${String(area.height)}@${String(area.dpr)}`
+    const push = (): void => {
+      const wait = Math.max(frozenUntil.current - Date.now(), lastSent.current + RESIZE_MS - Date.now())
+      if (wait > 0) {
+        clearTimeout(sizeTimer.current)
+        sizeTimer.current = setTimeout(push, wait)
+        return
+      }
+      if (sentSize.current === key || localCtx === undefined) return
+      sentSize.current = key
+      lastSent.current = Date.now()
+      void localCtx.remote.session.localAgentBrowserViewport({ width: area.width, height: area.height, dpr: area.dpr }).catch(() => undefined)
+    }
+    push()
+  }, [area.width, area.height, area.dpr, visible])
+  useEffect(() => () => { clearTimeout(sizeTimer.current) }, [])
+  // Si la imagen sigue sin cuadrar con el panel (se perdió un cambio de tamaño), se vuelve a pedir. Se mira cada poco:
+  // una página quieta no manda fotogramas.
+  const areaRef = useRef(area)
+  areaRef.current = area
+  useEffect(() => {
+    if (!visible || !running) return
+    const timer = setInterval(() => {
+      const picture = image.current
+      const now = areaRef.current
+      if (picture === null || picture.naturalWidth === 0 || now.width < 50 || localCtx === undefined) return
+      // Con los mismos límites que pone el Host (página de 320 × 240 como mínimo, densidad de 1 a 3).
+      const dpr = Math.min(3, Math.max(1, now.dpr))
+      const off = Math.abs(picture.naturalWidth / dpr - Math.max(320, now.width)) > 3 || Math.abs(picture.naturalHeight / dpr - Math.max(240, now.height)) > 3
+      if (!off || Date.now() - lastSent.current < 1500 || Date.now() < frozenUntil.current) return
+      lastSent.current = Date.now()
+      void localCtx.remote.session.localAgentBrowserViewport({ width: now.width, height: now.height, dpr: now.dpr }).catch(() => undefined)
+    }, 1000)
+    return () => { clearInterval(timer) }
+  }, [visible, running])
+
+  // Barra de dirección.
+  const [address, setAddress] = useState<string | null>(null)
+  const navigate = useCallback(async (navigation: { action: 'url'; url: string } | { action: 'back' | 'forward' | 'reload' }): Promise<void> => {
+    setError(null)
+    changedAt.current = Date.now()
+    setControlState(true)
+    try {
+      if (localCtx !== undefined) unwrap(await localCtx.remote.session.localAgentBrowserNavigate(navigation))
+    } catch (reason) {
+      setError(messageOf(reason))
+    }
+  }, [])
+  const submit = (event: FormEvent): void => {
+    event.preventDefault()
+    if (address === null || address.trim() === '') return
+    void navigate({ action: 'url', url: address })
+    setAddress(null)
+    view.current?.focus()
+  }
+  // Los enlaces del chat llegan como navegación de la pestaña.
+  const revision = tab.navigation.revision
+  const wantedUrl = (tab.navigation.params as { url?: unknown } | undefined)?.url
+  useEffect(() => {
+    if (revision === 0 || handledNavigation.get(tab.id) === revision) return
+    handledNavigation.set(tab.id, revision)
+    if (typeof wantedUrl === 'string' && wantedUrl !== '') void navigate({ action: 'url', url: wantedUrl })
+  }, [revision, wantedUrl, tab.id, navigate])
+  useEffect(() => tab.actions.bindCommands({ refresh: () => { void navigate({ action: 'reload' }) } }), [tab.actions, navigate])
+
+  // Ratón: pulsar toma el control; con él, también se mueve el puntero y se arrastra.
+  const pointer = useRef<{ x: number; y: number; buttons: number; modifiers: number } | null>(null)
+  const moveFrame = useRef(0)
+  const take = (): void => {
+    if (!control) markControl(true)
+    setError(null)
+  }
+  const onPointerDown = (event: ReactPointerEvent<HTMLImageElement>): void => {
+    event.preventDefault()
+    view.current?.focus({ preventScroll: true })
+    event.currentTarget.setPointerCapture(event.pointerId)
+    take()
+    send({
+      kind: 'mouse', type: 'down', ...pointOn(event.currentTarget, event.clientX, event.clientY),
+      button: BUTTONS[event.button] ?? 'left', buttons: event.buttons, clickCount: Math.max(1, event.detail), modifiers: modifiersOf(event),
+    })
+  }
+  const onPointerMove = (event: ReactPointerEvent<HTMLImageElement>): void => {
+    if (!control) return
+    pointer.current = { ...pointOn(event.currentTarget, event.clientX, event.clientY), buttons: event.buttons, modifiers: modifiersOf(event) }
+    if (moveFrame.current !== 0) return
+    moveFrame.current = requestAnimationFrame(() => {
+      moveFrame.current = 0
+      const at = pointer.current
+      if (at === null) return
+      const button = (at.buttons & 1) === 1 ? 'left' : (at.buttons & 2) === 2 ? 'right' : (at.buttons & 4) === 4 ? 'middle' : 'none'
+      send({ kind: 'mouse', type: 'move', x: at.x, y: at.y, button, buttons: at.buttons, clickCount: 0, modifiers: at.modifiers })
+    })
+  }
+  const onPointerUp = (event: ReactPointerEvent<HTMLImageElement>): void => {
+    send({
+      kind: 'mouse', type: 'up', ...pointOn(event.currentTarget, event.clientX, event.clientY),
+      button: BUTTONS[event.button] ?? 'left', buttons: event.buttons, clickCount: Math.max(1, event.detail), modifiers: modifiersOf(event),
+    })
+  }
+  useEffect(() => () => { cancelAnimationFrame(moveFrame.current) }, [])
+
+  // La rueda desplaza la página (no el panel), agrupada por fotograma de pantalla.
+  const controlRef = useRef(control)
+  controlRef.current = control
+  useEffect(() => {
+    const element = view.current
+    if (element === null || !running) return
+    const wheel = { dx: 0, dy: 0, x: 0, y: 0, modifiers: 0, frame: 0 }
+    const onWheel = (event: WheelEvent): void => {
+      const picture = image.current
+      if (picture === null) return
+      event.preventDefault()
+      if (!controlRef.current) {
+        changedAt.current = Date.now()
+        setControlState(true)
+      }
+      const scale = event.deltaMode === 1 ? 40 : event.deltaMode === 2 ? picture.clientHeight : 1
+      wheel.dx += event.deltaX * scale
+      wheel.dy += event.deltaY * scale
+      Object.assign(wheel, pointOn(picture, event.clientX, event.clientY), { modifiers: modifiersOf(event) })
+      if (wheel.frame !== 0) return
+      wheel.frame = requestAnimationFrame(() => {
+        send({ kind: 'wheel', x: wheel.x, y: wheel.y, deltaX: wheel.dx, deltaY: wheel.dy, modifiers: wheel.modifiers })
+        wheel.dx = 0
+        wheel.dy = 0
+        wheel.frame = 0
+      })
+    }
+    element.addEventListener('wheel', onWheel, { passive: false })
+    return () => {
+      element.removeEventListener('wheel', onWheel)
+      cancelAnimationFrame(wheel.frame)
+    }
+  }, [running, send])
+
+  // Teclado: el texto se agrupa (una llamada por ráfaga, no por letra); las demás teclas van una a una.
   const typed = useRef('')
   const flushTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const send = (gesture: Gesture): void => {
-    chain.current = chain.current
-      .then(async () => {
-        if (localCtx !== undefined) unwrap(await localCtx.remote.session.localAgentBrowserInput({ input: gesture }))
-        onSent()
-      })
-      .catch((error: unknown) => { console.warn('local agent browser input:', error) })
-  }
   const flush = (): void => {
     clearTimeout(flushTimer.current)
     if (typed.current === '') return
@@ -229,64 +429,176 @@ function useGestures(onSent: () => void): {
     typed.current = ''
     send({ kind: 'text', text })
   }
-  const position = (event: ReactMouseEvent<HTMLElement>): { x: number; y: number } => {
-    const box = event.currentTarget.getBoundingClientRect()
-    return { x: (event.clientX - box.left) / box.width, y: (event.clientY - box.top) / box.height }
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
+    if (!running || event.target !== event.currentTarget) return
+    // Ctrl+V lo atiende el evento de pegar (con el texto del portapapeles).
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') return
+    if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(event.key)) return
+    event.preventDefault()
+    take()
+    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      typed.current += event.key
+      clearTimeout(flushTimer.current)
+      flushTimer.current = setTimeout(flush, 40)
+      return
+    }
+    flush()
+    send({ kind: 'key', key: event.key, code: event.code, keyCode: event.keyCode, modifiers: modifiersOf(event) })
   }
-  return {
-    send: (gesture) => {
-      flush()
-      send(gesture)
-    },
-    onMouseDown: (event) => {
-      event.preventDefault()
-      event.currentTarget.focus()
-      flush()
-      const button = event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left'
-      send({ kind: 'click', ...position(event), button, clickCount: Math.max(1, event.detail) })
-    },
-    onKeyDown: (event) => {
-      // Ctrl+V lo atiende el evento de pegar (con el texto del portapapeles).
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') return
-      event.preventDefault()
-      if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-        typed.current += event.key
-        clearTimeout(flushTimer.current)
-        flushTimer.current = setTimeout(flush, 60)
-        return
-      }
-      if (['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) return
-      flush()
-      send({ kind: 'key', key: event.key, code: event.code, keyCode: event.keyCode, modifiers: modifiersOf(event) })
-    },
-  }
+
+  const [stepsOpen, setStepsOpen] = useState(false)
+  const [keysOpen, setKeysOpen] = useState(false)
+  const shownUrl = address ?? frame?.url ?? ''
+  const who = control ? 'you' : live?.running === true && steps.length > 0 ? 'agent' : undefined
+  return (
+    <div className={css.root} data-agent-browser data-control={control || undefined}>
+      <div className={css.header}>
+        <Tooltip label="Back" side="bottom" delayMs={500}>
+          <button type="button" className={css.icon} aria-label="Back" disabled={frame?.canGoBack !== true}
+            onClick={() => { void navigate({ action: 'back' }) }}><IconChevronLeftOutlineRegular /></button>
+        </Tooltip>
+        <Tooltip label="Forward" side="bottom" delayMs={500}>
+          <button type="button" className={css.icon} aria-label="Forward" disabled={frame?.canGoForward !== true}
+            onClick={() => { void navigate({ action: 'forward' }) }}><IconChevronRightOutlineRegular /></button>
+        </Tooltip>
+        <Tooltip label="Reload" side="bottom" delayMs={500}>
+          <button type="button" className={css.icon} aria-label="Reload" disabled={!running}
+            onClick={() => { void navigate({ action: 'reload' }) }}><IconRefreshOutlineRegular /></button>
+        </Tooltip>
+        <form className={css.address} onSubmit={submit} data-who={who}>
+          {who !== undefined && <span className={css.who} data-who={who}>{who === 'you' ? 'You' : 'Agent'}</span>}
+          <input className={css.addressInput} value={shownUrl} placeholder="Search or type an address" aria-label="Address"
+            spellCheck={false} autoComplete="off"
+            onFocus={(event) => { event.currentTarget.select() }}
+            onChange={(event) => { setAddress(event.target.value) }}
+            onBlur={() => { setAddress(null) }}
+            onKeyDown={(event) => { if (event.key === 'Escape') { setAddress(null); event.currentTarget.blur() } }} />
+        </form>
+        {steps.length > 0 && (
+          <Tooltip label="The agent's steps" side="bottom" delayMs={500} disabled={stepsOpen}>
+            <button type="button" className={css.icon} aria-label="The agent's steps" aria-expanded={stepsOpen} data-browser-steps
+              onClick={() => { setStepsOpen(open => !open) }}>
+              <IconChevronDownOutlineRegular className={css.chevron} />
+            </button>
+          </Tooltip>
+        )}
+        <Tooltip label="Passwords and sign-ins" side="bottom" delayMs={500} disabled={keysOpen}>
+          <button type="button" className={css.icon} aria-label="Passwords and sign-ins" aria-expanded={keysOpen} data-browser-keys
+            onClick={() => { setKeysOpen(open => !open) }}><KeyIcon /></button>
+        </Tooltip>
+        {stepsOpen && steps.length > 0 && <StepsPopover sessionId={sessionId} onClose={() => { setStepsOpen(false) }} />}
+        {keysOpen && <KeysPopover onClose={() => { setKeysOpen(false) }} />}
+      </div>
+      <div ref={(element) => { view.current = element; setViewElement(element) }} className={css.view}
+        data-control={control || undefined} tabIndex={running ? 0 : -1}
+        onKeyDown={onKeyDown}
+        onPaste={(event) => {
+          if (!running) return
+          event.preventDefault()
+          const text = event.clipboardData.getData('text/plain')
+          take()
+          flush()
+          if (text !== '') send({ kind: 'text', text })
+        }}>
+        {running && frame?.image != null && frame.url !== 'about:blank'
+          ? <img ref={image} className={css.image} src={`data:image/jpeg;base64,${frame.image}`} alt={frame.title} draggable={false}
+            onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp}
+            onContextMenu={(event) => { event.preventDefault() }} />
+          : (
+            <p className={css.empty}>
+              {running && frame?.url !== 'about:blank' ? 'Loading the page…' : 'Nothing open yet. Type an address above, or ask the agent to visit a site.'}
+            </p>
+          )}
+        {control && running && (
+          <div className={css.pill} role="status">
+            <span className={css.pillDot} />
+            <span>You're browsing — the agent waits</span>
+            <button type="button" className={css.pillAction} onClick={() => { void resume() }}>
+              <PlayIcon />Resume agent
+            </button>
+          </div>
+        )}
+        {error !== null && <p className={css.toast} role="alert" onClick={() => { setError(null) }}>{error}</p>}
+      </div>
+    </div>
+  )
 }
 
-/** «Saved sign-ins»: webs con sesión guardada en el navegador del agente, para borrar la que ya no quieras. */
-function SavedSignIns({ onClose }: { onClose: () => void }): ReactNode {
+/** El paso a paso del agente en el navegador, bajo la barra (oculto hasta pulsar la flecha). */
+function StepsPopover({ sessionId, onClose }: { sessionId: string; onClose: () => void }): ReactNode {
+  const live = useSyncExternalStore(subscribeLive, () => liveSnapshot(sessionId))
+  const steps = live?.browser ?? []
+  const box = useRef<HTMLDivElement | null>(null)
+  const list = useRef<HTMLOListElement | null>(null)
+  usePopoverDismiss(box, onClose, '[data-browser-steps]')
+  useLayoutEffect(() => {
+    if (list.current !== null) list.current.scrollTop = list.current.scrollHeight
+  }, [steps.length])
+  return (
+    <MenuSurface ref={box} className={css.popover} data-kind="steps" role="dialog" aria-label="The agent's steps in the browser">
+      <div className={css.stepsHead}><span>Agent steps</span><span>{String(steps.length)}</span></div>
+      <ol ref={list} className={css.steps}>
+        {steps.map(step => (
+          <li key={step.callId} className={css.step} data-status={step.status}>
+            <span className={css.stepDot} />
+            <span className={css.stepText}>{browserStepText(step)}</span>
+          </li>
+        ))}
+      </ol>
+    </MenuSurface>
+  )
+}
+
+/** Cierra una ventanita al pulsar fuera (salvo en su propio botón, que ya la alterna) o con Escape. */
+function usePopoverDismiss(box: { current: HTMLElement | null }, onClose: () => void, trigger: string): void {
+  useEffect(() => {
+    const key = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
+    const down = (event: PointerEvent): void => {
+      if (!(event.target instanceof Element)) return
+      // El botón que la abrió la cierra él mismo: sin esto se cerraría y se volvería a abrir.
+      if (box.current?.contains(event.target) === true || event.target.closest(trigger) !== null) return
+      onClose()
+    }
+    document.addEventListener('keydown', key, true)
+    document.addEventListener('pointerdown', down, true)
+    return () => {
+      document.removeEventListener('keydown', key, true)
+      document.removeEventListener('pointerdown', down, true)
+    }
+  }, [box, onClose, trigger])
+}
+
+/** La llave: contraseñas guardadas (bloqueadas con Windows) y webs con sesión iniciada. */
+function KeysPopover({ onClose }: { onClose: () => void }): ReactNode {
+  const box = useRef<HTMLDivElement | null>(null)
+  const [section, setSection] = useState<'passwords' | 'sites'>('passwords')
+  usePopoverDismiss(box, onClose, '[data-browser-keys]')
+  return (
+    <MenuSurface ref={box} className={css.popover} data-kind="keys" role="dialog" aria-label="Passwords and sign-ins">
+      <SegmentedControl id="local-browser-keys" label="Passwords and sign-ins" value={section} onChange={setSection}
+        className={css.segments}
+        options={[{ value: 'passwords', label: 'Passwords' }, { value: 'sites', label: 'Signed-in sites' }]} />
+      <div id={`local-browser-keys-${section}-panel`} role="tabpanel" aria-labelledby={`local-browser-keys-${section}`}>
+        {section === 'passwords' ? <SavedPasswords /> : <SignedInSites />}
+      </div>
+    </MenuSurface>
+  )
+}
+
+/** Webs con sesión iniciada en el navegador, para cerrar la que ya no quieras. */
+function SignedInSites(): ReactNode {
   const [sites, setSites] = useState<readonly Site[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const box = useRef<HTMLDivElement | null>(null)
   const load = async (): Promise<void> => {
     if (localCtx === undefined) return
     try {
       setSites(unwrap(await localCtx.remote.session.localAgentBrowserSites({})).sites)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+      setError(messageOf(reason))
     }
   }
   useEffect(() => { void load() }, [])
-  useEffect(() => {
-    const down = (event: MouseEvent): void => { if (box.current?.contains(event.target as Node) !== true) onClose() }
-    const key = (event: KeyboardEvent): void => { if (event.key === 'Escape') onClose() }
-    document.addEventListener('mousedown', down, true)
-    document.addEventListener('keydown', key, true)
-    return () => {
-      document.removeEventListener('mousedown', down, true)
-      document.removeEventListener('keydown', key, true)
-    }
-  }, [onClose])
   const forget = async (domain: string): Promise<void> => {
     if (localCtx === undefined) return
     setBusy(domain)
@@ -295,22 +607,21 @@ function SavedSignIns({ onClose }: { onClose: () => void }): ReactNode {
       unwrap(await localCtx.remote.session.localAgentBrowserForget({ domain }))
       await load()
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
+      setError(messageOf(reason))
     } finally {
       setBusy(null)
     }
   }
   return (
-    <div ref={box} className={css.popover} role="dialog" aria-label="Saved sign-ins">
-      <div className={css.popoverTitle}>Saved sign-ins</div>
-      <p className={css.popoverHint}>Sites where the agent's browser keeps you signed in. Remove one to sign it out.</p>
-      {sites === null && error === null && <p className={css.popoverHint}>Loading…</p>}
-      {sites !== null && sites.length === 0 && <p className={css.popoverHint}>None yet.</p>}
+    <div className={css.section}>
+      <p className={css.hint}>Sites where this browser keeps you signed in. Remove one to sign it out.</p>
+      {sites === null && error === null && <p className={css.hint}>Loading…</p>}
+      {sites !== null && sites.length === 0 && <p className={css.hint}>None yet.</p>}
       {sites !== null && sites.length > 0 && (
-        <ul className={css.sites}>
+        <ul className={css.rows}>
           {sites.map(site => (
-            <li key={site.domain} className={css.site}>
-              <span className={css.siteName}>{site.domain}</span>
+            <li key={site.domain} className={css.row}>
+              <span className={css.rowName}>{site.domain}</span>
               <button type="button" className={css.remove} disabled={busy !== null} onClick={() => { void forget(site.domain) }}>
                 {busy === site.domain ? 'Removing…' : 'Remove'}
               </button>
@@ -319,17 +630,16 @@ function SavedSignIns({ onClose }: { onClose: () => void }): ReactNode {
         </ul>
       )}
       {error !== null && <p className={css.error}>{error}</p>}
-      <SavedPasswords />
     </div>
   )
 }
 
 /**
- * «Saved passwords»: contraseñas para el navegador del agente, guardadas cifradas en este PC. El agente escribe el
- * nombre y el navegador pone el valor: el modelo nunca la ve y no pasa por el chat.
+ * Contraseñas para el navegador, guardadas cifradas en este PC. Bloqueadas hasta confirmar la contraseña de Windows:
+ * el agente puede usarlas por su nombre igualmente (escribe el nombre y el navegador pone el valor; nunca lo ve).
  */
 function SavedPasswords(): ReactNode {
-  const [secrets, setSecrets] = useState<readonly Secret[] | null>(null)
+  const [state, setState] = useState<{ locked: boolean; count: number; secrets: readonly Secret[] } | null>(null)
   const [name, setName] = useState('')
   const [site, setSite] = useState('')
   const [value, setValue] = useState('')
@@ -338,48 +648,70 @@ function SavedPasswords(): ReactNode {
   const load = async (): Promise<void> => {
     if (localCtx === undefined) return
     try {
-      setSecrets(unwrap(await localCtx.remote.session.localAgentBrowserSecrets({})).secrets)
+      setState(unwrap(await localCtx.remote.session.localAgentBrowserSecrets({})))
     } catch (reason) {
-      setMessage({ kind: 'error', text: reason instanceof Error ? reason.message : String(reason) })
+      setMessage({ kind: 'error', text: messageOf(reason) })
     }
   }
   useEffect(() => { void load() }, [])
-  const save = async (): Promise<void> => {
-    if (localCtx === undefined || busy) return
+  const run = async (task: () => Promise<void>): Promise<void> => {
+    if (busy) return
     setBusy(true)
     setMessage(null)
     try {
-      const saved = unwrap(await localCtx.remote.session.localAgentBrowserSaveSecret({ name, site, value }))
-      setValue('')
-      setName('')
-      setSite('')
-      setMessage({ kind: 'ok', text: `Saved as ${saved.name}. New chats can use it.` })
-      await load()
+      await task()
     } catch (reason) {
-      setMessage({ kind: 'error', text: reason instanceof Error ? reason.message : String(reason) })
+      setMessage({ kind: 'error', text: messageOf(reason) })
+      await load()
     } finally {
       setBusy(false)
     }
   }
-  const remove = async (secret: string): Promise<void> => {
+  const unlock = (): Promise<void> => run(async () => {
     if (localCtx === undefined) return
-    try {
-      unwrap(await localCtx.remote.session.localAgentBrowserRemoveSecret({ name: secret }))
-      await load()
-    } catch (reason) {
-      setMessage({ kind: 'error', text: reason instanceof Error ? reason.message : String(reason) })
-    }
+    const result = unwrap(await localCtx.remote.session.localAgentBrowserUnlock({}))
+    if (!result.unlocked && result.message !== undefined) setMessage({ kind: 'error', text: result.message })
+    await load()
+  })
+  const save = (): Promise<void> => run(async () => {
+    if (localCtx === undefined) return
+    const saved = unwrap(await localCtx.remote.session.localAgentBrowserSaveSecret({ name, site, value }))
+    setValue('')
+    setName('')
+    setSite('')
+    setMessage({ kind: 'ok', text: `Saved as ${saved.name}. New chats can use it.` })
+    await load()
+  })
+  const remove = (secret: string): Promise<void> => run(async () => {
+    if (localCtx === undefined) return
+    unwrap(await localCtx.remote.session.localAgentBrowserRemoveSecret({ name: secret }))
+    await load()
+  })
+  if (state === null) return <div className={css.section}><p className={css.hint}>{message?.text ?? 'Loading…'}</p></div>
+  if (state.locked) {
+    return (
+      <div className={css.locked}>
+        <LockIcon />
+        <div className={css.lockedTitle}>Saved passwords are locked</div>
+        <p className={css.hint}>
+          Confirm it's you with your Windows password to see or change them. The agent can still use them by name.
+          {state.count > 0 ? ` ${String(state.count)} saved.` : ''}
+        </p>
+        <button type="button" className={css.primary} disabled={busy} onClick={() => { void unlock() }} data-browser-unlock>
+          <ShieldIcon />{busy ? 'Waiting for Windows…' : 'Unlock with Windows'}
+        </button>
+        {message !== null && <p className={message.kind === 'error' ? css.error : css.okNote}>{message.text}</p>}
+      </div>
+    )
   }
   return (
-    <div className={css.passwords}>
-      <div className={css.popoverTitle}>Saved passwords</div>
-      <p className={css.popoverHint}>Encrypted on this PC. The agent types the name and the browser fills in the password: it never reaches the chat or the model.</p>
-      {secrets !== null && secrets.length > 0 && (
-        <ul className={css.sites}>
-          {secrets.map(secret => (
-            <li key={secret.name} className={css.site}>
-              <span className={css.siteName}>{secret.name}{secret.site === '' ? '' : <span className={css.secretSite}> · {secret.site}</span>}</span>
-              <button type="button" className={css.remove} onClick={() => { void remove(secret.name) }}>Remove</button>
+    <div className={css.section}>
+      {state.secrets.length > 0 && (
+        <ul className={css.rows}>
+          {state.secrets.map(secret => (
+            <li key={secret.name} className={css.row}>
+              <span className={css.rowName}>{secret.name}{secret.site === '' ? '' : <span className={css.rowSite}> · {secret.site}</span>}</span>
+              <button type="button" className={css.remove} disabled={busy} onClick={() => { void remove(secret.name) }}>Remove</button>
             </li>
           ))}
         </ul>
@@ -388,128 +720,41 @@ function SavedPasswords(): ReactNode {
         <input className={css.field} placeholder="Name (e.g. Work admin password)" value={name} onChange={(event) => { setName(event.target.value) }} aria-label="Password name" />
         <input className={css.field} placeholder="Site (e.g. example.com)" value={site} onChange={(event) => { setSite(event.target.value) }} aria-label="Site" />
         <input className={css.field} type="password" autoComplete="new-password" placeholder="Password" value={value} onChange={(event) => { setValue(event.target.value) }} aria-label="Password" />
-        <button type="submit" className={css.save} disabled={busy || name.trim() === '' || value === ''}>{busy ? 'Saving…' : 'Save password'}</button>
+        <button type="submit" className={css.primary} disabled={busy || name.trim() === '' || value === ''}>{busy ? 'Saving…' : 'Save password'}</button>
       </form>
+      <p className={css.hint}>Encrypted on this PC; the agent types the name and the browser fills in the password. Locks again when you hide the window or after 5 minutes.</p>
       {message !== null && <p className={message.kind === 'error' ? css.error : css.okNote}>{message.text}</p>}
     </div>
   )
 }
 
-function AgentBrowserTab({ sessionId }: PropsRuntime<'sidebar.right.pane.tab'>): ReactNode {
-  const view = useRef<HTMLDivElement | null>(null)
-  const [viewElement, setViewElement] = useState<HTMLDivElement | null>(null)
-  const area = useViewSize(viewElement)
-  const [frame, refresh] = useFrame(area)
-  const live = useSyncExternalStore(subscribeLive, () => liveSnapshot(sessionId))
-  const control = frame?.control === true
-  // La página toma el tamaño del panel (y la densidad de la pantalla); al redimensionar, con un poco de espera.
-  useEffect(() => {
-    if (area.width === 0) return
-    const timer = setTimeout(() => {
-      if (localCtx === undefined) return
-      void localCtx.remote.session.localAgentBrowserViewport({ mode: 'fit', fit: { width: area.width, height: area.height, dpr: area.dpr } })
-        .then(() => { refresh() }).catch(() => undefined)
-    }, 250)
-    return () => { clearTimeout(timer) }
-  }, [area.width, area.height, area.dpr])
-  // La imagen, lo más grande que quepa sin deformarse.
-  const aspect = frame === undefined || frame.viewport.height === 0 ? 1280 / 800 : frame.viewport.width / frame.viewport.height
-  const shown = area.width === 0 ? undefined : area.width / area.height > aspect
-    ? { width: Math.round(area.height * aspect), height: area.height }
-    : { width: area.width, height: Math.round(area.width / aspect) }
-  const gestures = useGestures(refresh)
-  const wheel = useRef<{ dx: number; dy: number; x: number; y: number; timer: ReturnType<typeof setTimeout> | undefined }>({ dx: 0, dy: 0, x: 0, y: 0, timer: undefined })
-  const setControl = async (active: boolean): Promise<void> => {
-    try {
-      if (localCtx !== undefined) unwrap(await localCtx.remote.session.localAgentBrowserControl({ active }))
-    } catch (error) {
-      console.warn('local agent browser control:', error)
-    }
-    refresh()
-    if (active) view.current?.focus()
-  }
-  // La rueda se agrupa (una llamada cada ~80 ms) y no desplaza el panel.
-  useEffect(() => {
-    const element = view.current
-    if (element === null || !control) return
-    const onWheel = (event: WheelEvent): void => {
-      event.preventDefault()
-      const image = element.querySelector('img')
-      if (image === null) return
-      const box = image.getBoundingClientRect()
-      const state = wheel.current
-      state.dx += event.deltaX
-      state.dy += event.deltaY
-      state.x = (event.clientX - box.left) / box.width
-      state.y = (event.clientY - box.top) / box.height
-      if (state.timer !== undefined) return
-      state.timer = setTimeout(() => {
-        gestures.send({ kind: 'wheel', x: state.x, y: state.y, deltaX: state.dx, deltaY: state.dy })
-        state.dx = 0
-        state.dy = 0
-        state.timer = undefined
-      }, 80)
-    }
-    element.addEventListener('wheel', onWheel, { passive: false })
-    return () => { element.removeEventListener('wheel', onWheel) }
-  }, [control, gestures])
-  const steps = live?.browser ?? []
-  const [saved, setSaved] = useState(false)
-  const list = useRef<HTMLOListElement | null>(null)
-  // El último paso, siempre a la vista.
-  useEffect(() => {
-    const element = list.current
-    if (element !== null) element.scrollTop = element.scrollHeight
-  }, [steps.length])
+/** Iconos que la app no trae (mismo trazo que los suyos: 1.5 px, puntas redondeadas). */
+function KeyIcon(): ReactNode {
   return (
-    <div className={css.root} data-agent-browser>
-      <div className={css.header}>
-        <span className={css.dot} data-running={frame?.running === true || undefined} />
-        <Tooltip label={frame?.url ?? ''} side="bottom" delayMs={500} disabled={frame?.url === undefined || frame.url === ''}>
-          <span className={css.address}>{frame?.url !== undefined && frame.url !== '' ? frame.url : 'Agent browser'}</span>
-        </Tooltip>
-        <Tooltip label={control ? 'Let the agent use the browser again' : 'Use the page yourself (to sign in, enter a code or solve a captcha). The agent waits.'} side="bottom" delayMs={500}>
-          <button type="button" className={css.tool} data-control={control || undefined} disabled={frame?.running !== true && !control}
-            onClick={() => { void setControl(!control) }}>
-            {control ? 'Give back to agent' : 'Take control'}
-          </button>
-        </Tooltip>
-        <button type="button" className={css.tool} aria-expanded={saved} onClick={() => { setSaved(open => !open) }}>Saved sign-ins</button>
-        {saved && <SavedSignIns onClose={() => { setSaved(false) }} />}
-      </div>
-      {control && (
-        <p className={css.notice} role="status">
-          You're in control and the agent is waiting. What you type goes straight to the page, never to the chat.
-        </p>
-      )}
-      <div ref={(element) => { view.current = element; setViewElement(element) }} className={css.view} data-control={control || undefined} tabIndex={control ? 0 : -1}
-        onKeyDown={control ? gestures.onKeyDown : undefined}
-        onPaste={control ? (event) => {
-          event.preventDefault()
-          const text = event.clipboardData.getData('text/plain')
-          if (text !== '') gestures.send({ kind: 'text', text })
-        } : undefined}>
-        {frame?.image != null
-          ? <img className={css.image} src={`data:image/webp;base64,${frame.image}`} alt={frame.title} draggable={false}
-            style={shown === undefined ? undefined : { width: shown.width, height: shown.height }}
-            onMouseDown={control ? gestures.onMouseDown : undefined}
-            onContextMenu={control ? (event) => { event.preventDefault() } : undefined} />
-          : (
-            <p className={css.empty}>
-              {frame?.running === true ? 'Waiting for the page…' : "The agent hasn't opened the browser yet. Ask it to visit a site and you'll see it here."}
-            </p>
-          )}
-      </div>
-      {steps.length > 0 && (
-        <ol ref={list} className={css.steps} aria-label="What the agent did in the browser">
-          {steps.map(step => (
-            <li key={step.callId} className={css.step} data-status={step.status}>
-              <span className={css.stepDot} />
-              <span className={css.stepText}>{stepText(step)}</span>
-            </li>
-          ))}
-        </ol>
-      )}
-    </div>
+    <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="6.5" cy="13.5" r="3.5" /><path d="M9 11l7.5-7.5M14 6l2 2M12 8l1.5 1.5" />
+    </svg>
+  )
+}
+
+function LockIcon(): ReactNode {
+  return (
+    <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={css.lockIcon}>
+      <rect x="5" y="10.5" width="14" height="10" rx="2.5" /><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3M12 14.5v2" />
+    </svg>
+  )
+}
+
+function ShieldIcon(): ReactNode {
+  return (
+    <svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M10 2.5l6 2.2v4.6c0 3.9-2.6 6.6-6 8.2-3.4-1.6-6-4.3-6-8.2V4.7z" /><path d="M7.5 10l1.8 1.8 3.4-3.6" />
+    </svg>
+  )
+}
+
+function PlayIcon(): ReactNode {
+  return (
+    <svg viewBox="0 0 20 20" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M6 4.5v11l9-5.5z" /></svg>
   )
 }

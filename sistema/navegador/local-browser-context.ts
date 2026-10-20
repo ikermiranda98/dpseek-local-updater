@@ -30,12 +30,30 @@ const TIPS = [
   '- In long pages, use browser_find to locate text instead of reading the whole snapshot again.',
   '- Do not take screenshots unless the user asks for one; you read pages through snapshots.',
   '- Before submitting a form that creates, changes or deletes data on a real (non-local) website, confirm with the user unless they explicitly asked for exactly that.',
-  '- Never ask for passwords, 2FA codes or captcha answers in the chat. When a site needs one, tell the user to open the Browser panel, press "Take control", do it there and press "Give back to agent" (or to save it under "Saved sign-ins" › "Saved passwords" for next time); then continue. Your browser actions wait while the user is in control.',
+  '- Never ask for passwords, 2FA codes or captcha answers in the chat. When a site needs one, tell the user to do it in the Browser panel (clicking the page gives them control, and "Resume agent" or their next message gives it back; passwords can also be saved under the key icon for next time). Your browser actions wait while the user is in control.',
+  '- Keep text between tool calls to one short line at most (no narration of what you see or plan). Every step must end with either a tool call or your final answer; after an error, try another way or tell the user.',
+  '- When done, answer with the result in 1-3 short sentences (what you did and anything the user must know). Give details or step lists only if the user asks.',
 ].join('\n')
 
 /** El usuario tiene el control del navegador desde el panel (lo pone el Host, local-agent-browser.ts). */
 const userControl = (): boolean =>
   ((globalThis as Record<symbol, unknown>)[Symbol.for('dpseek-local-updater.agent-browser-control')] as { active?: boolean } | undefined)?.active === true
+
+/** El control vuelve al agente (el usuario ha mandado un mensaje). */
+function releaseUserControl(): void {
+  const state = (globalThis as Record<symbol, unknown>)[Symbol.for('dpseek-local-updater.agent-browser-control')] as
+    { active?: boolean; timer?: ReturnType<typeof setTimeout> } | undefined
+  if (state?.active !== true) return
+  state.active = false
+  clearTimeout(state.timer)
+}
+
+/** Tipo del último suceso visible del chat. */
+function lastEventType(session: Session): string | undefined {
+  let last: number | undefined
+  for (const seq of session.surface.nodes) last = seq
+  return last === undefined ? undefined : session.eventAt(last)?.type
+}
 
 /** Espera a que el usuario devuelva el control; se corta si se cancela la llamada. */
 async function waitForUserControl(signal: AbortSignal): Promise<void> {
@@ -134,6 +152,8 @@ export function setupLocalBrowserContext(ctx: Context, toolPrefix: string): void
   })
 
   loose.on('agent/pre-step', async ({ agent, signal }, next) => {
+    // Un mensaje nuevo del usuario devuelve el control del navegador al agente.
+    if (lastEventType(agent.session) === 'user/message') releaseUserControl()
     if (!signal.aborted) {
       try {
         pruneOlderSnapshots(agent.session, loose.get('tokenMeter') as { estimateMessage(message: unknown): number } | undefined)

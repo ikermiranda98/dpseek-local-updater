@@ -284,30 +284,49 @@ campos y textos con su referencia), rellena formularios, hace clic y espera a qu
 con el **Edge de Windows** sin ventana. Es un solo Edge para todos los chats, con su propio
 perfil (`~/.dsh/storages/agent-browser`): las sesiones que inicia se quedan guardadas.
 
-**Lo que hace, a la vista.** Mientras el agente navega, la línea de estado del turno lleva
-**Browsing · N steps** (al terminar, **View browser**), que abre la pestaña **Browser** del
-panel derecho, junto a **Live code**. La pestaña muestra la página en directo con su dirección,
-el paso a paso del turno («Opened…», «Clicked Botón Entrar», «Filled in the form»…; nunca lo
-que escribe en un campo) y **Saved sign-ins**: una ventanita con las webs donde el navegador
-del agente tiene sesión guardada, con **Remove** para cerrarla (borra sus cookies y datos).
+**Un solo navegador, tuyo y del agente.** La pestaña **Browser** del panel derecho (la de la
+app, que los enlaces del chat abren) es ahora ese mismo Edge, en directo: **atrás**, **adelante**,
+**recargar** y la **dirección** editable (escribe una web o una búsqueda e Intro), con una etiqueta
+que dice quién lo maneja: **Agent** o **You**. Si la abres antes de que el agente use el
+navegador, el Edge se arranca al escribir una dirección, y luego el agente sigue en él.
 
-**La página se adapta sola al panel**, como una ventana de navegador (igual que el navegador de
-Claude Code): toma el tamaño del panel y la escala de tu pantalla, así que llena el sitio y se ve
-nítida al cambiar el tamaño de la ventana o pasarla a otra pantalla. Con el panel estrecho (menos
-de 768 px) la web ve un móvil.
+**Lo que hace, a la vista.** En el chat, la línea de estado del turno lleva solo un **globo**
+(abre la pestaña) y una **flecha** que despliega el paso a paso («Opened…», «Clicked Botón
+Entrar», «Filled in the form»…; nunca lo que escribe en un campo). La lista mide el sitio que
+tiene: se abre hacia abajo si cabe sin tapar la barra de escribir y, si no, hacia arriba, con la
+altura justa (si no cabe entera, se desplaza por dentro). En la pestaña, el paso a paso también
+está oculto: la flecha junto a la dirección lo despliega.
 
-**Take control.** Para iniciar sesión, meter un código 2FA o resolver un captcha sin pasar
-nada por el chat: **Take control** y usas la página desde el panel (clic, rueda, teclado y
-pegar); lo que escribes va directo a la página, nunca al chat ni al modelo. Mientras tanto
-las acciones del agente en el navegador esperan; **Give back to agent** las deja seguir (y si
-te olvidas, el control vuelve solo a los 5 minutos sin tocar nada). El agente sabe que, si una
-web le pide una contraseña que no tiene, debe pedirte que lo hagas tú así.
+**La página se adapta sola al panel y va fluida.** Toma el tamaño del panel y la escala de tu
+pantalla (como el navegador de Claude Code), así que llena el sitio y se ve nítida en cualquier
+ventana o pantalla; con el panel estrecho (menos de 768 px) la web ve un móvil. Edge manda cada
+fotograma en cuanto pinta (no capturas cada poco), al redimensionar la imagen se escala al momento
+y la página se recoloca como mucho cada 100 ms, y mientras el panel se desliza al abrirse o
+cerrarse no cambia nada, como el resto de animaciones de la app.
 
-**Contraseñas guardadas.** En **Saved sign-ins › Saved passwords** guardas una contraseña con
-un nombre y su web; queda cifrada en el PC con DPAPI de Windows (solo tu usuario de Windows
-la descifra). El agente solo conoce el nombre: lo escribe donde va la contraseña y el
-navegador pone el valor real, que el modelo nunca ve (en las respuestas sale como
-`<secret>NOMBRE</secret>`). Vale para los chats que empiecen a usar el navegador después.
+**Tomar el control es tocar la página.** Para iniciar sesión, meter un código 2FA o resolver un
+captcha sin pasar nada por el chat, haz clic, desplaza o escribe en la página: el borde se pone
+ámbar, la etiqueta dice **You** y abajo aparece **You're browsing — the agent waits · Resume
+agent**. Ratón (también pasar por encima y arrastrar), rueda, teclado y pegar van directos a la
+página, nunca al chat ni al modelo. Mientras tanto las acciones del agente en el navegador
+esperan; el control vuelve al agente con **Resume agent**, al mandar un mensaje en el chat o tras
+2 minutos sin tocar nada. El agente sabe que, si una web le pide una contraseña que no tiene,
+debe pedirte que lo hagas tú así.
+
+**Contraseñas y sesiones, en la llave.** El icono de la llave abre **Passwords | Signed-in
+sites**. Las contraseñas guardadas están **bloqueadas**: para verlas o cambiarlas, **Unlock with
+Windows** abre la ventana oficial de **Seguridad de Windows** con tu usuario, donde escribes tu
+contraseña de Windows (o Windows Hello, si lo tienes configurado). La contraseña se comprueba con
+Windows y no llega a la app; se vuelven a bloquear al ocultar o cerrar la ventana y a los 5
+minutos. Cada contraseña se guarda con un nombre y su web, cifrada con DPAPI (solo tu usuario de
+Windows la descifra). El agente solo conoce el nombre, también con la llave bloqueada: lo escribe
+donde va la contraseña y el navegador pone el valor real, que el modelo nunca ve (en las
+respuestas sale como `<secret>NOMBRE</secret>`). **Signed-in sites** lista las webs con sesión
+guardada, con **Remove** para cerrarla (borra sus cookies y datos).
+
+**Respuestas cortas.** Con el navegador o el control de Windows, el agente trabaja sin contar
+lo que va haciendo entre paso y paso y al final responde con el resultado en 1–3 frases (los
+detalles, si se los pides); el paso a paso queda en la parte plegable del turno.
 
 **Menos pasos y menos contexto.** Playwright, tras cada acción, devolvía un enlace a un fichero
 con la página en vez de la página: el modelo gastaba otra llamada en leerla o actuaba con
@@ -593,7 +612,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | El selector de modelo como chip («Qwen3.6 · 128K», la rueda cambia el contexto) que abre una fila de modelos dentro de la barra (opcional) | `packages/client/ui-model-selection` (`ModelSelect.tsx`) + [`sistema/contexto/LocalModelDrawer.tsx`](sistema/contexto/LocalModelDrawer.tsx) |
 | La barra lateral se esconde por debajo de 760 px de ventana, no de 1024 (opcional) | `packages/client/ui-layout` (`columns.ts`) |
 | Un navegador de verdad para el agente: Playwright MCP con un Edge compartido que guarda las sesiones, incluido en la app empaquetada (opcional) | `apps/cli/package.json`, `pnpm-lock.yaml`, `packages/bundle/web-app/cordis.patch.yml`, `packages/experimental/browser-use-playwright-mcp` + [`sistema/navegador/agent-browser-launcher.mjs`](sistema/navegador/agent-browser-launcher.mjs) |
-| Pestaña «Browser» en el panel derecho (página en directo, nítida y ajustada al panel, «Take control», paso a paso, «Saved sign-ins» y «Saved passwords») y «View browser» en la línea de estado del turno (opcional) | `packages/client/ui-deliverables`, `packages/client/ui-chat`, `packages/api/session-controller` + [`sistema/navegador/`](sistema/navegador/) |
+| Un navegador compartido por el agente y el usuario como pestaña «Browser» (fotogramas en directo, ajustado al panel, barra de dirección, control al tocar la página, paso a paso desplegable, llave con contraseñas bloqueadas por Windows y sesiones) y globo con flecha en la línea de estado del turno (opcional) | `packages/client/ui-deliverables`, `packages/client/ui-chat`, `packages/api/session-controller`, `packages/bundle/web-app/cordis.patch.yml` + [`sistema/navegador/`](sistema/navegador/) |
 | Navegador con menos pasos y contexto (página en línea en cada acción, solo la última entera, instrucciones de uso) y contraseñas por nombre (opcional) | `packages/experimental/browser-use-playwright-mcp` + [`sistema/navegador/local-browser-context.ts`](sistema/navegador/local-browser-context.ts) |
 | Arranque reintentado y sin cookies de acceso acumuladas (el error «Web authentication failed (HTTP 431)») (opcional) | `apps/desktop` (`welcome-backend.ts`, `main.ts`) |
 | La app arranca con Windows, oculta en la bandeja (opcional) | `apps/desktop` (`main.ts`) |

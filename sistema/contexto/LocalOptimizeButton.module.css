@@ -150,7 +150,7 @@
   border-radius: 9px;
   background: var(--dsw-alias-interactive-bg-hover);
   cursor: default;
-  transition: background 140ms ease;
+  transition: background var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
 .switch[data-on] {
@@ -170,7 +170,7 @@
   height: 14px;
   border-radius: 50%;
   background: var(--dsw-alias-label-primary);
-  transition: left 140ms ease;
+  transition: left var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
 .switch[data-on] .switchKnob {

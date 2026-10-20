@@ -58,7 +58,7 @@
   border-radius: 6px;
   background: var(--dsw-alias-interactive-bg-hover-solid);
   transform: translateX(calc(100% * var(--context-index)));
-  transition: transform 200ms var(--ds-ease-in-out, ease);
+  transition: transform var(--ds-transition-duration) var(--ds-ease-in-out);
   pointer-events: none;
 }
 
@@ -75,7 +75,7 @@
   font-variant-numeric: tabular-nums;
   line-height: 20px;
   cursor: default;
-  transition: color 100ms ease;
+  transition: color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
 }
 
 .step:hover:not(:disabled) {

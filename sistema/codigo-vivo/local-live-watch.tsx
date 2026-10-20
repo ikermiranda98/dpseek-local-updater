@@ -7,15 +7,19 @@
  * se leen unas siete veces por segundo.
  *
  * El panel no se abre solo: la línea de estado del turno («Deep diving…» y
- * «Completed in…») lleva el botón «View code» cuando el turno escribe ficheros.
+ * «Completed in…») lleva el botón «View code» cuando el turno escribe ficheros, y el globo del navegador (con su
+ * paso a paso en una lista desplegable) cuando usa el navegador.
  */
-import { createContext, useContext, useEffect, useRef, useSyncExternalStore } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
-import { LinkIconMedium, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  IconChevronDownOutlineRegular, IconGlobeOutlineRegular, LinkIconMedium, MenuSurface, Tooltip, useDismissOnOutsidePointer,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ToolCallBlock } from '../contract/snapshot.ts'
 import type { UseChat } from '../contract/slots.ts'
 import {
-  liveSnapshot, publishLive, requestBrowserOpen, requestLiveOpen, subscribeLive,
+  browserStepText, liveSnapshot, publishLive, requestBrowserOpen, requestLiveOpen, subscribeLive,
   type LiveBrowserStep, type LiveEdit, type LiveFile,
 } from './local-live-store.ts'
 import css from './local-live-watch.module.css'
@@ -197,28 +201,125 @@ export function LocalLiveCodeButton({ turn, placement }: { turn?: number; placem
 }
 
 /**
- * «View browser» en la línea de estado del turno: abre la pestaña «Agent browser» con lo que hace el agente.
+ * El navegador en la línea de estado del turno: el globo abre la pestaña «Browser» y la flecha de al lado despliega el
+ * paso a paso del agente. La lista mide el hueco que tiene (hasta la barra de escribir por abajo y hasta la cabecera por
+ * arriba), se abre hacia donde cabe y ajusta su altura; si no cabe entera, se desplaza por dentro.
  * @param props - turno de la línea (sin él, el que está en marcha) y dónde va.
- * @returns el botón, o nada si ese turno no ha usado el navegador.
+ * @returns los dos botones, o nada si ese turno no ha usado el navegador.
  */
 export function LocalBrowserButton({ turn, placement }: { turn?: number; placement: 'running' | 'process' }) {
   const sessionId = useContext(LiveSession)
   const live = useSyncExternalStore(subscribeLive, () => sessionId === undefined ? undefined : liveSnapshot(sessionId))
+  const [open, setOpen] = useState(false)
+  const group = useRef<HTMLSpanElement | null>(null)
+  const panel = useRef<HTMLDivElement | null>(null)
+  const list = useRef<HTMLOListElement | null>(null)
+  const [place, setPlace] = useState<StepsPlacement | null>(null)
   const steps = live?.browser ?? []
+  useDismissOnOutsidePointer(group, open, setOpen, panel)
+  useLayoutEffect(() => {
+    if (!open) {
+      setPlace(null)
+      return
+    }
+    const measure = (): void => {
+      if (group.current !== null && panel.current !== null) setPlace(placeSteps(group.current, panel.current))
+    }
+    measure()
+    const onKey = (event: KeyboardEvent): void => { if (event.key === 'Escape') setOpen(false) }
+    window.addEventListener('resize', measure)
+    window.addEventListener('scroll', measure, true)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('scroll', measure, true)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open, steps.length])
+  // El último paso, siempre a la vista.
+  useLayoutEffect(() => {
+    if (list.current !== null) list.current.scrollTop = list.current.scrollHeight
+  }, [open, steps.length, place?.maxHeight])
   if (sessionId === undefined || live === undefined || steps.length === 0) return null
   if (turn === undefined ? !live.running : live.turn !== turn) return null
   const busy = live.running && steps.at(-1)?.status === 'running'
   return (
-    <Tooltip label="See what the agent is doing in the browser" side="top" delayMs={500}>
-      <button type="button" className={css.button} data-placement={placement} data-browser-button
-        onClick={(event) => {
-          event.stopPropagation()
-          requestBrowserOpen(sessionId)
-        }}>
-        <LinkIconMedium kind="url" className={css.icon} />
-        <span>{busy ? 'Browsing' : 'View browser'}</span>
-        <span className={css.count}>{steps.length === 1 ? '1 step' : `${String(steps.length)} steps`}</span>
-      </button>
-    </Tooltip>
+    <span ref={group} className={css.browserGroup} data-placement={placement} data-browser-button
+      // Dentro de la línea «Completed in…», que pliega el turno: los clics son solo nuestros.
+      onClick={(event) => { event.stopPropagation() }}>
+      <Tooltip label="Open the browser" side="top" delayMs={500} portal>
+        <button type="button" className={css.groupButton} aria-label="Open the browser" data-browser-open
+          onClick={() => { requestBrowserOpen(sessionId) }}>
+          <IconGlobeOutlineRegular className={css.globe} data-busy={busy || undefined} />
+        </button>
+      </Tooltip>
+      <Tooltip label={open ? 'Hide the steps' : "The agent's steps"} side="top" delayMs={500} disabled={open} portal>
+        <button type="button" className={css.groupButton} aria-label="The agent's steps" aria-expanded={open} data-browser-steps
+          onClick={() => { setOpen(value => !value) }}>
+          <IconChevronDownOutlineRegular className={css.chevron} data-up={place?.up === true || undefined} />
+        </button>
+      </Tooltip>
+      {open && createPortal(
+        <MenuSurface ref={panel} className={css.stepsMenu} role="dialog" aria-label="The agent's steps in the browser"
+          style={place === null
+            ? { visibility: 'hidden', left: 0, top: 0 }
+            : { left: place.left, top: place.top, bottom: place.bottom, maxHeight: place.maxHeight }}>
+          <div className={css.stepsHead}><span>Agent steps</span><span>{String(steps.length)}</span></div>
+          <ol ref={list} className={css.stepsList}>
+            {steps.map(step => (
+              <li key={step.callId} className={css.step} data-status={step.status}>
+                <span className={css.stepDot} />
+                <span className={css.stepText}>{browserStepText(step)}</span>
+              </li>
+            ))}
+          </ol>
+        </MenuSurface>,
+        document.body,
+      )}
+    </span>
   )
+}
+
+interface StepsPlacement {
+  readonly left: number
+  readonly top?: number
+  readonly bottom?: number
+  readonly maxHeight: number
+  readonly up: boolean
+}
+
+/** Separación entre los botones y la lista, y margen con los bordes. */
+const STEPS_GAP = 6
+const STEPS_MARGIN = 10
+/** Altura con la que la lista se ve bien; con menos sitio debajo, se abre hacia arriba si allí hay más. */
+const STEPS_COMFORT = 220
+const STEPS_MAX = 420
+
+/** Dónde va la lista: hacia abajo si cabe (hasta la barra de escribir), si no hacia donde haya más sitio. */
+function placeSteps(anchor: HTMLElement, panel: HTMLElement): StepsPlacement {
+  const rect = anchor.getBoundingClientRect()
+  let scroller: HTMLElement | null = anchor.parentElement
+  while (scroller !== null && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement
+  const area = scroller?.getBoundingClientRect() ?? { top: 0, bottom: window.innerHeight }
+  const composer = scroller?.querySelector<HTMLElement>('[data-composer-seat]')?.getBoundingClientRect()
+  const topLimit = Math.max(overlayTopMargin(STEPS_MARGIN), area.top + STEPS_MARGIN)
+  const bottomLimit = Math.min(window.innerHeight - STEPS_MARGIN,
+    composer !== undefined && composer.top > rect.bottom ? composer.top - STEPS_MARGIN : area.bottom - STEPS_MARGIN)
+  const below = bottomLimit - rect.bottom - STEPS_GAP
+  const above = rect.top - STEPS_GAP - topLimit
+  const natural = Math.min(STEPS_MAX, panel.scrollHeight)
+  const up = below < Math.min(natural, STEPS_COMFORT) && above > below
+  const left = Math.min(Math.max(rect.right - panel.offsetWidth, STEPS_MARGIN), window.innerWidth - panel.offsetWidth - STEPS_MARGIN)
+  const maxHeight = Math.max(96, Math.min(STEPS_MAX, up ? above : below))
+  return up
+    ? { left, bottom: window.innerHeight - rect.top + STEPS_GAP, maxHeight, up }
+    : { left, top: rect.bottom + STEPS_GAP, maxHeight, up }
+}
+
+/** Margen superior de los menús de la app: el de la franja reservada de la ventana (como overlayTopMargin de la app). */
+function overlayTopMargin(min: number): number {
+  const root = document.documentElement
+  const clearance = Number.parseFloat(getComputedStyle(root).getPropertyValue('--dsh-frame-top-clearance'))
+  if (Number.isNaN(clearance)) return min
+  return Math.max(min, (root.hasAttribute('data-fullscreen') ? 0 : clearance) + 20)
 }

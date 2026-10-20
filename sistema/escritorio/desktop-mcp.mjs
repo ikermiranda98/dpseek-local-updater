@@ -53,6 +53,7 @@ const INSTRUCTIONS = [
   '4. Always pass window_id together with pid (an app can own several windows).',
   'Ask the user before closing apps, deleting files or data, sending messages or emails, making purchases or changing system settings.',
   'Never type passwords you were not given; for sign-ins, ask the user to do it themselves.',
+  'Keep text between tool calls to one short line at most. Every step must end with a tool call or your final answer; after an error, try another way or tell the user. When done, answer with the result in 1-3 short sentences; details only if asked.',
 ].join('\n')
 
 /**

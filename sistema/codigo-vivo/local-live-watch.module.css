@@ -37,3 +37,156 @@
 .count {
   color: var(--dsw-alias-label-tertiary);
 }
+
+/* El navegador en la línea de estado: solo el globo y una flecha, en una misma pastilla. */
+.browserGroup {
+  display: inline-flex;
+  flex: none;
+  align-items: stretch;
+  height: 24px;
+  margin-left: 10px;
+  overflow: hidden;
+  border: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 35%, transparent);
+  border-radius: var(--dsw-radius-sm);
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 10%, transparent);
+}
+
+.browserGroup[data-placement='process'] {
+  position: absolute;
+  top: 0;
+  right: 0;
+  margin-left: 0;
+}
+
+/* Con el navegador al lado, «View code» se aparta (la pastilla del navegador mide unos 52 px). */
+.button[data-placement='process']:has(+ .browserGroup[data-placement='process']) {
+  right: 60px;
+}
+
+.groupButton {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-state-business-primary);
+  cursor: default;
+  transition: background-color var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+.groupButton[data-browser-steps] {
+  width: 22px;
+  border-left: 0.5px solid color-mix(in srgb, var(--dsw-alias-state-business-primary) 30%, transparent);
+}
+
+.groupButton:hover,
+.groupButton[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--dsw-alias-state-business-primary) 18%, transparent);
+}
+
+.globe {
+  width: 14px;
+  height: 14px;
+}
+
+.globe[data-busy] {
+  animation: browserBusy 1.2s var(--ds-ease-in-out) infinite;
+}
+
+.chevron {
+  width: 12px;
+  height: 12px;
+  transition: transform var(--ds-transition-duration) var(--ds-ease-in-out);
+}
+
+.chevron[data-up] {
+  transform: rotate(180deg);
+}
+
+@keyframes browserBusy {
+  50% { opacity: 0.4; }
+}
+
+/* La lista de pasos: el material de los menús de la app, fija en la ventana (mide su hueco en el componente). */
+.stepsMenu {
+  position: fixed;
+  z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  width: 300px;
+  padding: 6px;
+  box-shadow: var(--dsw-elevation-panel);
+  color: var(--dsw-alias-label-primary);
+  font: var(--dsw-font-xs-13);
+  animation: stepsIn var(--ds-transition-duration-fast) var(--ds-ease-in-out);
+}
+
+@keyframes stepsIn {
+  from { opacity: 0; }
+}
+
+.stepsHead {
+  display: flex;
+  flex: none;
+  justify-content: space-between;
+  padding: 2px 8px 6px;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 12px;
+}
+
+.stepsList {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.step {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 8px;
+  border-radius: var(--dsw-radius-md);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.step:last-child {
+  color: var(--dsw-alias-label-primary);
+}
+
+.stepDot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-file-diff-added-marker);
+}
+
+.step[data-status='running'] .stepDot {
+  background: var(--dsw-alias-state-business-primary);
+  animation: browserBusy 1s var(--ds-ease-in-out) infinite;
+}
+
+.step[data-status='failed'] .stepDot {
+  background: var(--dsw-alias-state-error-primary);
+}
+
+.stepText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .globe[data-busy],
+  .step[data-status='running'] .stepDot,
+  .stepsMenu {
+    animation: none;
+  }
+}

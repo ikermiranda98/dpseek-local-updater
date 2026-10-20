@@ -522,7 +522,7 @@
   bottom: 2px;
   border-radius: 12px;
   background: var(--dsw-alias-bg-layer-1, var(--dsw-alias-interactive-bg-hover-solid));
-  transition: left 250ms ease, width 250ms ease, background-color 250ms;
+  transition: left var(--ds-transition-duration) var(--ds-ease-in-out), width var(--ds-transition-duration) var(--ds-ease-in-out), background-color var(--ds-transition-duration) var(--ds-ease-in-out);
 }
 
 :global([data-composer-card][data-local-reprompt]) .knob {
@@ -543,7 +543,7 @@
   font-size: 12px;
   white-space: nowrap;
   cursor: default;
-  transition: color 200ms;
+  transition: color var(--ds-transition-duration) var(--ds-ease-in-out);
 }
 
 .face[aria-selected="true"] {
@@ -591,8 +591,8 @@
    pestaña de opciones lo continúa con el mismo grosor. */
 :global([data-composer-card]) {
   --dsw-elevation-stroke: 0 0 0 1px var(--dsw-elevation-stroke-color);
-  transition: background-color 200ms var(--ds-ease-in-out, ease), margin-top 160ms var(--ds-ease-in-out, ease),
-    border-radius 200ms var(--ds-ease-in-out, ease);
+  transition: background-color var(--ds-transition-duration) var(--ds-ease-in-out), margin-top var(--ds-transition-duration) var(--ds-ease-in-out),
+    border-radius var(--ds-transition-duration) var(--ds-ease-in-out);
 }
 
 /* La pestaña de opciones tiene su propio hueco encima de la barra: lo que la app pone ahí (carpeta de trabajo
@@ -705,7 +705,7 @@
   border-bottom: 0;
   border-radius: var(--notch-r) var(--notch-r) 0 0;
   background: var(--notch-surface);
-  animation: notch-in 200ms var(--ds-ease-in-out, ease);
+  animation: notch-in var(--ds-transition-duration) var(--ds-ease-in-out);
 }
 
 /* La curva de unión, con formas vectoriales (máscaras SVG) para que el borde se suavice igual que las esquinas de
@@ -767,7 +767,7 @@
   font-size: 12px;
   white-space: nowrap;
   cursor: default;
-  transition: color 200ms, background-color 200ms;
+  transition: color var(--ds-transition-duration) var(--ds-ease-in-out), background-color var(--ds-transition-duration) var(--ds-ease-in-out);
 }
 
 .option svg {
@@ -832,7 +832,7 @@
   font-size: 12px;
   white-space: nowrap;
   cursor: default;
-  transition: color 200ms, background-color 200ms;
+  transition: color var(--ds-transition-duration) var(--ds-ease-in-out), background-color var(--ds-transition-duration) var(--ds-ease-in-out);
 }
 
 .shortcut:hover {
@@ -859,7 +859,7 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   cursor: default;
-  transition: background-color 200ms;
+  transition: background-color var(--ds-transition-duration) var(--ds-ease-in-out);
 }
 
 .counter:hover {

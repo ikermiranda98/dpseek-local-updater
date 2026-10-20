@@ -22,7 +22,7 @@
   background: transparent;
   color: var(--dsw-alias-label-tertiary);
   cursor: default;
-  transition: background-color 250ms var(--ds-ease-in-out, ease), color 250ms var(--ds-ease-in-out, ease);
+  transition: background-color var(--ds-transition-duration) var(--ds-ease-in-out), color var(--ds-transition-duration) var(--ds-ease-in-out);
 }
 
 .button:hover:not(:disabled) {
@@ -122,7 +122,7 @@
 .twinkles,
 .ring {
   opacity: 0;
-  transition: opacity 300ms ease;
+  transition: opacity var(--ds-transition-duration-slow) var(--ds-ease-in-out);
 }
 
 .button[data-mode='1'] .twinkles,

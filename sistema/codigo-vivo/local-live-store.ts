@@ -61,12 +61,12 @@ const store = ((globalThis as Record<symbol, unknown>)[KEY] ??= {
 store.browserOpeners ??= new Set()
 const browserOpeners = store.browserOpeners
 
-/** El chat pide abrir la pestaña «Agent browser». */
+/** El chat pide abrir la pestaña «Browser». */
 export function requestBrowserOpen(sessionId: string): void {
   for (const opener of browserOpeners) opener(sessionId)
 }
 
-/** @returns cómo dejar de atender las peticiones de abrir la pestaña «Agent browser». */
+/** @returns cómo dejar de atender las peticiones de abrir la pestaña «Browser». */
 export function onBrowserOpen(opener: (sessionId: string) => void): () => void {
   browserOpeners.add(opener)
   return () => { browserOpeners.delete(opener) }
@@ -98,4 +98,34 @@ export function requestLiveOpen(sessionId: string): void {
 export function onLiveOpen(opener: (sessionId: string) => void): () => void {
   store.openers.add(opener)
   return () => { store.openers.delete(opener) }
+}
+
+/** Cómo se dice cada paso del navegador, en pocas palabras (en el chat y en el panel). */
+export function browserStepText(step: LiveBrowserStep): string {
+  const on = step.detail === '' ? '' : ` ${step.detail}`
+  switch (step.action) {
+    case 'navigate': return `Opened${on}`
+    case 'navigate_back': return 'Went back'
+    case 'snapshot': return 'Read the page'
+    case 'click': return `Clicked${on}`
+    case 'hover': return `Hovered${on}`
+    case 'type': return `Typed in${on}`
+    case 'fill_form': return 'Filled in the form'
+    case 'select_option': return `Chose an option in${on}`
+    case 'press_key': return `Pressed${on}`
+    case 'wait_for': return step.detail === '' ? 'Waited' : `Waited for «${step.detail}»`
+    case 'take_screenshot': return 'Took a screenshot'
+    case 'tabs': return `Tabs: ${step.detail}`
+    case 'close': return 'Closed the page'
+    case 'evaluate': case 'run_code_unsafe': return 'Ran a script on the page'
+    case 'file_upload': return 'Uploaded a file'
+    case 'find': return step.detail === '' ? 'Searched the page' : `Searched the page for «${step.detail}»`
+    case 'network_requests': return 'Checked the network requests'
+    case 'network_request': return 'Read a network request'
+    case 'console_messages': return 'Read the console'
+    case 'handle_dialog': return 'Answered a dialog'
+    case 'drag': return `Dragged${on}`
+    case 'resize': return 'Resized the window'
+    default: return `${step.action.replace(/_/g, ' ')}${on}`
+  }
 }
