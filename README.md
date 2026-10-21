@@ -317,11 +317,13 @@ va a la dirección, **F5** recarga y **Alt+← / →** van atrás y adelante. El
 página (mano en los enlaces, barra en el texto) y el botón derecho abre un menú con Atrás, Adelante,
 Recargar, Copiar, Pegar, Seleccionar todo, Buscar y el zoom. **Arrastra ficheros** desde el
 Explorador sobre la página para subirlos: se sueltan en ese punto como un arrastre de verdad (las
-zonas de «suelta aquí» y los campos de fichero los aceptan; hasta 64 MB). Lleva **Adblock Plus** y
-**AdGuard**: la app los descarga de la Chrome Web Store la primera vez (y cada semana mira si hay
-versión nueva) y Edge los carga al arrancar (también si ya estaba abierto); la pestaña de bienvenida
-que abren al instalarse se cierra sola. Si Edge no está instalado o es anterior a la 120, la
-pestaña lo dice en vez de quedarse en blanco.
+zonas de «suelta aquí» y los campos de fichero los aceptan; hasta 64 MB). Si Edge no está instalado
+o es anterior a la 120, la pestaña lo dice en vez de quedarse en blanco.
+
+No lleva bloqueador de anuncios. Lo probé con Adblock Plus y AdGuard cargados en ese Edge, pero
+Edge rechazaba sus carpetas sin un motivo claro y había que copiarlas (cientos de MB cada vez), así
+que los quité. Al abrir la app se borra la carpeta `%LOCALAPPDATA%\dsh-ad-blockers` que dejaron las
+versiones anteriores.
 
 **Solo mirar.** El ojo de la barra enciende el modo **Look only**: en webs reales el agente puede
 abrir, leer, buscar y desplazarse, pero no pulsar, escribir ni rellenar formularios (en las webs
@@ -682,7 +684,7 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | El selector de modelo como chip («Qwen3.6 · 128K», la rueda cambia el contexto) que abre una fila de modelos dentro de la barra (opcional) | `packages/client/ui-model-selection` (`ModelSelect.tsx`) + [`sistema/contexto/LocalModelDrawer.tsx`](sistema/contexto/LocalModelDrawer.tsx) |
 | La barra lateral se esconde por debajo de 760 px de ventana, no de 1024 (opcional) | `packages/client/ui-layout` (`columns.ts`) |
 | Un navegador de verdad para el agente: Playwright MCP con un Edge compartido que guarda las sesiones, incluido en la app empaquetada (opcional) | `apps/cli/package.json`, `pnpm-lock.yaml`, `packages/bundle/web-app/cordis.patch.yml`, `packages/experimental/browser-use-playwright-mcp` + [`sistema/navegador/agent-browser-launcher.mjs`](sistema/navegador/agent-browser-launcher.mjs) |
-| Un navegador compartido por el agente y el usuario como pestaña «Browser» (fotogramas en directo, ajustado al panel, barra de dirección, pestañas, copiar, buscar, zoom, soltar ficheros, solo mirar, permiso con botón, control al tocar la página, paso a paso de todos los turnos, llave con contraseñas por web, Windows Hello y copia cifrada, sesiones, Adblock Plus y AdGuard) y globo con flecha en la línea de estado de cada turno (opcional) | `packages/client/ui-deliverables`, `packages/client/ui-chat`, `packages/api/session-controller`, `packages/bundle/web-app/cordis.patch.yml` + [`sistema/navegador/`](sistema/navegador/) |
+| Un navegador compartido por el agente y el usuario como pestaña «Browser» (fotogramas en directo, ajustado al panel, barra de dirección, pestañas, copiar, buscar, zoom, soltar ficheros, solo mirar, permiso con botón, control al tocar la página, paso a paso de todos los turnos, llave con contraseñas por web, Windows Hello y copia cifrada, sesiones) y globo con flecha en la línea de estado de cada turno (opcional) | `packages/client/ui-deliverables`, `packages/client/ui-chat`, `packages/api/session-controller`, `packages/bundle/web-app/cordis.patch.yml` + [`sistema/navegador/`](sistema/navegador/) |
 | Navegador con menos pasos y contexto (página en línea en cada acción, solo la última entera, instrucciones de uso) y contraseñas por nombre (opcional) | `packages/experimental/browser-use-playwright-mcp` + [`sistema/navegador/local-browser-context.ts`](sistema/navegador/local-browser-context.ts) |
 | Arranque reintentado y sin cookies de acceso acumuladas (el error «Web authentication failed (HTTP 431)») (opcional) | `apps/desktop` (`welcome-backend.ts`, `main.ts`) |
 | La app arranca con Windows, oculta en la bandeja (opcional) | `apps/desktop` (`main.ts`) |

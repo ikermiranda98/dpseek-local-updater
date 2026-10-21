@@ -17,14 +17,13 @@
  *   cerrar; copiar al portapapeles de Windows, buscar en la página, zoom, cursor y soltar ficheros sobre la página;
  * - modo «solo mirar» (el agente no escribe en webs reales) y el permiso con un botón para los clics que envían algo
  *   (los pide el proveedor del navegador, local-browser-context.ts);
- * - Adblock Plus y AdGuard en ese Edge (se descargan de la Chrome Web Store y se cargan al arrancarlo);
  * - al cerrar la app, se cierra ese Edge.
  */
 
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import {
-  closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
+  closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -119,7 +118,7 @@ export type LocalAgentBrowserNavigation =
   | { readonly action: 'url'; readonly url: string }
   | { readonly action: 'back' | 'forward' | 'reload' }
 
-/** Edge desde esta versión: el modo sin ventana nuevo, las extensiones sin empaquetar y el protocolo que se usa aquí. */
+/** Edge desde esta versión: el modo sin ventana nuevo y el protocolo que se usa aquí. */
 const EDGE_MIN_MAJOR = 120
 
 const home = (): string => process.env.DSH_HOME ?? join(homedir(), '.dsh')
@@ -580,155 +579,18 @@ export function localAgentBrowserCheck(): { readonly ok: boolean; readonly versi
 }
 
 /**
- * Bloqueadores de anuncios del navegador, de la Chrome Web Store (Edge acepta sus extensiones). Se descargan solos y se
- * cargan cada vez que arranca ese Edge, por el protocolo de depuración (Extensions.loadUnpacked: el Edge de marca ignora
- * --load-extension); cada semana se vuelve a mirar si hay versión nueva.
+ * Las versiones anteriores llevaban bloqueadores de anuncios (Adblock Plus y AdGuard) en una carpeta compartida; se
+ * quitaron porque Edge rechazaba sus carpetas sin un motivo claro y había que copiarlas (cientos de MB cada vez). Se
+ * borra lo que dejaron; si un Edge de antes aún la tiene abierta, se vuelve a intentar en el siguiente arranque.
  */
-const AD_BLOCKERS = [
-  { id: 'cfhdojbkjhnklbpkdaibdccddilifddb', name: 'Adblock Plus' },
-  { id: 'bgnkhhnnamicmpeenaelnjfhikgbkllg', name: 'AdGuard' },
-] as const
-const EXTENSIONS_REFRESH_MS = 7 * 24 * 60 * 60_000
-
-/**
- * Carpeta de las extensiones (la misma que mira el lanzador del agente, agent-browser-launcher.mjs). De ruta corta: con
- * la carpeta de la app más larga, las reglas de los bloqueadores pasaban de 260 caracteres y Edge no las cargaba.
- */
-export function localAgentBrowserExtensionsDir(): string {
-  return join(process.env.LOCALAPPDATA ?? join(home(), 'storages'), 'dsh-ad-blockers')
-}
-
-/**
- * Las carpetas de una extensión, de la más nueva a la más vieja. Cada descarga va a una carpeta con nombre nuevo
- * (<id>-<marca>), nunca encima de otra: tras sustituir una carpeta por otra con el mismo nombre, Edge rechazaba esa ruta
- * («The provided path … is invalid») aunque los ficheros estuvieran bien, incluso con un perfil limpio.
- */
-function extensionDirsOf(id: string): string[] {
-  const root = localAgentBrowserExtensionsDir()
+function removeOldAdBlockers(): void {
   try {
-    return readdirSync(root).filter(name => (name === id || name.startsWith(`${id}-`)) && existsSync(join(root, name, 'manifest.json')))
-      .map(name => join(root, name)).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
+    rmSync(join(process.env.LOCALAPPDATA ?? join(home(), 'storages'), 'dsh-ad-blockers'), { recursive: true, force: true })
   } catch {
-    return []
+    // En uso: otra vez será.
   }
 }
-
-/** Las extensiones listas para cargar: la carpeta más nueva de cada una. */
-function extensionDirs(): string[] {
-  return AD_BLOCKERS.map(item => extensionDirsOf(item.id)[0]).filter((dir): dir is string => dir !== undefined)
-}
-
-/** Una carpeta nueva para una extensión (nunca un nombre ya usado). */
-const freshExtensionDir = (id: string): string => join(localAgentBrowserExtensionsDir(), `${id}-${Date.now().toString(36)}`)
-
-/** Un .crx (cabecera Cr24 con su firma) y, detrás, un .zip normal. */
-function crxZip(crx: Buffer): Buffer {
-  if (crx.subarray(0, 4).toString('latin1') !== 'Cr24') throw new Error('no es una extensión')
-  const version = crx.readUInt32LE(4)
-  const start = version === 3 ? 12 + crx.readUInt32LE(8) : 16 + crx.readUInt32LE(8) + crx.readUInt32LE(12)
-  return crx.subarray(start)
-}
-
-async function downloadExtension(id: string, major: number): Promise<void> {
-  const root = localAgentBrowserExtensionsDir()
-  const stamp = join(root, `${id}.downloaded`)
-  try {
-    if (extensionDirsOf(id).length > 0 && Date.now() - statSync(stamp).mtimeMs < EXTENSIONS_REFRESH_MS) return
-  } catch {
-    // Sin la marca: se descarga.
-  }
-  mkdirSync(root, { recursive: true })
-  const url = `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=${String(major)}.0&acceptformat=crx2,crx3&x=id%3D${id}%26uc`
-  const response = await fetch(url, { signal: AbortSignal.timeout(60_000) })
-  if (!response.ok) throw new Error(`descarga: ${String(response.status)}`)
-  const zip = crxZip(Buffer.from(await response.arrayBuffer()))
-  const fresh = freshExtensionDir(id)
-  const zipFile = `${fresh}.zip`
-  mkdirSync(fresh, { recursive: true })
-  writeFileSync(zipFile, zip)
-  try {
-    // tar de Windows (bsdtar) abre .zip.
-    await new Promise<void>((resolve, reject) => {
-      execFile(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', zipFile, '-C', fresh],
-        { windowsHide: true, timeout: 60_000 }, (error) => { if (error === null) resolve(); else reject(new Error(error.message)) })
-    })
-  } finally {
-    rmSync(zipFile, { force: true })
-  }
-  if (!existsSync(join(fresh, 'manifest.json'))) {
-    rmSync(fresh, { recursive: true, force: true })
-    throw new Error('la extensión no trae manifest.json')
-  }
-  // Chrome no carga sin empaquetar las que traen _metadata (la firma de la tienda).
-  rmSync(join(fresh, '_metadata'), { recursive: true, force: true })
-  writeFileSync(stamp, new Date().toISOString())
-  // Se quedan la nueva y la anterior (un Edge en marcha puede estar usándola); las demás sobran, y las de la forma
-  // antigua (<id>, <id>.new, <id>.old) también.
-  for (const old of extensionDirsOf(id).filter(dir => dir !== fresh).slice(1)) rmSync(old, { recursive: true, force: true })
-  for (const legacy of [`${id}.new`, `${id}.old`, `${id}.zip`]) rmSync(join(root, legacy), { recursive: true, force: true })
-}
-
-/** Descarga (o actualiza) los bloqueadores; una vez por arranque de la app. Si falla, el navegador va sin ellos. */
-let extensionsReady: Promise<void> | undefined
-function prepareExtensions(): Promise<void> {
-  extensionsReady ??= (async () => {
-    const path = localEdgePath()
-    const major = Number(path === undefined ? Number.NaN : edgeVersion(path)?.split('.')[0])
-    for (const item of AD_BLOCKERS) {
-      try {
-        await downloadExtension(item.id, Number.isNaN(major) ? 140 : major)
-      } catch (error) {
-        console.warn(`local agent browser: no se ha podido preparar ${item.name}:`, error instanceof Error ? error.message : error)
-      }
-    }
-    // Si el Edge ya estaba abierto (lo arrancó el agente o la pestaña antes de terminar la descarga), se cargan en él.
-    const running = readState()
-    if (running !== undefined && await json(running, '/json/version') !== undefined) await loadExtensions(running)
-  })()
-  return extensionsReady
-}
-if (process.env.DSH_LOCAL_NO_AD_BLOCKERS !== '1') setTimeout(() => { void prepareExtensions() }, 3000).unref()
-
-/** El Edge (por su proceso) en el que ya se cargaron los bloqueadores. */
-let extensionsLoadedIn: number | undefined
-
-/** Carga las extensiones listas en ese Edge (no se guardan: hay que hacerlo en cada arranque), una vez por Edge. */
-async function loadExtensions(state: AgentBrowserState): Promise<void> {
-  const dirs = process.env.DSH_LOCAL_NO_AD_BLOCKERS === '1' ? [] : extensionDirs()
-  if (dirs.length === 0 || extensionsLoadedIn === state.pid) return
-  extensionsLoadedIn = state.pid
-  const socket = await json<{ webSocketDebuggerUrl?: string }>(state, '/json/version')
-  if (socket?.webSocketDebuggerUrl === undefined) return
-  const browserSocket = socket.webSocketDebuggerUrl
-  for (const path of dirs) {
-    const load = (from: string): Promise<unknown> => cdp(browserSocket, 'Extensions.loadUnpacked', { path: from })
-    await load(path).catch(async (error: unknown) => {
-      // Si Edge rechaza esa carpeta (le pasa a veces con una ruta ya usada), una copia con nombre nuevo sí carga.
-      if (!(error instanceof Error && error.message.includes('is invalid'))) throw error
-      const copy = freshExtensionDir(basename(path).split('-')[0] ?? basename(path))
-      cpSync(path, copy, { recursive: true })
-      await load(copy)
-    }).catch((error: unknown) => { console.warn('local agent browser: extensión sin cargar', path, error instanceof Error ? error.message : error) })
-  }
-  void closeWelcomePages(state, socket.webSocketDebuggerUrl)
-}
-
-/**
- * Al instalarse, AdGuard y Adblock Plus abren su página de bienvenida en una pestaña nueva, y el panel y el agente se
- * irían a ella: se cierra en cuanto aparece (llega un par de segundos después), sin hacer esperar al arranque.
- */
-async function closeWelcomePages(state: AgentBrowserState, browserSocket: string): Promise<void> {
-  for (let i = 0; i < 16; i++) {
-    await sleep(500)
-    const pages = await json<{ id: string; type: string; url: string }[]>(state, '/json/list') ?? []
-    for (const page of pages.filter(target => target.type === 'page' && EXTENSION_WELCOME.test(target.url))) {
-      await cdp(browserSocket, 'Target.closeTarget', { targetId: page.id }).catch(() => undefined)
-    }
-  }
-}
-
-/** Las páginas de bienvenida de los bloqueadores. */
-const EXTENSION_WELCOME = /^https:\/\/([a-z0-9-]+\.)*(adguard\.com|adblockplus\.org)\/|^chrome-extension:\/\//i
+setTimeout(removeOldAdBlockers, 3000).unref()
 
 async function json<T>(state: AgentBrowserState, path: string): Promise<T | undefined> {
   try {
@@ -768,18 +630,13 @@ async function ensureBrowser(): Promise<AgentBrowserState> {
     const check = localAgentBrowserCheck()
     const edge = localEdgePath()
     if (!check.ok || edge === undefined) throw new Error(check.message ?? 'Microsoft Edge is not installed.')
-    // Los bloqueadores de anuncios, si se están descargando ahora (la primera vez), se esperan un poco.
-    if (process.env.DSH_LOCAL_NO_AD_BLOCKERS !== '1') {
-      await Promise.race([prepareExtensions(), sleep(15_000)])
-    }
     const profile = localAgentBrowserProfile()
     mkdirSync(profile, { recursive: true })
     rmSync(join(profile, 'DevToolsActivePort'), { force: true })
     const browser = spawn(edge, [
       '--headless=new', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', `--user-data-dir=${profile}`,
       '--no-first-run', '--no-default-browser-check', '--disable-features=msEdgeSidebarV2,msUndersideButton',
-      // Permite cargar los bloqueadores por el protocolo (loadExtensions); el puerto solo escucha en 127.0.0.1.
-      '--enable-unsafe-extension-debugging', '--window-size=1280,800', 'about:blank',
+      '--window-size=1280,800', 'about:blank',
     ], { detached: true, stdio: 'ignore', windowsHide: true })
     browser.unref()
     let port: number | undefined
@@ -789,7 +646,6 @@ async function ensureBrowser(): Promise<AgentBrowserState> {
     }
     if (port === undefined || browser.pid === undefined) throw new Error('The browser did not start.')
     const state = { port, pid: browser.pid }
-    await loadExtensions(state)
     writeFileSync(stateFile, JSON.stringify({ ...state, startedAt: new Date().toISOString() }))
     return state
   } finally {
