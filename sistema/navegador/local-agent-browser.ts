@@ -24,7 +24,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import {
-  closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
+  closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
 } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
@@ -598,10 +598,28 @@ export function localAgentBrowserExtensionsDir(): string {
   return join(process.env.LOCALAPPDATA ?? join(home(), 'storages'), 'dsh-ad-blockers')
 }
 
-/** Las extensiones listas para cargar. */
-function extensionDirs(): string[] {
-  return AD_BLOCKERS.map(item => join(localAgentBrowserExtensionsDir(), item.id)).filter(dir => existsSync(join(dir, 'manifest.json')))
+/**
+ * Las carpetas de una extensión, de la más nueva a la más vieja. Cada descarga va a una carpeta con nombre nuevo
+ * (<id>-<marca>), nunca encima de otra: tras sustituir una carpeta por otra con el mismo nombre, Edge rechazaba esa ruta
+ * («The provided path … is invalid») aunque los ficheros estuvieran bien, incluso con un perfil limpio.
+ */
+function extensionDirsOf(id: string): string[] {
+  const root = localAgentBrowserExtensionsDir()
+  try {
+    return readdirSync(root).filter(name => (name === id || name.startsWith(`${id}-`)) && existsSync(join(root, name, 'manifest.json')))
+      .map(name => join(root, name)).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)
+  } catch {
+    return []
+  }
 }
+
+/** Las extensiones listas para cargar: la carpeta más nueva de cada una. */
+function extensionDirs(): string[] {
+  return AD_BLOCKERS.map(item => extensionDirsOf(item.id)[0]).filter((dir): dir is string => dir !== undefined)
+}
+
+/** Una carpeta nueva para una extensión (nunca un nombre ya usado). */
+const freshExtensionDir = (id: string): string => join(localAgentBrowserExtensionsDir(), `${id}-${Date.now().toString(36)}`)
 
 /** Un .crx (cabecera Cr24 con su firma) y, detrás, un .zip normal. */
 function crxZip(crx: Buffer): Buffer {
@@ -612,20 +630,20 @@ function crxZip(crx: Buffer): Buffer {
 }
 
 async function downloadExtension(id: string, major: number): Promise<void> {
-  const dir = join(localAgentBrowserExtensionsDir(), id)
-  const stamp = join(dir, '.downloaded')
+  const root = localAgentBrowserExtensionsDir()
+  const stamp = join(root, `${id}.downloaded`)
   try {
-    if (existsSync(join(dir, 'manifest.json')) && Date.now() - statSync(stamp).mtimeMs < EXTENSIONS_REFRESH_MS) return
+    if (extensionDirsOf(id).length > 0 && Date.now() - statSync(stamp).mtimeMs < EXTENSIONS_REFRESH_MS) return
   } catch {
     // Sin la marca: se descarga.
   }
+  mkdirSync(root, { recursive: true })
   const url = `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=${String(major)}.0&acceptformat=crx2,crx3&x=id%3D${id}%26uc`
   const response = await fetch(url, { signal: AbortSignal.timeout(60_000) })
   if (!response.ok) throw new Error(`descarga: ${String(response.status)}`)
   const zip = crxZip(Buffer.from(await response.arrayBuffer()))
-  const fresh = `${dir}.new`
-  const zipFile = `${dir}.zip`
-  rmSync(fresh, { recursive: true, force: true })
+  const fresh = freshExtensionDir(id)
+  const zipFile = `${fresh}.zip`
   mkdirSync(fresh, { recursive: true })
   writeFileSync(zipFile, zip)
   try {
@@ -637,14 +655,17 @@ async function downloadExtension(id: string, major: number): Promise<void> {
   } finally {
     rmSync(zipFile, { force: true })
   }
-  if (!existsSync(join(fresh, 'manifest.json'))) throw new Error('la extensión no trae manifest.json')
+  if (!existsSync(join(fresh, 'manifest.json'))) {
+    rmSync(fresh, { recursive: true, force: true })
+    throw new Error('la extensión no trae manifest.json')
+  }
   // Chrome no carga sin empaquetar las que traen _metadata (la firma de la tienda).
   rmSync(join(fresh, '_metadata'), { recursive: true, force: true })
-  writeFileSync(join(fresh, '.downloaded'), new Date().toISOString())
-  rmSync(`${dir}.old`, { recursive: true, force: true })
-  if (existsSync(dir)) renameSync(dir, `${dir}.old`)
-  renameSync(fresh, dir)
-  rmSync(`${dir}.old`, { recursive: true, force: true })
+  writeFileSync(stamp, new Date().toISOString())
+  // Se quedan la nueva y la anterior (un Edge en marcha puede estar usándola); las demás sobran, y las de la forma
+  // antigua (<id>, <id>.new, <id>.old) también.
+  for (const old of extensionDirsOf(id).filter(dir => dir !== fresh).slice(1)) rmSync(old, { recursive: true, force: true })
+  for (const legacy of [`${id}.new`, `${id}.old`, `${id}.zip`]) rmSync(join(root, legacy), { recursive: true, force: true })
 }
 
 /** Descarga (o actualiza) los bloqueadores; una vez por arranque de la app. Si falla, el navegador va sin ellos. */
@@ -678,9 +699,16 @@ async function loadExtensions(state: AgentBrowserState): Promise<void> {
   extensionsLoadedIn = state.pid
   const socket = await json<{ webSocketDebuggerUrl?: string }>(state, '/json/version')
   if (socket?.webSocketDebuggerUrl === undefined) return
+  const browserSocket = socket.webSocketDebuggerUrl
   for (const path of dirs) {
-    await cdp(socket.webSocketDebuggerUrl, 'Extensions.loadUnpacked', { path })
-      .catch((error: unknown) => { console.warn('local agent browser: extensión sin cargar', path, error instanceof Error ? error.message : error) })
+    const load = (from: string): Promise<unknown> => cdp(browserSocket, 'Extensions.loadUnpacked', { path: from })
+    await load(path).catch(async (error: unknown) => {
+      // Si Edge rechaza esa carpeta (le pasa a veces con una ruta ya usada), una copia con nombre nuevo sí carga.
+      if (!(error instanceof Error && error.message.includes('is invalid'))) throw error
+      const copy = freshExtensionDir(basename(path).split('-')[0] ?? basename(path))
+      cpSync(path, copy, { recursive: true })
+      await load(copy)
+    }).catch((error: unknown) => { console.warn('local agent browser: extensión sin cargar', path, error instanceof Error ? error.message : error) })
   }
   void closeWelcomePages(state, socket.webSocketDebuggerUrl)
 }

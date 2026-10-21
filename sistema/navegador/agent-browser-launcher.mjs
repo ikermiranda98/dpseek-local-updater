@@ -10,9 +10,9 @@
 // en la carpeta de trabajo del chat).
 import { randomUUID } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, cpSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const args = process.argv.slice(1).filter((arg) => arg !== '--')
@@ -24,8 +24,17 @@ const edge = [configuredEdge, join(process.env.ProgramFiles ?? 'C:\\Program File
 // Los bloqueadores de anuncios que la app ya ha descargado (local-agent-browser.ts): Adblock Plus y AdGuard. En una
 // carpeta de ruta corta (con rutas largas, Edge no encontraba sus reglas).
 const extensionsDir = join(process.env.LOCALAPPDATA ?? dirname(stateFile), 'dsh-ad-blockers')
+// Cada versión va en su carpeta (<id>-<marca>): la más nueva de cada una.
+const newest = (id) => {
+  try {
+    return readdirSync(extensionsDir).filter((name) => (name === id || name.startsWith(`${id}-`)) && existsSync(join(extensionsDir, name, 'manifest.json')))
+      .map((name) => join(extensionsDir, name)).sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0]
+  } catch {
+    return undefined
+  }
+}
 const extensions = process.env.DSH_LOCAL_NO_AD_BLOCKERS === '1' ? [] : ['cfhdojbkjhnklbpkdaibdccddilifddb', 'bgnkhhnnamicmpeenaelnjfhikgbkllg']
-  .map((id) => join(extensionsDir, id)).filter((dir) => existsSync(join(dir, 'manifest.json')))
+  .map(newest).filter((dir) => dir !== undefined)
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms) })
 
 /** Carga los bloqueadores en el Edge recién arrancado, por el protocolo de depuración; sin ellos, el navegador funciona. */
@@ -34,12 +43,21 @@ const loadExtensions = async (port) => {
     const { webSocketDebuggerUrl } = await (await fetch(`http://127.0.0.1:${String(port)}/json/version`)).json()
     const socket = new WebSocket(webSocketDebuggerUrl)
     await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject })
-    for (const [index, path] of extensions.entries()) {
-      socket.send(JSON.stringify({ id: index + 1, method: 'Extensions.loadUnpacked', params: { path } }))
-      await new Promise((resolve) => {
-        const timer = setTimeout(resolve, 15_000)
-        socket.onmessage = (event) => { if (JSON.parse(String(event.data)).id === index + 1) { clearTimeout(timer); resolve() } }
-      })
+    let id = 0
+    const load = (path) => new Promise((resolve) => {
+      const my = ++id
+      const timer = setTimeout(() => { resolve(undefined) }, 15_000)
+      socket.onmessage = (event) => { const message = JSON.parse(String(event.data)); if (message.id === my) { clearTimeout(timer); resolve(message.error) } }
+      socket.send(JSON.stringify({ id: my, method: 'Extensions.loadUnpacked', params: { path } }))
+    })
+    for (const path of extensions) {
+      const error = await load(path)
+      // Si Edge rechaza esa carpeta (le pasa a veces con una ruta ya usada), una copia con nombre nuevo sí carga.
+      if (error?.message?.includes('is invalid')) {
+        const copy = join(extensionsDir, `${basename(path).split('-')[0]}-${Date.now().toString(36)}`)
+        cpSync(path, copy, { recursive: true })
+        await load(copy)
+      }
     }
     // Al instalarse abren su página de bienvenida en otra pestaña (el agente y el panel se irían a ella): se cierra en
     // cuanto aparece, sin hacer esperar al arranque.
