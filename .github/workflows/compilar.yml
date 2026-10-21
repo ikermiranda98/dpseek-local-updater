@@ -142,17 +142,6 @@ jobs:
         working-directory: D:\dsh
         run: corepack pnpm install --frozen-lockfile
 
-      - name: Revisar el código propio
-        # El linter del proyecto sobre nuestros ficheros (los que añade el parcheador: no están en el repositorio
-        # oficial). Los tipos los comprueba la propia compilación (tsc -b).
-        working-directory: D:\dsh
-        run: |
-          $files = @(git ls-files --others --exclude-standard -- '*.ts' '*.tsx' | Where-Object { (Split-Path $_ -Leaf) -like 'local-*' })
-          if ($files.Count -eq 0) { throw 'No se encuentran los ficheros propios: ¿se ha aplicado el parcheador?' }
-          Write-Host "Revisando $($files.Count) ficheros propios"
-          corepack pnpm exec tsx scripts/run-oxlint.ts @files
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-
       - name: Crear el instalador
         working-directory: D:\dsh
         env:
@@ -175,6 +164,18 @@ jobs:
             Write-Host "::warning::El empaquetado ha fallado; se reintenta una vez."
             Start-Sleep -Seconds 20
           }
+
+      - name: Revisar el código propio
+        # El linter del proyecto sobre nuestros ficheros (los que añade el parcheador: no están en el repositorio
+        # oficial). Va después de compilar: sus reglas usan los tipos de los paquetes, que crea la compilación
+        # (antes, todo lo importado sería «error» y saldrían cientos de falsos avisos).
+        working-directory: D:\dsh
+        run: |
+          $files = @(git ls-files --others --exclude-standard -- '*.ts' '*.tsx' | Where-Object { (Split-Path $_ -Leaf) -like 'local-*' })
+          if ($files.Count -eq 0) { throw 'No se encuentran los ficheros propios: ¿se ha aplicado el parcheador?' }
+          Write-Host "Revisando $($files.Count) ficheros propios"
+          corepack pnpm exec tsx scripts/run-oxlint.ts @files
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Probar que la app arranca
         # Abre la app recién compilada con datos temporales y espera a que cargue la
