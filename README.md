@@ -146,6 +146,9 @@ Como en Hermes Agent Desktop:
   y números de línea; las ediciones se ven como diferencias (rojo lo quitado, verde
   lo añadido). «Follow» la mantiene en el fichero que se está escribiendo. El panel
   no se abre solo.
+- **Todos los turnos, también tras reiniciar:** la línea «Completed in…» de cada turno
+  anterior lleva su icono y su lista de ficheros, y abajo de la pestaña se elige el turno
+  («Turn 3 · 2 files»). Se calcula del registro del chat, así que sigue ahí al reiniciar.
 - **En tiempo real** si el proveedor envía el código por trozos (la API de DeepSeek,
   OpenAI o Anthropic lo hacen). **Ollama lo entrega entero** cuando el modelo termina
   de escribirlo, así que con Ollama el fichero aparece completo de una vez.
@@ -294,12 +297,44 @@ use el navegador, el Edge se arranca al escribir una dirección, y luego el agen
 ventanas emergentes que abren algunas webs (a veces diminutas) no tapan la página; si la vista se
 queda rara, **Fix the view** (junto a recargar) vuelve a la página buena, con el tamaño del panel.
 
-**Lo que hace, a la vista.** En el chat, la línea de estado del turno lleva solo un **globo**
+**Lo que hace, a la vista.** En el chat, la línea de estado de cada turno lleva solo un **globo**
 (abre la pestaña) y una **flecha** que despliega el paso a paso («Opened…», «Clicked Botón
 Entrar», «Filled in the form»…; nunca lo que escribe en un campo). La lista mide el sitio que
 tiene: se abre hacia abajo si cabe sin tapar la barra de escribir y, si no, hacia arriba, con la
-altura justa (si no cabe entera, se desplaza por dentro). En la pestaña, el paso a paso también
-está oculto: la flecha junto a la dirección lo despliega.
+altura justa (si no cabe entera, se desplaza por dentro). En la pestaña, la flecha junto a la
+dirección despliega el paso a paso de **todos los turnos** del chat, separados por turno. Los
+turnos anteriores salen del registro del chat: siguen ahí al reiniciar la app.
+
+**Pestañas.** El panel enseña la pestaña que usa el agente (la de su última acción) y la sigue
+cuando cambia. El icono de pestañas (con el número de abiertas) las lista con su título y su
+dirección, marca la del agente, y deja cambiar de pestaña, cerrarla o abrir una nueva (**Ctrl+T**
+con el foco en la página).
+
+**Como un navegador de diario.** **Ctrl+C** y **Ctrl+X** copian lo seleccionado al portapapeles de
+Windows (nunca de un campo de contraseña), **Ctrl+F** busca en la página, **Ctrl + / − / 0** (o
+Ctrl+rueda) hacen zoom (el porcentaje se ve en la dirección; pulsarlo lo deja en 100 %), **Ctrl+L**
+va a la dirección, **F5** recarga y **Alt+← / →** van atrás y adelante. El cursor cambia como en la
+página (mano en los enlaces, barra en el texto) y el botón derecho abre un menú con Atrás, Adelante,
+Recargar, Copiar, Pegar, Seleccionar todo, Buscar y el zoom. **Arrastra ficheros** desde el
+Explorador sobre la página para subirlos: se sueltan en ese punto como un arrastre de verdad (las
+zonas de «suelta aquí» y los campos de fichero los aceptan; hasta 64 MB). Lleva **Adblock Plus** y
+**AdGuard**: la app los descarga de la Chrome Web Store la primera vez (y cada semana mira si hay
+versión nueva) y Edge los carga al arrancar (también si ya estaba abierto); la pestaña de bienvenida
+que abren al instalarse se cierra sola. Si Edge no está instalado o es anterior a la 120, la
+pestaña lo dice en vez de quedarse en blanco.
+
+**Solo mirar.** El ojo de la barra enciende el modo **Look only**: en webs reales el agente puede
+abrir, leer, buscar y desplazarse, pero no pulsar, escribir ni rellenar formularios (en las webs
+locales y de prueba, sí). Se queda guardado para la próxima vez.
+
+**Enviar algo pide permiso, con un botón.** Cuando el agente va a pulsar un botón que envía, paga,
+borra o publica algo en una web real («Enviar», «Pagar», «Delete»…), espera: en el panel aparece
+una tarjeta con el botón y la web, **Allow** o **Don't allow**, y la casilla para permitirlo siempre
+en esa web hasta cerrar la app. Si el panel estaba cerrado, se abre solo. El agente no lo pregunta en
+el chat. Los botones que no cambian nada (continuar, iniciar sesión, las cookies) no preguntan.
+No se puede esquivar: un script del agente que pulsa, escribe o envía algo, o la tecla Enter en
+una página con un botón que envía, piden permiso igual. Si dices que no, se le indica que no lo
+intente de otra forma.
 
 **La página se adapta sola al panel y va fluida.** Toma el tamaño del panel y la escala de tu
 pantalla (como el navegador de Claude Code), así que llena el sitio y se ve nítida en cualquier
@@ -318,19 +353,28 @@ tocas la página después de mandarlo, el agente espera) o tras 2 minutos sin to
 debe pedirte que lo hagas tú así.
 
 **Contraseñas y sesiones, en la llave.** El icono de la llave abre **Passwords | Signed-in
-sites**. Las contraseñas guardadas están **bloqueadas**: para verlas o cambiarlas, **Unlock with
-Windows** abre la ventana oficial de **Seguridad de Windows** con tu usuario, donde escribes tu
-contraseña de Windows (o Windows Hello, si lo tienes configurado). La contraseña se comprueba con
-Windows y no llega a la app; se vuelven a bloquear al ocultar o cerrar la ventana y a los 5
-minutos. Cada contraseña se guarda con un nombre y su web, cifrada con DPAPI (solo tu usuario de
-Windows la descifra). El agente solo conoce el nombre, también con la llave bloqueada: lo escribe
-donde va la contraseña y el navegador pone el valor real, que el modelo nunca ve (en las
-respuestas sale como `<secret>NOMBRE</secret>`). **Signed-in sites** lista las webs con sesión
-guardada, con **Remove** para cerrarla (borra sus cookies y datos).
+sites**. Las contraseñas guardadas están **bloqueadas**: para verlas o cambiarlas, si tienes
+**Windows Hello** configurado el botón es **Unlock with Windows Hello** (huella, cara o PIN) y, si
+no, **Unlock with Windows** abre la ventana oficial de **Seguridad de Windows** con tu usuario,
+donde escribes tu contraseña de Windows. La comprobación la hace Windows y no llega a la app; se
+vuelven a bloquear al ocultar o cerrar la ventana y a los 5 minutos. Cada contraseña se guarda con
+un nombre y **su web** (obligatoria), cifrada con DPAPI (solo tu usuario de Windows la descifra).
+El agente solo conoce el nombre, también con la llave bloqueada: lo escribe donde va la contraseña
+y el navegador pone el valor real, que el modelo nunca ve (en las respuestas sale como
+`<secret>NOMBRE</secret>`). **Solo funciona en su web** (o sus subdominios): en cualquier otra
+página la acción se rechaza antes de escribir nada y se le dice que pare y te avise. Si el
+modelo cambia las mayúsculas del nombre, se le corrige. En webs reales, en un campo de
+contraseña solo puede ir el nombre de una guardada: el agente **no puede adivinar contraseñas**
+(probar valores puede bloquear la cuenta), y si la web rechaza la guardada, te lo dice. **Export…** guarda todas en un fichero cifrado
+con una frase de paso (AES-256-GCM; sirve para otro PC) e **Import…** las recupera. **Signed-in
+sites** lista las webs con sesión guardada, con **Remove** para cerrarla (borra sus cookies y
+datos).
 
-**Respuestas cortas.** Con el navegador o el control de Windows, el agente trabaja sin contar
-lo que va haciendo entre paso y paso y al final responde con el resultado en 1–3 frases (los
-detalles, si se los pides); el paso a paso queda en la parte plegable del turno.
+**Respuestas cortas.** En todos los chats, el agente va al grano: sin preámbulos ni resúmenes de
+cierre, y lo que razona o planea se queda en el pensamiento, no en la respuesta (entre
+herramientas, una línea como mucho). Con el navegador o el control de Windows, al final responde
+con el resultado en 1–3 frases (los detalles, si se los pides); el paso a paso queda en la parte
+plegable del turno.
 
 **Menos pasos y menos contexto.** Playwright, tras cada acción, devolvía un enlace a un fichero
 con la página en vez de la página: el modelo gastaba otra llamada en leerla o actuaba con
@@ -554,11 +598,21 @@ repetirlo en [`sistema/rendimiento/`](sistema/rendimiento)):
 ## Otras mejoras pequeñas
 
 - **La zona de trabajo como una tarjeta flotante:** el chat y el panel derecho flotan sobre el
-  fondo con un margen a la derecha y abajo, las cuatro esquinas redondeadas (el mismo radio
-  de la app) y una sombra suave, con los mismos colores. El panel derecho proyecta una sombra
-  difusa sobre el chat y lleva un filo de luz, para que se distingan también en oscuro; a
-  pantalla completa mantiene la misma forma. Las pestañas «Live code» y «Browser» llevan su
-  icono, como las demás, y sus cabeceras están alineadas con la del chat.
+  fondo con un margen a la derecha y abajo, esquinas redondeadas (el mismo radio de la app) y
+  sombras cortas por capas (se apagan en unos 12 px: no llegan al texto ni hacen bandas). El
+  panel derecho, con sus cuatro esquinas redondeadas, se apoya sobre el chat con una sombra que
+  sigue sus esquinas, sin ninguna línea entre los dos: el chat sigue por debajo de las curvas
+  (no asoma el fondo) y su barra de desplazamiento termina en el borde del panel, a la vista. En
+  tema oscuro el chat es un poco más claro que la barra lateral (como las tarjetas blancas sobre
+  gris del tema claro) y el panel derecho un tono más claro que el chat; la barra lateral
+  conserva su color. A pantalla completa mantiene la misma forma. **Ajustes → General** tiene **Corner radius** (de cuadradas a
+  muy redondas) y **Card margin** (sin margen a grande). Las pestañas «Live code» y «Browser»
+  llevan su icono, como las demás, y sus cabeceras están alineadas con la del chat.
+- **Más contraste en el tema claro:** fechas, contadores, descripciones de los ajustes y del
+  panel, y la pestaña activa del chat pasan de 3,7:1 y 4,2:1 a más de 4,5:1 (lo que pide WCAG
+  para texto pequeño). El tema oscuro ya cumplía.
+- **Doble clic en la línea entre el chat y el panel derecho:** reparte el espacio a partes
+  iguales (el arrastre sigue igual).
 - **Aviso si Ollama no responde:** encima del cuadro de texto, «Ollama isn't running, so
   the AI can't answer», con **Open Ollama** (abre su aplicación) y **Check again**. Se
   quita solo cuando Ollama vuelve.
@@ -605,7 +659,10 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | Aviso de Windows al terminar una respuesta (opcional) | `packages/client/ui-workspace`; código en [`sistema/avisos/`](sistema/avisos) |
 | No volver a ofrecer una versión retirada (opcional) | `apps/desktop/src/update-coordinator.ts` (`local-skip-version.ts`) |
 | Código de cada turno a la derecha (icono y flecha con los ficheros en la línea de estado) y deshacer por fichero (opcional) | `packages/client/ui-chat`, `ui-deliverables` y `packages/api/session-controller` (`localUndoTurnFile`); código en [`sistema/codigo-vivo/`](sistema/codigo-vivo) |
-| La zona de trabajo como una tarjeta flotante (margen, esquinas redondeadas, sombra y separación chat/panel) (opcional) | `packages/client/ui-layout/src/client/AppFrame.module.css` |
+| La zona de trabajo como una tarjeta flotante (margen, esquinas redondeadas, sombra, separación chat/panel y bordes en tema oscuro), con radio y margen en Ajustes → General (opcional) | `packages/client/ui-layout/src/client/AppFrame.module.css` + `packages/client/ui-chat` (`apply.ts`) + [`sistema/diseno/local-card-rows.tsx`](sistema/diseno/local-card-rows.tsx) |
+| Doble clic en el tirador del panel derecho: mitad y mitad (opcional) | `packages/client/ui-layout/src/client/AppFrame.tsx` |
+| Más contraste en el texto secundario y la pestaña activa del tema claro (opcional) | `packages/client/ui-theme/src/styles/design-platform.css`, `packages/client/ui-conversation/src/client/skeleton/ConversationRoot.module.css` |
+| Respuestas cortas y el razonamiento en el pensamiento, en todos los chats (opcional) | `packages/client/ui-deliverables/src/index.ts` (sección del prompt del sistema) |
 | Subchats: «Open in subchat», anidados en la barra lateral y sugerencia junto al medidor de contexto (opcional) | `packages/client/ui-chat`, `ui-workspace`, `ui-conversation` y `packages/api/session-controller` (`localStartSubchat`); código en [`sistema/subchats/`](sistema/subchats) |
 | Actualizar Ollama desde la app, en el aviso de actualizaciones de abajo a la izquierda (opcional) | `packages/client/ui-settings-general` (`LocalUpdatesIndicator.tsx`) + `packages/client/ui-model-selection` (`local-ollama-bridge.ts`) + `packages/api/session-controller` (`local-ollama-update.ts`) |
 | Cursor normal (flecha) en toda la interfaz; la mano solo en los enlaces (opcional) | estilos `.css` de `packages/client`, `packages/extensions` y `apps/desktop/renderer` |
@@ -625,13 +682,13 @@ versión (ver *Si DeepSeek cambia algo que tocamos*).
 | El selector de modelo como chip («Qwen3.6 · 128K», la rueda cambia el contexto) que abre una fila de modelos dentro de la barra (opcional) | `packages/client/ui-model-selection` (`ModelSelect.tsx`) + [`sistema/contexto/LocalModelDrawer.tsx`](sistema/contexto/LocalModelDrawer.tsx) |
 | La barra lateral se esconde por debajo de 760 px de ventana, no de 1024 (opcional) | `packages/client/ui-layout` (`columns.ts`) |
 | Un navegador de verdad para el agente: Playwright MCP con un Edge compartido que guarda las sesiones, incluido en la app empaquetada (opcional) | `apps/cli/package.json`, `pnpm-lock.yaml`, `packages/bundle/web-app/cordis.patch.yml`, `packages/experimental/browser-use-playwright-mcp` + [`sistema/navegador/agent-browser-launcher.mjs`](sistema/navegador/agent-browser-launcher.mjs) |
-| Un navegador compartido por el agente y el usuario como pestaña «Browser» (fotogramas en directo, ajustado al panel, barra de dirección, control al tocar la página, paso a paso desplegable, llave con contraseñas bloqueadas por Windows y sesiones) y globo con flecha en la línea de estado del turno (opcional) | `packages/client/ui-deliverables`, `packages/client/ui-chat`, `packages/api/session-controller`, `packages/bundle/web-app/cordis.patch.yml` + [`sistema/navegador/`](sistema/navegador/) |
+| Un navegador compartido por el agente y el usuario como pestaña «Browser» (fotogramas en directo, ajustado al panel, barra de dirección, pestañas, copiar, buscar, zoom, soltar ficheros, solo mirar, permiso con botón, control al tocar la página, paso a paso de todos los turnos, llave con contraseñas por web, Windows Hello y copia cifrada, sesiones, Adblock Plus y AdGuard) y globo con flecha en la línea de estado de cada turno (opcional) | `packages/client/ui-deliverables`, `packages/client/ui-chat`, `packages/api/session-controller`, `packages/bundle/web-app/cordis.patch.yml` + [`sistema/navegador/`](sistema/navegador/) |
 | Navegador con menos pasos y contexto (página en línea en cada acción, solo la última entera, instrucciones de uso) y contraseñas por nombre (opcional) | `packages/experimental/browser-use-playwright-mcp` + [`sistema/navegador/local-browser-context.ts`](sistema/navegador/local-browser-context.ts) |
 | Arranque reintentado y sin cookies de acceso acumuladas (el error «Web authentication failed (HTTP 431)») (opcional) | `apps/desktop` (`welcome-backend.ts`, `main.ts`) |
 | La app arranca con Windows, oculta en la bandeja (opcional) | `apps/desktop` (`main.ts`) |
 | Control de Windows para el agente: servidor MCP propio sobre Cua Driver, en su propio proceso (opcional) | `apps/cli/package.json`, `pnpm-lock.yaml`, `packages/bundle/web-app/cordis.patch.yml` + [`sistema/escritorio/desktop-mcp.mjs`](sistema/escritorio/desktop-mcp.mjs) |
 | Chats nuevos con esfuerzo «Pensar»; el cambio en un chat se queda en ese chat (opcional) | `packages/bundle/base` (`reasoning: medium`), `packages/api/session-controller` (`commands.ts`), `packages/client/ui-model-selection` |
-| Prueba de arranque antes de publicar | [`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs) en el workflow |
+| Pruebas antes de publicar: reglas del navegador ([`sistema/pruebas/`](sistema/pruebas)), el linter del proyecto sobre nuestros ficheros, los tipos (la compilación) y que la app arranca ([`sistema/prueba-arranque.mjs`](sistema/prueba-arranque.mjs)) | el workflow |
 
 La app va en inglés (o en chino), como la oficial: no se añade ningún idioma.
 

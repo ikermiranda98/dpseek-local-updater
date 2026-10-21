@@ -2983,6 +2983,7 @@ optional('un navegador de verdad para el agente (Playwright con Edge)', (tx) => 
   // Menos pasos y menos contexto: la página va en línea en cada acción, solo la última queda entera en el
   // historial y el modelo recibe unas instrucciones cortas de uso (sistema/navegador/local-browser-context.ts).
   tx.copy(join(here, 'navegador', 'local-browser-context.ts'), join(dirname(provider), 'local-browser-context.ts'))
+  tx.copy(join(here, 'navegador', 'local-browser-rules.ts'), join(dirname(provider), 'local-browser-rules.ts'))
   tx.replace(provider, "import type {} from '@deepseek-ai/dsh-working-directory'\n",
     "import type {} from '@deepseek-ai/dsh-working-directory'\nimport { setupLocalBrowserContext } from './local-browser-context.ts'\n",
     "import { setupLocalBrowserContext } from './local-browser-context.ts'")
@@ -3041,6 +3042,30 @@ const SHARED_BROWSER_REMOTES = [
     'localAgentBrowserSites()', 'Sites with a saved sign-in in the shared browser.'],
   ['localAgentBrowserForget', 'SessionLocalBrowserForgetRequest', 'SessionLocalBrowserForgetValue', true,
     'localAgentBrowserForget(request.domain)', "Sign the shared browser out of one site (its cookies and stored data)."],
+  ['localAgentBrowserTabs', 'SessionLocalEmptyRequest', 'SessionLocalBrowserTabs', true,
+    'localAgentBrowserTabs()', "Open tabs of the shared browser, the one shown in the panel and the agent's."],
+  ['localAgentBrowserTab', 'SessionLocalBrowserTabRequest', 'SessionLocalBrowserTabValue', true,
+    'localAgentBrowserTab(request)', 'Show another tab, open a new one or close one.'],
+  ['localAgentBrowserCopy', 'SessionLocalEmptyRequest', 'SessionLocalBrowserCopyValue', true,
+    'localAgentBrowserCopy()', 'The text selected in the page, for the Windows clipboard (never from a password field).'],
+  ['localAgentBrowserFind', 'SessionLocalBrowserFindRequest', 'SessionLocalBrowserFindValue', true,
+    'localAgentBrowserFind(request.text, request.backwards)', 'Find in page: select and show the next (or previous) match.'],
+  ['localAgentBrowserDrop', 'SessionLocalBrowserDropRequest', 'SessionLocalBrowserDropValue', true,
+    'localAgentBrowserDrop(request)', 'Files dropped on the page from the panel, dropped there like a real drag.'],
+  ['localAgentBrowserSettings', 'SessionLocalBrowserSettingsRequest', 'SessionLocalBrowserSettings', true,
+    'localAgentBrowserSettings(request)', 'Look-only mode and page zoom (saved between starts); without changes, just read them.'],
+  ['localAgentBrowserConfirm', 'SessionLocalBrowserConfirmRequest', 'SessionLocalBrowserConfirmValue', false,
+    'localAgentBrowserConfirm(request.id, request.allow, request.always)', 'Allow or decline a click of the agent that sends something on a real website.'],
+  ['localAgentBrowserPending', 'SessionLocalEmptyRequest', 'SessionLocalBrowserPending', false,
+    'localAgentBrowserPending()', 'The click of the agent waiting for the user, if any.'],
+  ['localAgentBrowserCheck', 'SessionLocalEmptyRequest', 'SessionLocalBrowserCheck', false,
+    'localAgentBrowserCheck()', 'Whether Microsoft Edge is installed and new enough for the browser.'],
+  ['localAgentBrowserUnlockMethod', 'SessionLocalEmptyRequest', 'SessionLocalBrowserUnlockMethod', true,
+    'localAgentBrowserUnlockMethod()', 'How saved passwords unlock on this PC: Windows Hello or the Windows password.'],
+  ['localAgentBrowserExportSecrets', 'SessionLocalBrowserExportRequest', 'SessionLocalBrowserExportValue', true,
+    'localAgentBrowserExportSecrets(request.passphrase)', 'Backup of the saved passwords, encrypted with a passphrase (needs unlock).'],
+  ['localAgentBrowserImportSecrets', 'SessionLocalBrowserImportRequest', 'SessionLocalBrowserImportValue', true,
+    'localAgentBrowserImportSecrets(request.file, request.passphrase)', 'Import a passwords backup; same names are replaced (needs unlock).'],
 ]
 
 const SHARED_BROWSER_TYPES = [
@@ -3059,6 +3084,22 @@ const SHARED_BROWSER_TYPES = [
   '  readonly viewport: { readonly width: number; readonly height: number }',
   '  readonly canGoBack: boolean',
   '  readonly canGoForward: boolean',
+  '  /** The tab shown and how many are open. */',
+  '  readonly tabId: string',
+  '  readonly tabCount: number',
+  '  /** The agent cannot write on real websites. */',
+  '  readonly lookOnly: boolean',
+  '  /** Page zoom (1 = 100%). */',
+  '  readonly zoom: number',
+  '  /** A click of the agent waiting for the user. */',
+  '  readonly confirm: SessionLocalBrowserConfirm | null',
+  '}',
+  '',
+  '/** Local build: a click of the agent that sends something on a real website, waiting for the user. */',
+  'export interface SessionLocalBrowserConfirm {',
+  '  readonly id: string',
+  '  readonly label: string',
+  '  readonly site: string',
   '}',
   '',
   '/** Local build: the last frame number the panel has. */',
@@ -3100,9 +3141,10 @@ const SHARED_BROWSER_TYPES = [
   "    | { readonly kind: 'key'; readonly key: string; readonly code: string; readonly keyCode: number; readonly modifiers: number }",
   '}',
   '',
-  '/** Local build: whether the gesture reached the page. */',
+  '/** Local build: whether the gesture reached the page, and the cursor the page shows there. */',
   'export interface SessionLocalBrowserInputValue {',
   '  readonly sent: boolean',
+  '  readonly cursor?: string',
   '}',
   '',
   '/** Local build: the address bar of the shared browser. */',
@@ -3169,6 +3211,112 @@ const SHARED_BROWSER_TYPES = [
   'export interface SessionLocalBrowserForgetValue {',
   '  readonly removed: number',
   '}',
+  '',
+  '/** Local build: the open tabs of the shared browser. */',
+  'export interface SessionLocalBrowserTabs {',
+  '  readonly tabs: readonly { readonly id: string; readonly title: string; readonly url: string; readonly shown: boolean; readonly agent: boolean }[]',
+  '}',
+  '',
+  '/** Local build: show, open or close a tab. */',
+  'export type SessionLocalBrowserTabRequest =',
+  "  | { readonly action: 'show' | 'close'; readonly id: string }",
+  "  | { readonly action: 'new'; readonly url?: string }",
+  '',
+  '/** Local build: the tab shown, opened or closed. */',
+  'export interface SessionLocalBrowserTabValue {',
+  '  readonly id: string',
+  '}',
+  '',
+  '/** Local build: the text selected in the page. */',
+  'export interface SessionLocalBrowserCopyValue {',
+  '  readonly text: string',
+  '}',
+  '',
+  '/** Local build: find text in the page. */',
+  'export interface SessionLocalBrowserFindRequest {',
+  '  readonly text: string',
+  '  readonly backwards?: boolean',
+  '}',
+  '',
+  '/** Local build: whether it was found. */',
+  'export interface SessionLocalBrowserFindValue {',
+  '  readonly found: boolean',
+  '}',
+  '',
+  '/** Local build: files dropped on the page (positions from 0 to 1 over the picture, contents in base64). */',
+  'export interface SessionLocalBrowserDropRequest {',
+  '  readonly x: number',
+  '  readonly y: number',
+  '  readonly files: readonly { readonly name: string; readonly data: string }[]',
+  '}',
+  '',
+  '/** Local build: how many files were dropped. */',
+  'export interface SessionLocalBrowserDropValue {',
+  '  readonly dropped: number',
+  '}',
+  '',
+  '/** Local build: change look-only mode or zoom (nothing: just read them). */',
+  'export interface SessionLocalBrowserSettingsRequest {',
+  '  readonly lookOnly?: boolean',
+  '  readonly zoom?: number',
+  '}',
+  '',
+  '/** Local build: look-only mode and zoom. */',
+  'export interface SessionLocalBrowserSettings {',
+  '  readonly lookOnly: boolean',
+  '  readonly zoom: number',
+  '}',
+  '',
+  '/** Local build: the answer to a click of the agent. */',
+  'export interface SessionLocalBrowserConfirmRequest {',
+  '  readonly id: string',
+  '  readonly allow: boolean',
+  '  readonly always?: boolean',
+  '}',
+  '',
+  '/** Local build: whether the answer reached a waiting click. */',
+  'export interface SessionLocalBrowserConfirmValue {',
+  '  readonly answered: boolean',
+  '}',
+  '',
+  '/** Local build: the click of the agent waiting for the user, if any. */',
+  'export interface SessionLocalBrowserPending {',
+  '  readonly confirm: SessionLocalBrowserConfirm | null',
+  '}',
+  '',
+  '/** Local build: whether Microsoft Edge can run the browser. */',
+  'export interface SessionLocalBrowserCheck {',
+  '  readonly ok: boolean',
+  '  readonly version?: string',
+  '  readonly message?: string',
+  '}',
+  '',
+  '/** Local build: how saved passwords unlock on this PC. */',
+  'export interface SessionLocalBrowserUnlockMethod {',
+  "  readonly method: 'hello' | 'password'",
+  '}',
+  '',
+  '/** Local build: export saved passwords with a passphrase. */',
+  'export interface SessionLocalBrowserExportRequest {',
+  '  readonly passphrase: string',
+  '}',
+  '',
+  '/** Local build: the encrypted backup and how many passwords it has. */',
+  'export interface SessionLocalBrowserExportValue {',
+  '  readonly file: string',
+  '  readonly count: number',
+  '}',
+  '',
+  '/** Local build: import a passwords backup. */',
+  'export interface SessionLocalBrowserImportRequest {',
+  '  readonly file: string',
+  '  readonly passphrase: string',
+  '}',
+  '',
+  '/** Local build: how many passwords were imported. */',
+  'export interface SessionLocalBrowserImportValue {',
+  '  readonly count: number',
+  '}',
 ]
 
 optional('un navegador compartido por el agente y el usuario en el panel derecho', (tx) => {
@@ -3219,6 +3367,8 @@ optional('un navegador compartido por el agente y el usuario en el panel derecho
   const hostTypes = join(hostDir, 'types.ts')
   tx.copy(join(nav, 'local-agent-browser.ts'), join(hostDir, 'local-agent-browser.ts'))
   tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-agent-browser.ts')
+  tx.copy(join(nav, 'local-browser-rules.ts'), join(hostDir, 'local-browser-rules.ts'))
+  tx.addToTsconfig(join(hostDir, '..', 'tsconfig.host.json'), 'src/local-browser-rules.ts')
   const typesStart = '// local-shared-browser:start\n'
   const typesEnd = '// local-shared-browser:end\n'
   tx.write(hostTypes, upsertBlock(tx.read(hostTypes), typesStart, typesEnd,
@@ -3524,85 +3674,252 @@ optional('una respuesta que solo piensa se repite', (tx) => {
 })
 
 // ── 40. La zona de trabajo, como una tarjeta flotante ─────────────────────────────
-// El chat y el panel derecho forman una tarjeta separada del borde de la ventana por la derecha
-// y por abajo (arriba ya la separa la franja del título), con las cuatro esquinas redondeadas
-// (el mismo radio de 16 px que la app usaba arriba a la izquierda) y una sombra suave en vez de
-// borde; el panel derecho proyecta una sombra difusa sobre el chat y lleva un filo de luz, para
-// que se distingan (en oscuro tienen casi el mismo tono). Mismos colores que la app. Solo en Windows. El panel
-// derecho a pantalla completa (que se sale de su columna) es también una tarjeta con el mismo margen y esquinas.
+// El chat y el panel derecho son dos tarjetas separadas del borde de la ventana por la derecha y por
+// abajo (arriba ya las separa la franja del título), con las esquinas redondeadas (el radio de 16 px
+// que la app usaba arriba a la izquierda) y sombras por capas en vez de borde: una cercana que dibuja
+// el filo y otras cada vez más amplias y tenues. El panel derecho, con sus cuatro esquinas
+// redondeadas, se apoya sobre el chat, que sigue por debajo, y le proyecta su sombra. En tema oscuro
+// una sombra negra apenas se ve sobre una ventana casi negra: el chat es más claro que la barra
+// lateral (33 sobre 27, como las tarjetas blancas sobre gris del tema claro) y el panel derecho es un
+// tono más claro que el chat, sin la línea que lo separaba. La barra lateral conserva su color. El chat
+// llega por debajo del panel al menos lo que mide la curva de sus esquinas (no asoma el fondo por ellas),
+// pero su contenido y su barra de desplazamiento terminan en el borde del panel; la sombra del panel es
+// un halo que sigue sus esquinas. Solo en Windows.
+// El panel derecho a pantalla completa (que se sale de su columna) es también una tarjeta con el mismo
+// margen y esquinas.
 
 const FLOATING_CARD_CSS = [
-  '/* local-build: floating card (dpseek-local-updater). The conversation and the right panel form one card set',
-  '   off the window edge on the right and bottom, with all four corners rounded and a soft shadow. */',
-  ':global([data-windows-titlebar]) .frame {',
-  '  --dsh-local-card-gap: 12px;',
-  '  --dsh-local-card-shadow: 0 1px 2px rgb(0 0 0 / 0.1), 0 6px 24px rgb(0 0 0 / 0.14);',
-  '  /* The right panel casts a soft shadow over the conversation and has a fading hairline, so the two read as',
-  '     separate surfaces (in the dark theme their fills are almost the same). */',
-  '  --dsh-local-split-shadow: -10px 0 22px -10px rgb(0 0 0 / 0.13);',
-  '  --dsh-local-split-edge: rgb(0 0 0 / 0.06);',
-  '}',
-  '',
-  ':global(body[data-ds-dark-theme]) .frame {',
-  '  --dsh-local-split-shadow: -12px 0 28px -10px rgb(0 0 0 / 0.7);',
-  '  --dsh-local-split-edge: rgb(255 255 255 / 0.07);',
-  '}',
-  '',
-  ':global([data-windows-titlebar]) .centerCol {',
-  '  margin-bottom: var(--dsh-local-card-gap);',
-  '  border-radius: var(--dsh-windows-content-radius) 0 0 var(--dsh-windows-content-radius);',
-  '  box-shadow: var(--dsh-local-card-shadow);',
-  '}',
-  '',
-  ':global([data-windows-titlebar]) .frame[data-rightbar-collapsed] .centerCol,',
-  ':global([data-windows-titlebar]) .frame[data-rightbar-fullscreen] .centerCol {',
-  '  margin-right: var(--dsh-local-card-gap);',
-  '  border-radius: var(--dsh-windows-content-radius);',
-  '}',
-  '',
-  ':global([data-windows-titlebar]) .frame:not([data-rightbar-collapsed], [data-rightbar-fullscreen]) .rightbarCol {',
-  '  margin: 0 var(--dsh-local-card-gap) var(--dsh-local-card-gap) 0;',
-  '}',
-  '',
-  '/* The round corners and the shadows go on the panel itself, not on its column: the panel starts 12px to the',
-  '   left of the column (its own inner margin), and clipping at the column cut that margin off. */',
+  "/* local-build: floating card (dpseek-local-updater). The conversation and the right panel are two cards set off the",
+  "   window edge on the right and bottom, all corners rounded; the right panel lies over the conversation. */",
+  ":global([data-windows-titlebar]) .frame {",
+  "  /* Radius and margin can be changed in Settings → General (local-card-rows.tsx). */",
+  "  --dsh-local-card-gap: var(--dsh-local-user-card-gap, 12px);",
+  "  --dsh-local-card-radius: var(--dsh-local-user-card-radius, var(--dsh-windows-content-radius));",
+  "  /* Short layered shadows: a close one draws the edge and fainter ones carry it off within ~12px, so they never reach",
+  "     the text next to the card and fade in steps too small to see as bands. */",
+  "  --dsh-local-card-shadow: 0 0.5px 1px rgb(0 0 0 / 0.06), 0 1px 3px rgb(0 0 0 / 0.05), 0 3px 8px rgb(0 0 0 / 0.05), 0 6px 14px -2px rgb(0 0 0 / 0.05);",
+  "  /* The right panel: a halo all around, not pushed down, so it follows both rounded corners over the conversation. */",
+  "  --dsh-local-panel-shadow: 0 0 0.5px rgb(0 0 0 / 0.12), 0 1px 3px rgb(0 0 0 / 0.06), 0 2px 10px rgb(0 0 0 / 0.07);",
+  "}",
+  "",
+  "/* Dark theme: a black shadow barely shows on a near-black window, so the conversation is lighter than the sidebar it",
+  "   sits on (as the white cards on grey of the light theme) and the right panel is one tone lighter than the",
+  "   conversation (it lies on top of it), with no line between them. The sidebar keeps its colour. */",
+  ":global([data-windows-titlebar] body[data-ds-dark-theme]) .frame {",
+  "  --dsh-local-card-shadow: 0 0.5px 1px rgb(0 0 0 / 0.3), 0 1px 3px rgb(0 0 0 / 0.22), 0 3px 8px rgb(0 0 0 / 0.2), 0 6px 14px -2px rgb(0 0 0 / 0.2);",
+  "  --dsh-local-panel-shadow: 0 0 0.5px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.3), 0 2px 10px rgb(0 0 0 / 0.32);",
+  "  --dsh-local-panel-fill: rgb(40 40 43);",
+  "}",
+  "",
+  ":global([data-windows-titlebar] body[data-ds-dark-theme]) .centerCol {",
+  "  --dsw-alias-bg-base: rgb(33 33 35);",
+  "}",
+  "",
+  ":global([data-windows-titlebar]) .centerCol {",
+  "  margin-bottom: var(--dsh-local-card-gap);",
+  "  border-radius: var(--dsh-local-card-radius) 0 0 var(--dsh-local-card-radius);",
+  "  box-shadow: var(--dsh-local-card-shadow);",
+  "}",
+  "",
+  "/* With the right panel open, the conversation goes on under it at least as far as the panel's rounded corners reach",
+  "   (the panel starts 12px inside it), so no background shows through those corners; its content and scrollbar end at",
+  "   the panel's edge, where they can be seen and used. */",
+  ":global([data-windows-titlebar]) .frame:not([data-rightbar-collapsed], [data-rightbar-fullscreen]) .centerCol {",
+  "  margin-right: min(0px, calc(12px - var(--dsh-local-card-radius)));",
+  "  padding-right: max(12px, var(--dsh-local-card-radius));",
+  "}",
+  "",
+  ":global([data-windows-titlebar]) .frame[data-rightbar-collapsed] .centerCol,",
+  ":global([data-windows-titlebar]) .frame[data-rightbar-fullscreen] .centerCol {",
+  "  margin-right: var(--dsh-local-card-gap);",
+  "  border-radius: var(--dsh-local-card-radius);",
+  "}",
+  "",
+  ":global([data-windows-titlebar]) .frame:not([data-rightbar-collapsed], [data-rightbar-fullscreen]) .rightbarCol {",
+  "  margin: 0 var(--dsh-local-card-gap) var(--dsh-local-card-gap) 0;",
+  "}",
+  "",
+  "/* The round corners and the shadow go on the panel itself, not on its column: the panel starts 12px to the left of",
+  "   the column (its own inner margin) and lies over the conversation. */",
   ":global([data-windows-titlebar]) .frame:not([data-rightbar-collapsed], [data-rightbar-fullscreen]) .rightbarCol :global([data-sidebar-right-panel='push']) {",
-  '  border-radius: 0 var(--dsh-windows-content-radius) var(--dsh-windows-content-radius) 0;',
-  '  corner-shape: round;',
-  '  box-shadow: var(--dsh-local-card-shadow), var(--dsh-local-split-shadow);',
-  '}',
-  '',
-  ":global([data-windows-titlebar]) .frame:not([data-rightbar-collapsed], [data-rightbar-fullscreen]) .rightbarCol :global([data-sidebar-right-panel='push'])::before {",
-  "  content: '';",
-  '  position: absolute;',
-  '  inset: 0 auto 0 0;',
-  '  z-index: 40;',
-  '  width: 0.5px;',
-  '  pointer-events: none;',
-  '  background: linear-gradient(to bottom, transparent, var(--dsh-local-split-edge) 12%, var(--dsh-local-split-edge) 88%, transparent);',
-  '}',
-  '',
-  '/* The resize handle sits on the visible edge of the right panel (12px left of its column): on the column edge it',
-  '   covered the first pixels of the panel, and in the browser that left part of the page could not be clicked. */',
+  "  border-radius: var(--dsh-local-card-radius);",
+  "  corner-shape: round;",
+  "  box-shadow: var(--dsh-local-panel-shadow);",
+  "}",
+  "",
+  "/* Without the straight line the dock draws on the panel's left edge (it did not follow the rounded corners). */",
+  ":global([data-windows-titlebar]) .frame:not([data-rightbar-collapsed]) .rightbarCol :global([data-sidebar-right-panel] [data-dockkit-host='dock'] > *) {",
+  "  border-left-color: transparent;",
+  "}",
+  "",
+  "/* Dark theme: the panel one tone lighter (only while open: closed, it stays in the page over the conversation). The",
+  "   theme's base colour is the panel's inside it, so every tab painted with it (files, previews, the terminal) matches. */",
+  ":global([data-windows-titlebar] body[data-ds-dark-theme]) .frame:not([data-rightbar-collapsed]) .rightbarCol :global([data-sidebar-right-panel]) {",
+  "  --dsw-alias-bg-base: var(--dsh-local-panel-fill);",
+  "}",
+  ":global([data-windows-titlebar] body[data-ds-dark-theme]) .frame:not([data-rightbar-collapsed]) .rightbarCol :global([data-sidebar-right-panel]),",
+  ":global([data-windows-titlebar] body[data-ds-dark-theme]) .frame:not([data-rightbar-collapsed]) .rightbarCol :global([data-sidebar-right-panel] [data-dockkit-host='dock'] > *) {",
+  "  background-color: var(--dsh-local-panel-fill);",
+  "}",
+  "",
+  "/* The resize handle sits on the visible edge of the right panel (12px left of its column): on the column edge it",
+  "   covered the first pixels of the panel, and in the browser that left part of the page could not be clicked. */",
   ":global([data-windows-titlebar]) .frame:not([data-rightbar-collapsed], [data-rightbar-fullscreen]) .handle[data-side='rightbar'] {",
-  '  margin-left: -16px;',
-  '}',
-  '',
-  '/* The right panel in fullscreen keeps the same card shape: the gap on the right and bottom, round corners, shadow. */',
+  "  margin-left: -16px;",
+  "}",
+  "",
+  "/* The right panel in fullscreen keeps the same card shape: the gap on the right and bottom, round corners, shadow. */",
   ":global([data-windows-titlebar]) .frame[data-rightbar-fullscreen] :global([data-sidebar-right-panel='fullscreen']) {",
-  '  right: var(--dsh-local-card-gap);',
-  '  bottom: var(--dsh-local-card-gap);',
-  '  max-width: calc(100vw - var(--dsh-windows-sidebar-width, 0px) - var(--dsh-local-card-gap));',
-  '  border-radius: var(--dsh-windows-content-radius);',
-  '  box-shadow: var(--dsh-local-card-shadow);',
-  '}',
+  "  right: var(--dsh-local-card-gap);",
+  "  bottom: var(--dsh-local-card-gap);",
+  "  max-width: calc(100vw - var(--dsh-windows-sidebar-width, 0px) - var(--dsh-local-card-gap));",
+  "  border-radius: var(--dsh-local-card-radius);",
+  "  box-shadow: var(--dsh-local-card-shadow);",
+  "}",
+  "/* local-build: floating card end */",
 ].join('\n')
+
+const FLOATING_CARD_START = '/* local-build: floating card (dpseek-local-updater).'
+const FLOATING_CARD_END = '/* local-build: floating card end */'
 
 optional('la zona de trabajo como una tarjeta flotante', (tx) => {
   const frameCss = join(repo, 'packages', 'client', 'ui-layout', 'src', 'client', 'AppFrame.module.css')
   const css = tx.read(frameCss)
   if (!css.includes(':global([data-windows-titlebar]) .centerCol {')) skip(`no se encuentra el marco de Windows en ${rel(frameCss)}`)
-  if (!css.includes('local-build: floating card')) tx.write(frameCss, css.trimEnd() + '\n\n' + FLOATING_CARD_CSS + '\n')
+  // Sustituye la versión anterior si ya estaba (las primeras no tenían marca de cierre: iban al final del fichero).
+  const at = css.indexOf(FLOATING_CARD_START)
+  const stop = at < 0 ? -1 : css.indexOf(FLOATING_CARD_END, at)
+  const before = at < 0 ? css : css.slice(0, at)
+  const after = stop < 0 ? '' : css.slice(stop + FLOATING_CARD_END.length)
+  const rest = after.trim() === '' ? '' : '\n' + after.replace(/^\n+/, '')
+  const next = before.trimEnd() + '\n\n' + FLOATING_CARD_CSS + '\n' + rest
+  if (next !== css) tx.write(frameCss, next)
+
+  // Radio de las esquinas y margen, en Ajustes → General (sistema/diseno/local-card-rows.tsx).
+  const chatClient = join(repo, 'packages', 'client', 'ui-chat', 'src', 'client')
+  tx.copy(join(here, 'diseno', 'local-card-rows.tsx'), join(chatClient, 'settings', 'local-card-rows.tsx'))
+  const chatApply = join(chatClient, 'apply.ts')
+  tx.replace(chatApply, "import { TranscriptViewRow, type TranscriptViewRowInjected } from './settings/TranscriptViewRow.tsx'\n",
+    "import { TranscriptViewRow, type TranscriptViewRowInjected } from './settings/TranscriptViewRow.tsx'\n"
+      + "import { LocalCardGapRow, LocalCardRadiusRow } from './settings/local-card-rows.tsx'\n",
+    "import { LocalCardGapRow, LocalCardRadiusRow } from './settings/local-card-rows.tsx'")
+  tx.replace(chatApply, '  }, TranscriptViewRow))\n',
+    '  }, TranscriptViewRow))\n\n'
+      + '  // Local build: corner radius and margin of the floating card (local-card-rows.tsx).\n'
+      + "  ctx.slots.inject('settings.general.item', () => ctx.slots.register({\n"
+      + "    name: 'settings.general.item', id: 'local-card-radius', order: 13, locale: NS,\n"
+      + '  }, LocalCardRadiusRow))\n'
+      + "  ctx.slots.inject('settings.general.item', () => ctx.slots.register({\n"
+      + "    name: 'settings.general.item', id: 'local-card-gap', order: 14, locale: NS,\n"
+      + '  }, LocalCardGapRow))\n',
+    "id: 'local-card-radius'")
+})
+
+// ── 41. Doble clic en la línea entre el chat y el panel: mitad y mitad ──────────────
+// El tirador del panel derecho reparte el espacio a partes iguales con un doble clic (el
+// arrastre sigue igual). El ancho pasa por el mismo setRightbar, así que respeta los límites.
+
+optional('doble clic en el tirador del panel derecho: mitad y mitad', (tx) => {
+  const frame = join(repo, 'packages', 'client', 'ui-layout', 'src', 'client', 'AppFrame.tsx')
+  tx.replace(frame,
+    'function DragHandle(props: { side: \'sidebar\' | \'rightbar\'; left: number; onStart: () => void; onDrag: (dx: number) => void; onEnd: () => void }) {',
+    'function DragHandle(props: { side: \'sidebar\' | \'rightbar\'; left: number; onStart: () => void; onDrag: (dx: number) => void; onEnd: () => void; onDoubleClick?: () => void }) {',
+    'onDoubleClick?: () => void }')
+  tx.replace(frame,
+    '      onLostPointerCapture={onPointerCancel}\n    />',
+    '      onLostPointerCapture={onPointerCancel}\n      onDoubleClick={props.onDoubleClick}\n    />',
+    'onDoubleClick={props.onDoubleClick}')
+  tx.replace(frame,
+    '  const productTitle = process.env.DSH_CLIENT_TITLE',
+    '  // Local build: a double click on the right handle splits the space beside the sidebar in half.\n'
+      + '  const onRightbarHalf = useCallback(() => { actions.setRightbar((viewport - colsRef.current.sidebar) / 2) }, [actions, viewport])\n'
+      + '  const productTitle = process.env.DSH_CLIENT_TITLE',
+    'onRightbarHalf')
+  tx.replace(frame,
+    '<DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} />',
+    '<DragHandle side="rightbar" left={viewport - normal.rightbar} onStart={onRightbarStart} onDrag={onRightbarDrag} onEnd={onDragEnd} onDoubleClick={onRightbarHalf} />',
+    'onDoubleClick={onRightbarHalf}')
+})
+
+// ── 42. Respuestas cortas; lo que se piensa, en el pensamiento ──────────────────────
+// El prompt oficial no dice nada del estilo de las respuestas y los modelos locales narran cada
+// paso («Ahora voy a…», «Veo que…») y cierran con resúmenes largos. Una sección para todos los
+// chats: ir al grano, razonar en el pensamiento y no en el texto, y una línea como mucho entre
+// herramientas. Va al final, junto a las referencias a ficheros (orden 9000 + 500).
+
+const REPLY_STYLE_PROMPT = [
+  '# Reply style',
+  '- Be brief. Lead with the answer or the result; no preamble, no restating the question, no closing recap or offers of more help.',
+  '- A question or explanation gets 2-5 sentences (under 100 words) unless the user asks for more detail; skip sections, headings and examples nobody asked for.',
+  '- Your first words are the answer itself: never open with "Sure", "Of course", "Great question", "Here you go", "Here are…" or their equivalents in the user\'s language (e.g. "Claro", "Aquí tienes").',
+  '- Keep your reasoning in your thinking, not in the reply: plans, options you weigh and narration of what you see or are about to do stay there.',
+  '- Between tool calls, write at most one short line, or nothing.',
+  '- When a task is done, say what changed and anything the user must do or know, in a few sentences. Add detail, lists or tables only when the user asks or the content truly needs them.',
+].join('\n')
+
+optional('respuestas cortas y el razonamiento en el pensamiento', (tx) => {
+  const deliverables = join(repo, 'packages', 'client', 'ui-deliverables', 'src', 'index.ts')
+  // Si ya estaba con un texto anterior, se cambia solo el texto.
+  const current = tx.read(deliverables)
+  const text = `    text: ${JSON.stringify(REPLY_STYLE_PROMPT)},\n`
+  const stale = /(    name: 'local:reply-style',\n    order: [^\n]+\n)    text: "[^\n]*",\n/
+  if (stale.test(current) && !current.includes(text)) tx.write(deliverables, current.replace(stale, (_, head) => head + text))
+  tx.replace(deliverables,
+    '  registerPresentOpen(ctx)\n',
+    '  registerPresentOpen(ctx)\n'
+      + '  // Local build: short replies, with the reasoning kept in the thinking (dpseek-local-updater).\n'
+      + '  ctx.systemPrompt.section({\n'
+      + "    name: 'local:reply-style',\n"
+      + "    order: ctx.systemPrompt.getSectionOrder('DELIVERABLE_FILE_REFERENCES') + 500,\n"
+      + `    text: ${JSON.stringify(REPLY_STYLE_PROMPT)},\n`
+      + '    interpolate: false,\n'
+      + '  })\n',
+    "name: 'local:reply-style'")
+})
+
+// ── 43. Los botones de Windows, sin tapar la esquina del panel ──────────────────────
+// Detrás de minimizar, maximizar y cerrar, Windows pinta una capa propia del color de la barra
+// lateral, opaca y un par de píxeles más alta que la franja del título: tapaba la esquina de
+// arriba a la derecha del panel (y su sombra), que se veía mellada. Transparente, se ve lo que
+// pinta la app debajo (el mismo color); Windows sigue dibujando los botones y su resaltado.
+
+optional('los botones de Windows sin tapar la esquina del panel', (tx) => {
+  const main = join(repo, 'apps', 'desktop', 'src', 'main.ts')
+  tx.replace(main,
+    '      if (validColor(color) && validColor(symbolColor)) mainWindow.setTitleBarOverlay({ color, symbolColor })\n',
+    '      // Local build: a transparent caption layer; opaque, it covered the top-right corner of the right panel.\n'
+      + "      if (validColor(color) && validColor(symbolColor)) mainWindow.setTitleBarOverlay({ color: 'rgba(0, 0, 0, 0)', symbolColor })\n",
+    "setTitleBarOverlay({ color: 'rgba(0, 0, 0, 0)', symbolColor })")
+})
+
+// ── 44. Contraste del texto secundario en el tema claro ─────────────────────────────
+// En claro, las fechas, contadores, descripciones de ajustes y la lista de Workspaces usan un gris
+// (#81858c) que sobre blanco se queda en 3,7:1, y la pestaña activa (Chat/Trajectory) un azul de
+// 4,2:1; WCAG pide 4,5:1 para texto pequeño. Un gris y un azul un poco más oscuros llegan (5,7:1
+// sobre blanco y 4,9:1 sobre la barra lateral; 5,4:1). El tema oscuro ya cumple y no cambia.
+
+const CONTRAST_START = '/* local-build: light theme contrast (dpseek-local-updater) */'
+const CONTRAST_END = '/* local-build: light theme contrast end */'
+
+optional('más contraste en el texto secundario del tema claro', (tx) => {
+  const tokens = join(repo, 'packages', 'client', 'ui-theme', 'src', 'styles', 'design-platform.css')
+  const block = [
+    CONTRAST_START,
+    'body:not([data-ds-dark-theme]) {',
+    '  --dsw-alias-label-tertiary: rgb(99 103 110);',
+    '}',
+    CONTRAST_END,
+  ].join('\n')
+  const css = tx.read(tokens)
+  if (!css.includes('--dsw-alias-label-tertiary:')) skip(`no se encuentra el gris de los textos secundarios en ${rel(tokens)}`)
+  const next = upsertBlock(css, CONTRAST_START, CONTRAST_END, block, (text, value) => `${text.trimEnd()}\n\n${value}\n`)
+  if (next !== css) tx.write(tokens, next)
+  const root = join(repo, 'packages', 'client', 'ui-conversation', 'src', 'client', 'skeleton', 'ConversationRoot.module.css')
+  tx.replace(root, '.tabActive {\n  color: var(--dsw-alias-state-business-primary);\n}\n',
+    '.tabActive {\n  color: var(--dsw-alias-state-business-primary);\n}\n\n'
+      + '/* Local build: a darker blue for the label in the light theme (4.5:1 on white). */\n'
+      + ':global(body:not([data-ds-dark-theme])) .tabActive {\n  color: var(--dsw-static-deepseek-600);\n}\n',
+    'body:not([data-ds-dark-theme])) .tabActive')
 })
 
 console.log('\nCambios aplicados:')

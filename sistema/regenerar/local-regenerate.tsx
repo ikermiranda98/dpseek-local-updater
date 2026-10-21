@@ -146,7 +146,7 @@ function VersionWatcher({ sessionId, useChat }: LocalChat) {
   })
   useEffect(() => {
     if (lastTurn === undefined) return
-    let changed = false
+    let changed = false as boolean
     const finished: VersionGroup[] = []
     const next = list.flatMap((group) => {
       if (!group.members.includes(sessionId)) return [group]
@@ -346,11 +346,12 @@ export function LocalUserMessage({ node, t, children }: { node: UserNodeLike; t:
   const turn = node.location.kind === 'turn' || node.location.kind === 'step' ? node.location.turn : undefined
   const editable = local !== undefined && node.kind === 'user' && turn?.start !== undefined && ctx !== undefined
   const [editing, setEditing] = useState(false)
-  if (!editable || turn === undefined) return <>{children}</>
+  if (!editable) return <>{children}</>
   return (
     <div className={css.userMessage}>
       {editing
-        ? <EditBox node={node} turn={turn} sessionId={local.sessionId} useChat={local.useChat} t={t} onClose={() => { setEditing(false) }} />
+        ? <EditBox node={node} turn={turn} sessionId={local.sessionId} useChat={local.useChat} t={t}
+          onClose={() => { setEditing(false) }} />
         : (
           <div
             className={css.editable}
@@ -413,7 +414,7 @@ function EditBox({ node, turn, sessionId, useChat, t, onClose }: {
       className={css.editBox}
       onBlur={(event) => {
         // Clic fuera: solo se cierra si no has cambiado nada (como Hermes).
-        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+        if (event.currentTarget.contains(event.relatedTarget)) return
         if (!sending && textRef.current === initial) onClose()
       }}
     >
@@ -440,17 +441,17 @@ function EditBox({ node, turn, sessionId, useChat, t, onClose }: {
         {error !== null && <span className={css.editError}>{error}</span>}
         {error === null && hasFiles(node.data.content) && <span className={css.editNote}>{t('local.edit.files')}</span>}
         <Tooltip label={t('local.edit.send')} side="top" delayMs={500}>
-        <button
-          type="button"
-          className={css.send}
-          aria-label={t('local.edit.send')}
-          disabled={sending || text.trim() === ''}
-          // Que el clic no quite el foco al editor antes de enviar.
-          onPointerDown={(event) => { event.preventDefault() }}
-          onClick={send}
-        >
-          <IconSendOutlineRegular size={14} />
-        </button>
+          <button
+            type="button"
+            className={css.send}
+            aria-label={t('local.edit.send')}
+            disabled={sending || text.trim() === ''}
+            // Que el clic no quite el foco al editor antes de enviar.
+            onPointerDown={(event) => { event.preventDefault() }}
+            onClick={send}
+          >
+            <IconSendOutlineRegular size={14} />
+          </button>
         </Tooltip>
       </div>
     </div>
@@ -469,7 +470,7 @@ function VersionBar({ sessionId, turn, t }: { sessionId: SessionId; turn: number
     const app = ctx
     if (app === undefined || target === undefined || moving) return
     setMoving(true)
-    app.uiWorkspace.unarchiveSession(target)
+    void app.uiWorkspace.unarchiveSession(target)
       .catch(() => undefined)
       .then(async () => {
         app.uiWorkspace.openSession(target)

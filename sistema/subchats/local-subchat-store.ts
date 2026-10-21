@@ -53,7 +53,7 @@ const store = ((globalThis as Record<symbol, unknown>)[KEY] ??= {
   list: load<readonly LocalSubchat[]>(STORAGE_KEY, [], (value): value is readonly LocalSubchat[] =>
     Array.isArray(value) && value.every(isSubchat)),
   collapsed: new Set(load<readonly string[]>(COLLAPSED_KEY, [], (value): value is readonly string[] =>
-    Array.isArray(value) && value.every((id) => typeof id === 'string'))),
+    Array.isArray(value) && value.every(id => typeof id === 'string'))),
   listeners: new Set(),
 }) as SubchatStore
 
@@ -67,26 +67,26 @@ function changed(): void {
 
 /** @param subchat - subchat recién creado (su grupo se despliega). */
 export function addSubchat(subchat: LocalSubchat): void {
-  store.list = [...store.list.filter((entry) => entry.childId !== subchat.childId), subchat]
-  if (store.collapsed.has(subchat.parentId)) store.collapsed = new Set([...store.collapsed].filter((id) => id !== subchat.parentId))
+  store.list = [...store.list.filter(entry => entry.childId !== subchat.childId), subchat]
+  if (store.collapsed.has(subchat.parentId)) store.collapsed = new Set([...store.collapsed].filter(id => id !== subchat.parentId))
   changed()
 }
 
 /** @param childId - subchat. @param patch - cambios (nombre, entregado…). */
 export function updateSubchat(childId: string, patch: Partial<Pick<LocalSubchat, 'label' | 'delivered'>>): void {
-  store.list = store.list.map((entry) => entry.childId === childId ? { ...entry, ...patch } : entry)
+  store.list = store.list.map(entry => entry.childId === childId ? { ...entry, ...patch } : entry)
   changed()
 }
 
 /** @param childId - subchat que deja de verse en la barra lateral. */
 export function forgetSubchat(childId: string): void {
-  store.list = store.list.filter((entry) => entry.childId !== childId)
+  store.list = store.list.filter(entry => entry.childId !== childId)
   changed()
 }
 
 /** @returns el subchat con esa sesión, si es uno de la app. */
 export function subchatOf(childId: string): LocalSubchat | undefined {
-  return store.list.find((entry) => entry.childId === childId)
+  return store.list.find(entry => entry.childId === childId)
 }
 
 /** @param parentId - chat principal. @param collapsed - si sus subchats se pliegan. */

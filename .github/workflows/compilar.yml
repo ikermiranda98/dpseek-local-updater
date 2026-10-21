@@ -112,6 +112,11 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           git config --system core.longpaths true
 
+      - name: Probar las reglas propias
+        # Pruebas de la lógica que no necesita la app (navegador: webs locales, contraseñas por web, qué clics piden
+        # permiso, barra de dirección, copia de seguridad cifrada). Si fallan, no se compila ni se publica nada.
+        run: node --test "sistema/pruebas/*.test.mjs"
+
       - name: Descargar DeepSeek Harness ${{ needs.comprobar.outputs.version }}
         run: git clone --depth 1 --branch $env:ETIQUETA $env:OFICIAL $env:CODIGO
 
@@ -136,6 +141,17 @@ jobs:
       - name: Instalar dependencias
         working-directory: D:\dsh
         run: corepack pnpm install --frozen-lockfile
+
+      - name: Revisar el código propio
+        # El linter del proyecto sobre nuestros ficheros (los que añade el parcheador: no están en el repositorio
+        # oficial). Los tipos los comprueba la propia compilación (tsc -b).
+        working-directory: D:\dsh
+        run: |
+          $files = @(git ls-files --others --exclude-standard -- '*.ts' '*.tsx' | Where-Object { (Split-Path $_ -Leaf) -like 'local-*' })
+          if ($files.Count -eq 0) { throw 'No se encuentran los ficheros propios: ¿se ha aplicado el parcheador?' }
+          Write-Host "Revisando $($files.Count) ficheros propios"
+          corepack pnpm exec tsx scripts/run-oxlint.ts @files
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Crear el instalador
         working-directory: D:\dsh

@@ -4,7 +4,9 @@
  * Mira las llamadas a write/edit/str_replace_editor del último turno del chat y
  * publica lo que van escribiendo (local-live-store.ts). Los argumentos crecen en
  * su sitio mientras llegan, sin avisar, así que mientras el turno está en marcha
- * se leen unas siete veces por segundo.
+ * se leen unas siete veces por segundo. Los turnos anteriores (ficheros y pasos
+ * del navegador) se leen del registro del chat, así que también están tras
+ * reiniciar la app.
  *
  * El panel no se abre solo: la línea de estado del turno («Deep diving…» y
  * «Completed in…») lleva el icono de «Live code», con la lista de ficheros en una flecha, cuando el turno escribe
@@ -19,8 +21,8 @@ import {
 import type { ToolCallBlock } from '../contract/snapshot.ts'
 import type { UseChat } from '../contract/slots.ts'
 import {
-  browserStepText, liveSnapshot, publishLive, requestBrowserOpen, requestLiveFile, requestLiveOpen, subscribeLive,
-  type LiveBrowserStep, type LiveEdit, type LiveFile,
+  browserStepText, liveSnapshot, publishHistory, publishLive, requestBrowserOpen, requestLiveFile, requestLiveOpen, subscribeLive,
+  turnSnapshot, type LiveBrowserStep, type LiveEdit, type LiveFile, type LiveTurn,
 } from './local-live-store.ts'
 import css from './local-live-watch.module.css'
 
@@ -159,6 +161,45 @@ export function LocalLiveWatcher({ sessionId, useChat }: { sessionId: string; us
       clearInterval(timer)
     }
   }, [sessionId, turn, running, source, startedAt])
+
+  // Los turnos anteriores: una vez al abrir el chat y cuando cambian (al cargar turnos más antiguos o al empezar otro).
+  const turnOrder = useChat(s => s.timeline.turnOrder)
+  const nodes = useChat(s => s.nodes)
+  const timeline = useRef<{ turns: ReadonlyMap<number, { data?: unknown }> } | undefined>(undefined)
+  timeline.current = useChat(s => s.timeline)
+  useEffect(() => {
+    const older = turnOrder.slice(0, -1)
+    let last = ''
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const read = (): void => {
+      timer = undefined
+      const turns: LiveTurn[] = []
+      for (const number of older) {
+        const blocks = nodes.turnDataSource(number, 'tool-call').getSnapshot().map(data => data.root)
+        const files = filesOf(blocks)
+        const browser = browserSteps(blocks)
+        if (files.length === 0 && browser.length === 0) continue
+        const data = timeline.current?.turns.get(number)?.data as { get(key: string): unknown } | undefined
+        const changes = (data?.get('deliverables') as { changes?: { seq: number } } | undefined)?.changes
+        turns.push({
+          sessionId, turn: number, running: false, files,
+          ...changes === undefined ? {} : { changesSeq: changes.seq },
+          ...browser.length === 0 ? {} : { browser },
+        })
+      }
+      const now = turns.map(entry => `${String(entry.turn)}:${signature(false, entry.files, entry.changesSeq, entry.browser)}`).join('/')
+      if (now === last) return
+      last = now
+      publishHistory(sessionId, turns)
+    }
+    const later = (): void => { timer ??= setTimeout(read, 200) }
+    read()
+    const unsubscribes = older.map(number => nodes.turnDataSource(number, 'tool-call').subscribe(later))
+    return () => {
+      for (const unsubscribe of unsubscribes) unsubscribe()
+      clearTimeout(timer)
+    }
+  }, [sessionId, turnOrder, nodes])
   return null
 }
 
@@ -251,6 +292,10 @@ function TurnIconMenu({ placement, icon, openLabel, onOpen, busy, menuLabel, tit
   )
 }
 
+/** El turno de una línea de estado: sin número, el que está en marcha; con él, ese (el actual o uno anterior). */
+const lineTurn = (sessionId: string, turn: number | undefined): LiveTurn | undefined =>
+  turn === undefined ? liveSnapshot(sessionId) : turnSnapshot(sessionId, turn)
+
 const fileStatus = (file: LiveFile): LiveEdit['status'] => file.edits.at(-1)?.status ?? 'done'
 const fileName = (path: string): string => path.split(/[\\/]/).at(-1) ?? path
 const fileFolder = (path: string): string => {
@@ -266,9 +311,9 @@ const fileFolder = (path: string): string => {
  */
 export function LocalLiveCodeButton({ turn, placement }: { turn?: number; placement: 'running' | 'process' }) {
   const sessionId = useContext(LiveSession)
-  const live = useSyncExternalStore(subscribeLive, () => sessionId === undefined ? undefined : liveSnapshot(sessionId))
+  const live = useSyncExternalStore(subscribeLive, () => sessionId === undefined ? undefined : lineTurn(sessionId, turn))
   if (sessionId === undefined || live === undefined || live.files.length === 0) return null
-  if (turn === undefined ? !live.running : live.turn !== turn) return null
+  if (turn === undefined && !live.running) return null
   const writing = live.files.some(file => file.edits.some(edit => edit.status === 'writing'))
   return (
     <TurnIconMenu placement={placement} icon={<LinkIconMedium kind="code" className={css.icon} />}
@@ -278,7 +323,7 @@ export function LocalLiveCodeButton({ turn, placement }: { turn?: number; placem
       {close => live.files.map(file => (
         <li key={file.path}>
           <button type="button" className={css.fileRow} data-status={fileStatus(file)} title={file.path}
-            onClick={() => { close(); requestLiveFile(sessionId, file.path) }}>
+            onClick={() => { close(); requestLiveFile(sessionId, file.path, live.turn) }}>
             <span className={css.stepDot} />
             <span className={css.stepText}>{fileName(file.path)}</span>
             <span className={css.fileFolder}>{fileFolder(file.path)}</span>
@@ -297,10 +342,10 @@ export function LocalLiveCodeButton({ turn, placement }: { turn?: number; placem
  */
 export function LocalBrowserButton({ turn, placement }: { turn?: number; placement: 'running' | 'process' }) {
   const sessionId = useContext(LiveSession)
-  const live = useSyncExternalStore(subscribeLive, () => sessionId === undefined ? undefined : liveSnapshot(sessionId))
+  const live = useSyncExternalStore(subscribeLive, () => sessionId === undefined ? undefined : lineTurn(sessionId, turn))
   const steps = live?.browser ?? []
   if (sessionId === undefined || live === undefined || steps.length === 0) return null
-  if (turn === undefined ? !live.running : live.turn !== turn) return null
+  if (turn === undefined && !live.running) return null
   const busy = live.running && steps.at(-1)?.status === 'running'
   return (
     <TurnIconMenu placement={placement} icon={<IconGlobeOutlineRegular className={css.icon} />}

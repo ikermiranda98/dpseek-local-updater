@@ -22,7 +22,7 @@ const TEXT = new Set([
 ])
 
 /** Lo que admite el selector de ficheros. */
-export const DOCUMENT_ACCEPT = ['.pdf', '.docx', ...[...TEXT].map((ext) => `.${ext}`)].join(',')
+export const DOCUMENT_ACCEPT = ['.pdf', '.docx', ...[...TEXT].map(ext => `.${ext}`)].join(',')
 
 /** El documento leído, con lo que la tarjeta cuenta de él. */
 export interface LocalDocument extends LocalImproveDocument {
@@ -53,7 +53,7 @@ export async function localDocumentText(file: File, signal: AbortSignal): Promis
     if (read === undefined) throw new Error('the PDF reader is not available')
     const list = await read(new Uint8Array(await file.arrayBuffer()), signal)
     pages = list.length
-    blank = list.filter((page) => page.trim() === '').length
+    blank = list.filter(page => page.trim() === '').length
     if (blank === list.length) throw new Error(`${file.name} has no text to read (it may be a scanned image)`)
     // Por páginas enteras: así se puede decir hasta dónde se ha leído.
     const kept: string[] = []
@@ -83,7 +83,7 @@ export async function localDocumentText(file: File, signal: AbortSignal): Promis
     text = text.slice(0, at > DOCUMENT_MAX_CHARS / 2 ? at : DOCUMENT_MAX_CHARS)
     cut = `the first ${String(Math.round(DOCUMENT_MAX_CHARS / 1000))}k characters`
   }
-  const words = text.split(/\s+/).filter((word) => word !== '' && !/^\[p\.$|^\d+\]$/.test(word)).length
+  const words = text.split(/\s+/).filter(word => word !== '' && !/^\[p\.$|^\d+\]$/.test(word)).length
   return {
     name: file.name, text, words,
     ...pages === undefined ? {} : { pages }, ...cut === undefined ? {} : { cut }, ...blank === 0 ? {} : { blank },
@@ -132,8 +132,19 @@ const ITEM = '\u0000'
 interface Paragraph { text: string; style?: string; numId?: string; ilvl: number; outline?: number }
 interface Cell { readonly blocks: string[] }
 interface Table { readonly rows: string[][]; row: string[] | null; cell: Cell | null; readonly parentCell: Cell | null }
-interface Style { readonly name: string; readonly outline?: number; readonly numId?: string; readonly ilvl?: number; readonly basedOn?: string }
-interface Resolved { readonly name: string; readonly outline: number | undefined; readonly numId: string | undefined; readonly ilvl: number | undefined }
+interface Style {
+  readonly name: string
+  readonly outline?: number
+  readonly numId?: string
+  readonly ilvl?: number
+  readonly basedOn?: string
+}
+interface Resolved {
+  readonly name: string
+  readonly outline: number | undefined
+  readonly numId: string | undefined
+  readonly ilvl: number | undefined
+}
 interface Level { readonly format: string; readonly text: string; readonly start: number }
 
 class DocxReader {
@@ -192,11 +203,11 @@ class DocxReader {
     }
     const own = chain[0]
     if (own === undefined) return undefined
-    const heading = chain.map((style) => /^heading (\d)$/.exec(style.name)).find((match) => match !== null)
-    const numbered = chain.find((style) => style.numId !== undefined)
+    const heading = chain.map(style => /^heading (\d)$/.exec(style.name)).find(match => match !== null)
+    const numbered = chain.find(style => style.numId !== undefined)
     return {
       name: own.name,
-      outline: chain.find((style) => style.outline !== undefined)?.outline ?? (heading == null ? undefined : Number(heading[1]) - 1),
+      outline: chain.find(style => style.outline !== undefined)?.outline ?? (heading == null ? undefined : Number(heading[1]) - 1),
       numId: numbered?.numId,
       ilvl: numbered?.ilvl,
     }
@@ -223,7 +234,7 @@ class DocxReader {
   private finish(paragraph: Paragraph): string | null {
     const style = this.style(paragraph.style)
     if (style !== undefined && /^(toc \d|toc heading)$/.test(style.name)) return null
-    const text = paragraph.text.replace(/[ \t]+/g, (space) => (space.includes('\t') ? '\t' : ' ')).trim()
+    const text = paragraph.text.replace(/[ \t]+/g, space => (space.includes('\t') ? '\t' : ' ')).trim()
     if (text === '') return ''
     const outline = paragraph.outline ?? style?.outline ?? (style?.name === 'title' ? 0 : undefined)
     const numId = paragraph.numId ?? style?.numId
@@ -255,7 +266,7 @@ class DocxReader {
       else blocks.push(block)
     }
     const collecting = (): boolean => !sdt.some(Boolean)
-      && fields.every((field) => field.result && !/^\s*TOC\b/.test(field.instr))
+      && fields.every(field => field.result && !/^\s*TOC\b/.test(field.instr))
     for (const match of xml.matchAll(/<([^>]*)>|([^<]+)/g)) {
       const tag = match[1]
       if (tag === undefined) {
@@ -291,7 +302,7 @@ class DocxReader {
           if (text !== null) emit(text)
         } else if (name === 'w:tc') {
           if (table?.cell != null && table.row !== null) {
-            table.row.push(table.cell.blocks.filter((block) => block !== '').map((block) => block.replace(ITEM, ''))
+            table.row.push(table.cell.blocks.filter(block => block !== '').map(block => block.replace(ITEM, ''))
               .join('<br>').replace(/\|/g, '\\|'))
           }
           if (table !== undefined) table.cell = null
@@ -373,11 +384,11 @@ class DocxReader {
 
 /** Una tabla Markdown; las de una sola columna (cuadros o maquetación), como párrafos. */
 function renderTable(rows: readonly string[][]): string {
-  const filled = rows.filter((row) => row.some((cell) => cell.trim() !== ''))
+  const filled = rows.filter(row => row.some(cell => cell.trim() !== ''))
   const first = filled[0]
   if (first === undefined) return ''
-  const columns = Math.max(...filled.map((row) => row.length))
-  if (columns <= 1) return filled.map((row) => (row[0] ?? '').replace(/<br>/g, '\n').replace(/\\\|/g, '|')).join('\n\n')
+  const columns = Math.max(...filled.map(row => row.length))
+  if (columns <= 1) return filled.map(row => (row[0] ?? '').replace(/<br>/g, '\n').replace(/\\\|/g, '|')).join('\n\n')
   const line = (row: readonly string[]): string =>
     `| ${Array.from({ length: columns }, (_, index) => (row[index] ?? '').trim()).join(' | ')} |`
   return [line(first), `|${' --- |'.repeat(columns)}`, ...filled.slice(1).map(line)].join('\n')

@@ -176,7 +176,9 @@ export class LocalSessionDeleter {
  * aparte, que no se deben borrar con él.
  */
 function descendants(
-  records: readonly { readonly header: { readonly id: SessionId; readonly parentSession?: SessionId; readonly delegationDepth?: number } }[],
+  records: readonly {
+    readonly header: { readonly id: SessionId; readonly parentSession?: SessionId; readonly delegationDepth?: number }
+  }[],
   sessionId: SessionId,
 ): SessionId[] {
   const found: SessionId[] = []

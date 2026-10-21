@@ -67,7 +67,7 @@ export function localSubchatContext(): Context | undefined {
 /** Cita un texto seleccionado para la tarea. */
 function quote(text: string): string {
   const clipped = text.length > 1500 ? `${text.slice(0, 1500)}…` : text
-  return `${clipped.split('\n').map((line) => `> ${line}`).join('\n')}\n\n`
+  return `${clipped.split('\n').map(line => `> ${line}`).join('\n')}\n\n`
 }
 
 /**
@@ -181,7 +181,7 @@ function SubchatDialog({ sessionId, initial, onClose }: { sessionId: string; ini
       <div className={css.quick}>
         {QUICK_TASKS.map(([label, text]) => (
           <button key={label} type="button" className={css.chip} disabled={busy}
-            onClick={() => { setTask((current) => current.trim() === '' ? text : `${current.trimEnd()}\n${text}`); area.current?.focus() }}>
+            onClick={() => { setTask(current => current.trim() === '' ? text : `${current.trimEnd()}\n${text}`); area.current?.focus() }}>
             {label}
           </button>
         ))}

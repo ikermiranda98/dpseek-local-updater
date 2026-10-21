@@ -150,7 +150,9 @@ function measureStatus(): Omit<LocalOptimizeStatus, 'cleanup'> {
   }
   try {
     const state = JSON.parse(readFileSync(join(dir, 'local-contexto.estado.json'), 'utf8')) as {
-      model?: unknown, hechos?: unknown, total?: unknown
+      model?: unknown
+      hechos?: unknown
+      total?: unknown
     }
     const done = Number(state.hechos)
     const total = Number(state.total)
@@ -283,7 +285,8 @@ export async function ensureLocalVariant(selection: { readonly provider: string;
   if (shown.ok) return
   const base = `${match[1] ?? ''}:${match[2] ?? 'latest'}`
   const spec = readSpec()
-  const cache = spec === undefined ? {} : readJson<Record<string, { optimo?: number, capas?: Record<string, number> }>>(spec.job.cacheFile, {})
+  type Cache = Record<string, { optimo?: number; capas?: Record<string, number> }>
+  const cache = spec === undefined ? {} : readJson<Cache>(spec.job.cacheFile, {})
   const declared = Number(spec?.models[base]?.declared)
   const ctx = match[3] === 'auto' ? (cache[base]?.optimo ?? (declared > 0 ? declared : 65536)) : Number(match[3])
   const layers = cache[base]?.capas?.[String(ctx)]
@@ -304,7 +307,7 @@ export interface LocalModelInfo {
 export async function localModelsInfo(): Promise<{ readonly models: readonly LocalModelInfo[] }> {
   const response = await ollama('/api/tags')
   if (!response.ok) return { models: [] }
-  const tags = ((await response.json()) as { models?: { name: string, size: number, modified_at: string }[] }).models ?? []
+  const tags = ((await response.json()) as { models?: { name: string; size: number; modified_at: string }[] }).models ?? []
   const usage = readJson<Record<string, string>>(join(storages(), 'local-variantes-uso.json'), {})
   const now = Date.now()
   const tracking = trackingSince(now)

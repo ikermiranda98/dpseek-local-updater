@@ -58,7 +58,7 @@ export interface LocalImproveSuggestion {
  */
 export function isLongPrompt(draft: string): boolean {
   const text = draft.trim()
-  return text.length > 1200 || text.split('\n').filter((line) => line.trim() !== '').length > 20
+  return text.length > 1200 || text.split('\n').filter(line => line.trim() !== '').length > 20
 }
 
 /** Llamadas al Host. */

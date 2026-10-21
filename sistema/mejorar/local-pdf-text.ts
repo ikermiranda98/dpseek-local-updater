@@ -18,7 +18,7 @@ export async function localPdfText(data: Uint8Array<ArrayBuffer>, signal: AbortS
       const page = await document.getPage(number)
       try {
         const content = await page.getTextContent()
-        pages.push(content.items.map((item) => 'str' in item ? item.str + (item.hasEOL ? '\n' : ' ') : '').join(''))
+        pages.push(content.items.map(item => 'str' in item ? item.str + (item.hasEOL ? '\n' : ' ') : '').join(''))
       } finally {
         page.cleanup()
       }

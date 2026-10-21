@@ -30,8 +30,17 @@ interface SummaryLike {
   readonly running?: boolean
   readonly retainedBy?: { readonly mainView?: number }
   readonly projectionValues?: {
-    readonly subagentTiming?: { readonly settledMs: number; readonly active?: { readonly since: number }; readonly lastTurnCompleted?: boolean }
-    readonly tokenUsage?: { readonly uncachedInputTokens: number; readonly outputTokens: number; readonly cacheReadTokens: number; readonly cacheWriteTokens: number }
+    readonly subagentTiming?: {
+      readonly settledMs: number
+      readonly active?: { readonly since: number }
+      readonly lastTurnCompleted?: boolean
+    }
+    readonly tokenUsage?: {
+      readonly uncachedInputTokens: number
+      readonly outputTokens: number
+      readonly cacheReadTokens: number
+      readonly cacheWriteTokens: number
+    }
   }
 }
 
@@ -43,7 +52,7 @@ const noStatuses: StatusSource = { getSnapshot: () => new Map(), subscribe: () =
 const statusSource = (): StatusSource =>
   (localCtx?.get('uiSession') as { sessionStatus?: StatusSource } | undefined)?.sessionStatus ?? noStatuses
 const byIdOf = (): Record<string, SummaryLike | undefined> =>
-  (sessions?.list.getSnapshot().byId ?? {}) as unknown as Record<string, SummaryLike | undefined>
+  sessions?.list.getSnapshot().byId ?? {}
 
 type Kind = 'running' | 'waiting' | 'failed' | 'review' | 'done'
 
@@ -72,7 +81,9 @@ function tooltip(entry: LocalSubchat, kind: Kind, summary: SummaryLike | undefin
   const timing = summary?.projectionValues?.subagentTiming
   const usage = summary?.projectionValues?.tokenUsage
   const ms = timing === undefined ? undefined : timing.settledMs + (timing.active === undefined ? 0 : Date.now() - timing.active.since)
-  const tokens = usage === undefined ? undefined : usage.uncachedInputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
+  const tokens = usage === undefined
+    ? undefined
+    : usage.uncachedInputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens
   return [
     entry.label,
     KIND_TEXT[kind],
@@ -95,10 +106,10 @@ function installNotifications(list: ISessions, open: (target: SessionTarget) => 
     // Los subagentes se marcan «en marcha» en el estado de sesión, no siempre en la lista.
     const statuses = statusSource().getSnapshot()
     const isRunning = (id: string): boolean => (statuses.get(id)?.running ?? byId[id]?.running) === true
-    const now = new Set(subchatsSnapshot().filter((entry) => isRunning(entry.childId)).map((entry) => entry.childId))
+    const now = new Set(subchatsSnapshot().filter(entry => isRunning(entry.childId)).map(entry => entry.childId))
     const away = document.visibilityState !== 'visible' || !document.hasFocus()
     for (const childId of running) {
-      const entry = subchatsSnapshot().find((candidate) => candidate.childId === childId)
+      const entry = subchatsSnapshot().find(candidate => candidate.childId === childId)
       if (now.has(childId) || entry === undefined || Notification.permission === 'denied') continue
       const viewing = mainViewId()
       if (!away && (viewing === entry.parentId || viewing === childId)) continue
@@ -134,8 +145,8 @@ export function setLocalSubchats(ctx: Context, list: ISessions, open: (target: S
   openSession = open
   // Subchats borrados desde la selección (Supr / «Delete N»): fuera de la barra lateral.
   const onDeleted = (event: Event): void => {
-    const ids = (event as CustomEvent<readonly string[]>).detail
-    if (Array.isArray(ids)) for (const id of ids) forgetSubchat(id)
+    const ids: unknown = (event as CustomEvent<unknown>).detail
+    if (Array.isArray(ids)) for (const id of ids) if (typeof id === 'string') forgetSubchat(id)
   }
   window.addEventListener('dpseek-local-deleted', onDeleted)
   const stop = installNotifications(list, open)
@@ -168,15 +179,18 @@ export function LocalSubchatRows({ parentId, currentId }: { parentId: string; cu
   if (list === undefined) return null
   const byId = list.byId as unknown as Record<string, SummaryLike | undefined>
   // Con la lista ya cargada, un subchat que no aparece se ha borrado con su chat.
-  const mine = all.filter((entry) => entry.parentId === parentId && (list.phase !== 'ready' || byId[entry.childId] !== undefined))
+  const mine = all.filter(entry => entry.parentId === parentId && (list.phase !== 'ready' || byId[entry.childId] !== undefined))
   if (mine.length === 0) return null
-  const anyOtherRunning = (childId: string): boolean => Object.entries(byId).some(([id, summary]) => id !== childId && summary?.running === true)
-  const kinds = mine.map((entry) => kindOf(entry, byId[entry.childId], statuses.get(entry.childId)))
-  const working = kinds.filter((kind) => kind === 'running').length
-  const attention = kinds.some((kind) => kind === 'waiting' || kind === 'review')
+  const anyOtherRunning = (childId: string): boolean =>
+    Object.entries(byId).some(([id, summary]) => id !== childId && summary?.running === true)
+  const kinds = mine.map(entry => kindOf(entry, byId[entry.childId], statuses.get(entry.childId)))
+  const working = kinds.filter(kind => kind === 'running').length
+  const attention = kinds.some(kind => kind === 'waiting' || kind === 'review')
   const target = (entry: LocalSubchat): SessionTarget =>
     ({ parentSessionId: parentId as SessionId, childSessionId: entry.childId as SessionId, mode: 'continuable' })
-  const run = (action: Promise<unknown>): void => { action.catch((reason: unknown) => { setError(reason instanceof Error ? reason.message : String(reason)) }) }
+  const run = (action: Promise<unknown>): void => {
+    action.catch((reason: unknown) => { setError(reason instanceof Error ? reason.message : String(reason)) })
+  }
   const menuItems = (entry: LocalSubchat, kind: Kind): MenuEntry[] => [
     { id: 'open', label: 'Open' },
     { id: 'aside', label: 'Open beside' },
@@ -219,23 +233,23 @@ export function LocalSubchatRows({ parentId, currentId }: { parentId: string; cu
         const summary = byId[entry.childId]
         return (
           <Tooltip key={entry.childId} label={() => tooltip(entry, kind, summary, anyOtherRunning(entry.childId))} side="right" delayMs={600} maxWidth={320}>
-          <div className={css.row} role="treeitem" data-row-key={`subchat:${entry.childId}`}
-            aria-selected={entry.childId === currentId}
-            onClick={() => { if (renaming !== entry.childId) openSession?.(target(entry)) }}
-            onContextMenu={(event) => {
-              event.preventDefault()
-              event.stopPropagation()
-              setMenu({ entry, rect: new DOMRect(event.clientX, event.clientY, 0, 0) })
-            }}>
-            <IconTreeCornerRegular className={css.corner} />
-            <span className={css.dot} data-kind={kind} aria-label={KIND_TEXT[kind]} />
-            {renaming === entry.childId
-              ? <RenameBox label={entry.label} onDone={(label) => {
-                setRenaming(null)
-                if (label !== undefined && label.trim() !== '') updateSubchat(entry.childId, { label: label.trim() })
-              }} />
-              : <span className={css.label}>{entry.label}</span>}
-          </div>
+            <div className={css.row} role="treeitem" data-row-key={`subchat:${entry.childId}`}
+              aria-selected={entry.childId === currentId}
+              onClick={() => { if (renaming !== entry.childId) openSession?.(target(entry)) }}
+              onContextMenu={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setMenu({ entry, rect: new DOMRect(event.clientX, event.clientY, 0, 0) })
+              }}>
+              <IconTreeCornerRegular className={css.corner} />
+              <span className={css.dot} data-kind={kind} aria-label={KIND_TEXT[kind]} />
+              {renaming === entry.childId
+                ? <RenameBox label={entry.label} onDone={(label) => {
+                  setRenaming(null)
+                  if (label !== undefined && label.trim() !== '') updateSubchat(entry.childId, { label: label.trim() })
+                }} />
+                : <span className={css.label}>{entry.label}</span>}
+            </div>
           </Tooltip>
         )
       })}
@@ -243,7 +257,7 @@ export function LocalSubchatRows({ parentId, currentId }: { parentId: string; cu
         <Menu open portal dense autoFocus anchor={<span className={css.menuAnchor} />} listClassName={css.menuList}
           getAnchorRect={() => menu.rect}
           items={menuItems(menu.entry, kindOf(menu.entry, byId[menu.entry.childId], statuses.get(menu.entry.childId)))}
-          onSelect={(id) => { choose(menu.entry, String(id)) }}
+          onSelect={(id) => { choose(menu.entry, id) }}
           onClose={() => { setMenu(null) }} />
       )}
       {deleting !== null && (

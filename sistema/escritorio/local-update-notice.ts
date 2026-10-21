@@ -86,7 +86,7 @@ export function localUpdateConfirmation(confirmation: UpdateDialogOptions, repor
     ...confirmation,
     type: report.level === 'green' && !tasks ? 'info' : 'warning',
     message: tasks ? confirmation.message : headline,
-    detail: [tasks ? headline : '', report.detail, confirmation.detail ?? ''].filter((part) => part !== '').join('\n\n'),
+    detail: [tasks ? headline : '', report.detail, confirmation.detail ?? ''].filter(part => part !== '').join('\n\n'),
     technicalDetails: report.technical,
     buttons, defaultId: report.level === 'green' ? 0 : 1, cancelId: 1,
   }

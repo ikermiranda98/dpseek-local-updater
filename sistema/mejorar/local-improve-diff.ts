@@ -28,18 +28,18 @@ function lcs(a: readonly string[], b: readonly string[]): [number, number][] {
   const width = m + 1
   const table = Math.min(n, m) < 65_535 ? new Uint16Array((n + 1) * width) : new Uint32Array((n + 1) * width)
   for (let i = n - 1; i >= 0; i--) {
-    const ai = a[i]!
+    const ai = a[i] ?? ''
     const row = i * width
     const next = row + width
     for (let j = m - 1; j >= 0; j--) {
-      table[row + j] = ai !== '' && ai === b[j] ? table[next + j + 1]! + 1 : Math.max(table[next + j]!, table[row + j + 1]!)
+      table[row + j] = ai !== '' && ai === b[j] ? (table[next + j + 1] ?? 0) + 1 : Math.max(table[next + j] ?? 0, table[row + j + 1] ?? 0)
     }
   }
   const pairs: [number, number][] = []
   let i = 0
   let j = 0
   while (i < n && j < m) {
-    if (a[i] !== '' && a[i] === b[j]) { pairs.push([i, j]); i++; j++ } else if (table[(i + 1) * width + j]! >= table[i * width + j + 1]!) i++
+    if (a[i] !== '' && a[i] === b[j]) { pairs.push([i, j]); i++; j++ } else if ((table[(i + 1) * width + j] ?? 0) >= (table[i * width + j + 1] ?? 0)) i++
     else j++
   }
   return pairs
@@ -61,7 +61,7 @@ function build(a: readonly string[], b: readonly string[], pairs: readonly [numb
   for (const [pi, pj] of [...pairs, [a.length, b.length] as [number, number]]) {
     push('del', a.slice(i, pi).join(join) + (pi > i && join !== '' ? join : ''))
     push('add', b.slice(j, pj).join(join) + (pj > j && join !== '' ? join : ''))
-    if (pj < b.length) push('same', b[pj]! + (join !== '' && pj < b.length - 1 ? join : ''))
+    if (pj < b.length) push('same', (b[pj] ?? '') + (join !== '' && pj < b.length - 1 ? join : ''))
     i = pi + 1
     j = pj + 1
   }

@@ -1,10 +1,13 @@
 /**
  * Código en vivo (añadido por dpseek-local-updater): lo que el modelo está
- * escribiendo en el turno actual de cada chat.
+ * escribiendo en el turno actual de cada chat, y lo que escribió y los pasos que
+ * dio con el navegador en los turnos anteriores.
  *
  * El chat (ui-chat) lo publica mientras llegan las llamadas a write/edit y la
  * pestaña «Live code» del panel derecho (ui-deliverables) lo dibuja. Son paquetes
- * distintos, así que comparten el estado por un símbolo global.
+ * distintos, así que comparten el estado por un símbolo global. Los turnos
+ * anteriores salen del registro del chat (el mismo que se guarda en disco), así
+ * que siguen ahí al reiniciar la app.
  */
 
 /** Una escritura o edición de un fichero, tal y como va llegando. */
@@ -54,8 +57,12 @@ interface LiveStore {
   readonly listeners: Set<() => void>
   readonly openers: Set<(sessionId: string) => void>
   browserOpeners?: Set<(sessionId: string) => void>
-  /** El último fichero que se pidió ver desde el chat (la lista de la flecha de «Live code»). */
-  liveChoice?: { readonly sessionId: string; readonly path: string; readonly at: number }
+  /** El último fichero que se pidió ver desde el chat (la lista de la flecha de «Live code»), y de qué turno. */
+  liveChoice?: { readonly sessionId: string; readonly path: string; readonly at: number; readonly turn?: number }
+  /** Turnos ya terminados de cada chat que escribieron ficheros o usaron el navegador, por número de turno. */
+  history?: Map<string, Map<number, LiveTurn>>
+  /** Los turnos de cada chat (los terminados y el actual) en orden, para no rehacer la lista en cada lectura. */
+  turnLists?: Map<string, readonly LiveTurn[]>
   /** Quien quiere saber que un chat empieza un turno (el usuario acaba de mandar un mensaje). */
   turnStarters?: Set<(sessionId: string, startedAt: number | undefined) => void>
 }
@@ -82,6 +89,7 @@ export function onBrowserOpen(opener: (sessionId: string) => void): () => void {
 export function publishLive(turn: LiveTurn): void {
   const previous = store.turns.get(turn.sessionId)
   store.turns.set(turn.sessionId, turn)
+  store.turnLists?.delete(turn.sessionId)
   for (const listener of store.listeners) listener()
   // Un turno nuevo en marcha: el usuario acaba de mandar un mensaje (también el primero de un chat nuevo).
   if (turn.running && previous?.turn !== turn.turn) {
@@ -101,6 +109,45 @@ export function liveSnapshot(sessionId: string): LiveTurn | undefined {
   return store.turns.get(sessionId)
 }
 
+/**
+ * Los turnos anteriores de un chat (se calculan del registro del chat al abrirlo).
+ * @param sessionId - chat.
+ * @param turns - turnos terminados que escribieron ficheros o usaron el navegador.
+ */
+export function publishHistory(sessionId: string, turns: readonly LiveTurn[]): void {
+  store.history ??= new Map()
+  store.history.set(sessionId, new Map(turns.map(turn => [turn.turn, turn])))
+  store.turnLists?.delete(sessionId)
+  for (const listener of store.listeners) listener()
+}
+
+/** @returns ese turno del chat: el actual o uno anterior, si escribió ficheros o usó el navegador. */
+export function turnSnapshot(sessionId: string, turn: number): LiveTurn | undefined {
+  const live = store.turns.get(sessionId)
+  return live?.turn === turn ? live : store.history?.get(sessionId)?.get(turn)
+}
+
+/** @returns los turnos del chat con ficheros o pasos del navegador, del más antiguo al actual (misma lista mientras no cambien). */
+export function sessionTurns(sessionId: string): readonly LiveTurn[] {
+  store.turnLists ??= new Map()
+  const cached = store.turnLists.get(sessionId)
+  if (cached !== undefined) return cached
+  const live = store.turns.get(sessionId)
+  const older = [...store.history?.get(sessionId)?.values() ?? []].filter(turn => turn.turn !== live?.turn)
+  const list = [...older, ...live === undefined ? [] : [live]]
+    .filter(turn => turn.files.length > 0 || (turn.browser?.length ?? 0) > 0)
+    .sort((a, b) => a.turn - b.turn)
+  store.turnLists.set(sessionId, list)
+  return list
+}
+
+/** @returns los chats con un turno en marcha, el que usa el navegador ahora primero. */
+export function runningSessions(): string[] {
+  const running = [...store.turns.values()].filter(turn => turn.running)
+  const browsing = (turn: LiveTurn): number => turn.browser?.at(-1)?.status === 'running' ? 0 : 1
+  return running.sort((a, b) => browsing(a) - browsing(b)).map(turn => turn.sessionId)
+}
+
 /** @returns cómo dejar de escuchar. */
 export function subscribeLive(listener: () => void): () => void {
   store.listeners.add(listener)
@@ -112,15 +159,15 @@ export function requestLiveOpen(sessionId: string): void {
   for (const opener of store.openers) opener(sessionId)
 }
 
-/** El chat pide abrir la pestaña «Live code» en un fichero concreto. */
-export function requestLiveFile(sessionId: string, path: string): void {
-  store.liveChoice = { sessionId, path, at: Date.now() }
+/** El chat pide abrir la pestaña «Live code» en un fichero concreto (de ese turno; sin turno, el actual). */
+export function requestLiveFile(sessionId: string, path: string, turn?: number): void {
+  store.liveChoice = { sessionId, path, at: Date.now(), ...turn === undefined ? {} : { turn } }
   for (const listener of store.listeners) listener()
   requestLiveOpen(sessionId)
 }
 
 /** @returns el último fichero que se pidió ver en ese chat, si lo hay. */
-export function liveChoice(sessionId: string): { readonly path: string; readonly at: number } | undefined {
+export function liveChoice(sessionId: string): { readonly path: string; readonly at: number; readonly turn?: number } | undefined {
   return store.liveChoice?.sessionId === sessionId ? store.liveChoice : undefined
 }
 

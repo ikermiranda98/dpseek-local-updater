@@ -174,7 +174,7 @@ const LONG_LINES = 20
 /** @returns si el borrador se trata como un prompt largo que hay que reorganizar. */
 export function localIsLongPrompt(draft: string): boolean {
   const text = draft.trim()
-  return text.length > LONG_CHARS || text.split('\n').filter((line) => line.trim() !== '').length > LONG_LINES
+  return text.length > LONG_CHARS || text.split('\n').filter(line => line.trim() !== '').length > LONG_LINES
 }
 
 const RESTRUCTURE_INSTRUCTIONS = [
@@ -270,7 +270,7 @@ export function localRecentTurns(events: Iterable<{ readonly type: string; reado
       if (text !== '') turns.push({ role: 'assistant', text })
     }
   }
-  return turns.slice(-RECENT_MESSAGES).map((turn) => ({
+  return turns.slice(-RECENT_MESSAGES).map(turn => ({
     ...turn,
     text: turn.text.length > MESSAGE_CHARS ? `${turn.text.slice(0, MESSAGE_CHARS)}…` : turn.text,
   }))
@@ -312,11 +312,13 @@ export function localProjectFiles(root: string | undefined): string[] {
 
 /** Español, por las letras y palabras más comunes (para decírselo al modelo: los pequeños se pasan al inglés). */
 function looksSpanish(text: string): boolean {
-  return /[áéíóúñ¿¡]/i.test(text) || (text.match(/\b(que|el|la|los|las|de|del|un|una|en|hasta|para|con|por|haz|crea|cree|archivo)\b/gi)?.length ?? 0) >= 2
+  return /[áéíóúñ¿¡]/i.test(text)
+    || (text.match(/\b(que|el|la|los|las|de|del|un|una|en|hasta|para|con|por|haz|crea|cree|archivo)\b/gi)?.length ?? 0) >= 2
 }
 
 /** Cabeceras que algunos modelos añaden aunque se les pida que no. */
-const PREAMBLE = /^(improved|rewritten|improve the|here is|aquí tienes|mensaje mejorado|versión mejorada|prompt mejorado|prompt)[^\n]*:\s*\n?/i
+const PREAMBLE = new RegExp('^(improved|rewritten|improve the|here is|aquí tienes|mensaje mejorado|versión mejorada|prompt mejorado|prompt)'
+  + '[^\\n]*:\\s*\\n?', 'i')
 const QUESTIONS = /^\s*\**\s*(QUESTIONS|PREGUNTAS)\s*\**\s*:\s*$/im
 const NOTES = /^\s*\**\s*(NOTES|NOTAS)\s*\**\s*:\s*$/im
 
@@ -325,7 +327,9 @@ const NOTES = /^\s*\**\s*(NOTES|NOTAS)\s*\**\s*:\s*$/im
  * pensado, con `think`) para que la tarjeta lo enseñe mientras llega.
  */
 async function chat(model: string, messages: readonly { role: string; content: string }[], predict: number,
-  signal: AbortSignal, options: { timeoutMs?: number; think?: boolean; onText?: (text: string, thinking: string) => void } = {}): Promise<string> {
+  signal: AbortSignal,
+  options: { timeoutMs?: number; think?: boolean; onText?: (text: string, thinking: string) => void } = {},
+): Promise<string> {
   const stream = options.onText !== undefined
   const response = await fetch(`${ollamaUrl()}/api/chat`, {
     method: 'POST',
@@ -413,7 +417,7 @@ const reporter = (progress: LocalImproveProgress | undefined, phase: string) =>
 /** Partes clave ya elegidas, por documento: cambiar de versión no las vuelve a pedir. */
 const keyCache = new Map<string, { key: string; note: string }>()
 
-const words = (text: string): number => text.split(/\s+/).filter((word) => word !== '').length
+const words = (text: string): number => text.split(/\s+/).filter(word => word !== '').length
 
 /** Un bloque más largo que esto (una lista larga) se parte por sus elementos para poder quedarse con parte. */
 const BLOCK_CHARS = 1200
@@ -432,7 +436,7 @@ function blocks(text: string): string[] {
       current = []
     }
     const lines = block.split('\n')
-    const long = block.length > BLOCK_CHARS && !lines.every((line) => line.trimStart().startsWith('|'))
+    const long = block.length > BLOCK_CHARS && !lines.every(line => line.trimStart().startsWith('|'))
     for (const line of lines) {
       const heading = /^#{1,6} /.test(line)
       if (heading || (long && current.length > 0 && /^(?:[-*•+]|\d+[.)])\s/.test(line))) flush()
@@ -509,7 +513,7 @@ async function keyParts(model: string, document: LocalImproveDocument, signal: A
   }
   if (keep.size === 0) throw new Error('the model found no key parts in the document')
   // Cada bloque que se queda lleva los títulos de sus secciones (el suyo y los de encima).
-  const open: number[] = []
+  const open: (number | undefined)[] = []
   for (const [index, block] of list.entries()) {
     const level = /^(#{1,6}) /.exec(block)?.[1]?.length
     if (level !== undefined) {
@@ -544,7 +548,7 @@ function documentForPrompt(document: LocalImproveDocument): string {
   if (document.text.length <= HEADER_CHARS) return document.text
   const at = document.text.lastIndexOf('\n', HEADER_CHARS)
   const cut = at > HEADER_CHARS / 2 ? at : HEADER_CHARS
-  let outline = document.text.slice(cut).split('\n').filter((line) => /^#{1,6} /.test(line)).join('\n')
+  let outline = document.text.slice(cut).split('\n').filter(line => /^#{1,6} /.test(line)).join('\n')
   if (outline.length > OUTLINE_CHARS) outline = `${outline.slice(0, outline.lastIndexOf('\n', OUTLINE_CHARS))}\n…`
   return `${document.text.slice(0, cut)}\n\n[… the document goes on${outline === '' ? '' : `; headings of the rest:\n${outline}`}]`
 }
@@ -572,7 +576,7 @@ const STYLES: Readonly<Record<LocalImproveStyle, string>> = {
 /** El mensaje para el modelo con todo lo que tiene que ver. */
 function userMessage(input: LocalImproveInput): string {
   const conversation = input.recent.length === 0 ? '(no earlier messages)'
-    : input.recent.map((turn) => `${turn.role === 'user' ? 'User' : 'Assistant'}: ${turn.text}`).join('\n\n')
+    : input.recent.map(turn => `${turn.role === 'user' ? 'User' : 'Assistant'}: ${turn.text}`).join('\n\n')
   const files = input.files.length === 0 ? '(none listed)' : input.files.join('\n')
   const draft = input.draft.trim()
   const document = input.document
@@ -592,7 +596,7 @@ function userMessage(input: LocalImproveInput): string {
       : document === undefined ? 'Draft: (empty)' : 'Draft: (empty: write the prompt from the user\'s intent and the document)',
     ...input.answers === undefined || input.answers.length === 0 ? [] : [
       'The user answered your questions (use the answers and do not ask them again):\n'
-        + input.answers.map((item) => `- ${item.question} → ${item.answer}`).join('\n'),
+        + input.answers.map(item => `- ${item.question} → ${item.answer}`).join('\n'),
     ],
     ...input.style === undefined ? [] : [STYLES[input.style]],
   ]
@@ -630,7 +634,7 @@ export async function localImprovePrompt(model: string, input: LocalImproveInput
   const text = await chat(model, [
     { role: 'system', content: INSTRUCTIONS },
     // Con razonamiento, sin los ejemplos: respuestas resueltas sin pensar le enseñan a no pensar.
-    ...input.think === true ? [] : EXAMPLES.flatMap((example) => [
+    ...input.think === true ? [] : EXAMPLES.flatMap(example => [
       { role: 'user', content: userMessage(example.input) },
       { role: 'assistant', content: example.answer },
     ]),
@@ -654,9 +658,9 @@ function splitAnswer(text: string): { body: string; questions: string[]; notes: 
   const body = (first === undefined ? clean : clean.slice(0, first.index)).trim().replace(/^["“«](.*)["”»]$/s, '$1').trim()
   const lines = (mark: RegExpExecArray | null): string[] => {
     if (mark === null) return []
-    const next = marks.find((other) => other.index > mark.index)
+    const next = marks.find(other => other.index > mark.index)
     return clean.slice(mark.index + mark[0].length, next?.index).split('\n')
-      .map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter((line) => line !== '')
+      .map(line => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter(line => line !== '')
   }
   return { body, questions: lines(QUESTIONS.exec(clean)).slice(0, 2), notes: lines(NOTES.exec(clean)).slice(0, 3) }
 }
@@ -693,7 +697,7 @@ const TRANSFORM_PART_CHARS = 12_000
  */
 async function transform(model: string, job: LocalImproveTransform, signal: AbortSignal,
   progress?: LocalImproveProgress): Promise<LocalImproveResult> {
-  const chunks = job.text.length <= TRANSFORM_PART_CHARS ? [job.text] : groups(blocks(job.text), TRANSFORM_PART_CHARS).map((group) => group.blocks.join('\n\n'))
+  const chunks = job.text.length <= TRANSFORM_PART_CHARS ? [job.text] : groups(blocks(job.text), TRANSFORM_PART_CHARS).map(group => group.blocks.join('\n\n'))
   const out: string[] = []
   const notes: string[] = []
   const phase = job.kind === 'english' ? 'translating' : job.kind === 'grammar' ? 'fixing the grammar' : 'translating the other sentences'
@@ -768,10 +772,10 @@ async function restructure(model: string, input: LocalImproveInput, signal: Abor
     { role: 'system', content: REVIEW_INSTRUCTIONS },
     { role: 'user', content: `Prompt to review:\n\n${draft}${spanish ? '\n\nWrite the list in Spanish.' : ''}` },
   ], 900, signal, { think: input.think === true, onText: reporter(progress, 'reviewing'), timeoutMs: 600_000 })).trim()
-  const fixes = review === '-' ? [] : review.split('\n').map((line) => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
-    .filter((line) => line !== '')
+  const fixes = review === '-' ? [] : review.split('\n').map(line => line.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim())
+    .filter(line => line !== '')
   const pieces = draft.length <= RESTRUCTURE_PART_CHARS * 1.5 ? [draft]
-    : groups(blocks(draft), RESTRUCTURE_PART_CHARS).map((group) => group.blocks.join('\n\n'))
+    : groups(blocks(draft), RESTRUCTURE_PART_CHARS).map(group => group.blocks.join('\n\n'))
   const out: string[] = []
   const questions: string[] = []
   const notes: string[] = []
@@ -798,7 +802,7 @@ async function restructure(model: string, input: LocalImproveInput, signal: Abor
       {
         role: 'user',
         content: context
-          + (fixes.length === 0 ? '' : `\n\nApply these fixes while restructuring${total === 1 ? '' : ' (only those that concern this part)'}:\n${fixes.map((fix) => `- ${fix}`).join('\n')}`)
+          + (fixes.length === 0 ? '' : `\n\nApply these fixes while restructuring${total === 1 ? '' : ' (only those that concern this part)'}:\n${fixes.map(fix => `- ${fix}`).join('\n')}`)
           + (spanish ? '\n\nWrite it in Spanish, like the original.' : ''),
       },
     ]

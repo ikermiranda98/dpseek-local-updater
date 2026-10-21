@@ -9,8 +9,8 @@ import { addSubchat, subchatOf, updateSubchat } from './local-subchat-store.ts'
 
 /** Nombre corto del subchat: la primera línea de la tarea (sin la cita de un texto seleccionado). */
 function labelOf(task: string): string {
-  const lines = task.trim().split('\n').map((line) => line.trim()).filter((line) => line !== '')
-  const line = lines.find((candidate) => !candidate.startsWith('>')) ?? lines[0]?.replace(/^>\s*/, '') ?? ''
+  const lines = task.trim().split('\n').map(line => line.trim()).filter(line => line !== '')
+  const line = lines.find(candidate => !candidate.startsWith('>')) ?? lines[0]?.replace(/^>\s*/, '') ?? ''
   return line.length > 48 ? `${line.slice(0, 47)}…` : line
 }
 

@@ -11,14 +11,26 @@
  *   cuanto la toca, las acciones del agente en el navegador esperan; lo que escribe va directo a la página, nunca al chat;
  * - las webs con sesión guardada en su perfil y borrar la de una web (cookies y datos guardados);
  * - contraseñas guardadas: cifradas con DPAPI de Windows y, en la app, bloqueadas hasta que el usuario confirma que es él
- *   con su contraseña de Windows (o Windows Hello si lo tiene). El agente las usa por su nombre sin verlas;
+ *   con Windows Hello (o su contraseña de Windows si no lo tiene). El agente las usa por su nombre sin verlas, y solo en
+ *   su web. Se pueden exportar e importar en un fichero cifrado con una frase de paso;
+ * - pestañas: el panel enseña la que usa el agente (la de su última acción) y el usuario puede elegir otra, abrir y
+ *   cerrar; copiar al portapapeles de Windows, buscar en la página, zoom, cursor y soltar ficheros sobre la página;
+ * - modo «solo mirar» (el agente no escribe en webs reales) y el permiso con un botón para los clics que envían algo
+ *   (los pide el proveedor del navegador, local-browser-context.ts);
+ * - Adblock Plus y AdGuard en ese Edge (se descargan de la Chrome Web Store y se cargan al arrancarlo);
  * - al cerrar la app, se cierra ese Edge.
  */
 
 import { execFile, spawn } from 'node:child_process'
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import {
+  closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
+import { localAddressToUrl, openSecrets, sealSecrets, type PlainSecret } from './local-browser-rules.ts'
+
+export { localAddressToUrl } from './local-browser-rules.ts'
 
 interface AgentBrowserState {
   readonly port: number
@@ -55,13 +67,48 @@ export interface LocalAgentBrowserFrame {
   readonly viewport: { readonly width: number; readonly height: number }
   readonly canGoBack: boolean
   readonly canGoForward: boolean
+  /** La pestaña que se ve y cuántas hay abiertas. */
+  readonly tabId: string
+  readonly tabCount: number
+  /** El agente no puede escribir en webs reales. */
+  readonly lookOnly: boolean
+  /** Zoom de la página (1 = 100 %). */
+  readonly zoom: number
+  /** Un clic del agente que espera el permiso del usuario. */
+  readonly confirm: LocalAgentBrowserConfirm | null
+}
+
+/** Un clic del agente que envía algo en una web real y espera el permiso del usuario. */
+export interface LocalAgentBrowserConfirm {
+  readonly id: string
+  /** El texto del botón. */
+  readonly label: string
+  /** La web. */
+  readonly site: string
+}
+
+/** Una pestaña del navegador compartido. */
+export interface LocalAgentBrowserTab {
+  readonly id: string
+  readonly title: string
+  readonly url: string
+  /** La que se ve en el panel. */
+  readonly shown: boolean
+  /** La de la última acción del agente. */
+  readonly agent: boolean
 }
 
 /** Un gesto del usuario en el panel; las posiciones van de 0 a 1 sobre la imagen. */
 export type LocalAgentBrowserInput =
   | {
-    readonly kind: 'mouse'; readonly type: 'down' | 'up' | 'move'; readonly x: number; readonly y: number
-    readonly button: 'left' | 'right' | 'middle' | 'none'; readonly buttons: number; readonly clickCount: number; readonly modifiers: number
+    readonly kind: 'mouse'
+    readonly type: 'down' | 'up' | 'move'
+    readonly x: number
+    readonly y: number
+    readonly button: 'left' | 'right' | 'middle' | 'none'
+    readonly buttons: number
+    readonly clickCount: number
+    readonly modifiers: number
   }
   | { readonly kind: 'wheel'; readonly x: number; readonly y: number; readonly deltaX: number; readonly deltaY: number; readonly modifiers: number }
   | { readonly kind: 'text'; readonly text: string }
@@ -72,7 +119,10 @@ export type LocalAgentBrowserNavigation =
   | { readonly action: 'url'; readonly url: string }
   | { readonly action: 'back' | 'forward' | 'reload' }
 
-const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+/** Edge desde esta versión: el modo sin ventana nuevo, las extensiones sin empaquetar y el protocolo que se usa aquí. */
+const EDGE_MIN_MAJOR = 120
+
+const home = (): string => process.env.DSH_HOME ?? join(homedir(), '.dsh')
 const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36'
 /** Hasta que la pestaña dice su tamaño. */
 const DESKTOP = { width: 1280, height: 800, dpr: 1 }
@@ -88,6 +138,17 @@ interface ControlState {
   timer?: ReturnType<typeof setTimeout>
   /** El tamaño del panel en píxeles CSS y la densidad de la pantalla. */
   fit?: { width: number; height: number; dpr: number }
+  /** Modo «solo mirar»: el agente no escribe en webs reales (lo aplica local-browser-context.ts). */
+  lookOnly?: boolean
+  /** Zoom de la página (1 = 100 %). */
+  zoom?: number
+  /** La página de la última acción del agente y cuándo fue (la pone local-browser-context.ts). */
+  agentUrl?: string
+  agentAt?: number
+  /** Clic del agente que espera el permiso del usuario (lo pone y lo espera local-browser-context.ts). */
+  confirm?: { id: string; label: string; site: string; answer?: boolean }
+  /** Webs donde el usuario ha dicho «permitir siempre» mientras la app siga abierta. */
+  allowedSites?: Set<string>
 }
 
 /** Sin gestos durante este tiempo, el control vuelve solo al agente (para que no se quede esperando para siempre). */
@@ -96,6 +157,59 @@ const CONTROL_IDLE_MS = 2 * 60_000
 // Compartido con el proveedor del navegador (local-browser-context.ts), que está en el mismo proceso del Host: sus
 // acciones esperan mientras `active`. Al mandar un mensaje en el chat, la pestaña devuelve el control al agente.
 const control = ((globalThis as Record<symbol, unknown>)[Symbol.for('dpseek-local-updater.agent-browser-control')] ??= { active: false }) as ControlState
+
+/** Ajustes que se guardan entre arranques: el modo «solo mirar» y el zoom. */
+const settingsFile = (): string => join(home(), 'storages', 'local-agent-browser-settings.json')
+try {
+  const saved = JSON.parse(readFileSync(settingsFile(), 'utf8')) as { lookOnly?: unknown; zoom?: unknown }
+  if (typeof saved.lookOnly === 'boolean') control.lookOnly ??= saved.lookOnly
+  if (typeof saved.zoom === 'number' && saved.zoom >= 0.25 && saved.zoom <= 3) control.zoom ??= saved.zoom
+} catch {
+  // Sin ajustes guardados.
+}
+
+/**
+ * Ajustes del navegador: modo «solo mirar» y zoom. Sin nada, solo los devuelve.
+ * @param change - lo que cambia.
+ */
+export async function localAgentBrowserSettings(
+  change: { lookOnly?: boolean; zoom?: number },
+): Promise<{ readonly lookOnly: boolean; readonly zoom: number }> {
+  if (typeof change.lookOnly === 'boolean') control.lookOnly = change.lookOnly
+  if (typeof change.zoom === 'number' && Number.isFinite(change.zoom)) control.zoom = Math.min(3, Math.max(0.25, Math.round(change.zoom * 100) / 100))
+  if (change.lookOnly !== undefined || change.zoom !== undefined) {
+    try {
+      mkdirSync(join(settingsFile(), '..'), { recursive: true })
+      writeFileSync(settingsFile(), JSON.stringify({ lookOnly: control.lookOnly === true, zoom: control.zoom ?? 1 }))
+    } catch {
+      // Si no se puede guardar, vale para esta vez.
+    }
+    const live = session
+    if (change.zoom !== undefined && live?.alive === true) await prepare(live).catch(() => undefined)
+  }
+  return { lookOnly: control.lookOnly === true, zoom: control.zoom ?? 1 }
+}
+
+/**
+ * El usuario responde al permiso que pide el agente para un clic que envía algo.
+ * @param id - el permiso.
+ * @param allow - si lo deja.
+ * @param always - permitir siempre en esa web mientras la app siga abierta.
+ */
+export function localAgentBrowserConfirm(id: string, allow: boolean, always = false): { readonly answered: boolean } {
+  const pending = control.confirm
+  if (pending?.id !== id) return { answered: false }
+  pending.answer = allow
+  if (allow && always) (control.allowedSites ??= new Set()).add(pending.site)
+  return { answered: true }
+}
+
+/** El clic del agente que espera permiso, si lo hay (la app lo mira para abrir el panel del navegador). */
+export function localAgentBrowserPending(): { readonly confirm: LocalAgentBrowserConfirm | null } {
+  const pending = control.confirm
+  if (pending === undefined || pending.answer !== undefined) return { confirm: null }
+  return { confirm: { id: pending.id, label: pending.label, site: pending.site } }
+}
 
 const takeControl = (): void => {
   control.active = true
@@ -182,7 +296,11 @@ class PageSession {
   private constructor(readonly url: string, private readonly socket: WebSocket) {
     socket.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data)) as {
-        id?: number; result?: unknown; error?: { message: string }; method?: string; params?: Record<string, unknown>
+        id?: number
+        result?: unknown
+        error?: { message: string }
+        method?: string
+        params?: Record<string, unknown>
       }
       if (message.method === 'Page.screencastFrame' && message.params !== undefined) {
         this.onFrame(message.params as { data: string; sessionId: number; metadata: { deviceWidth: number; deviceHeight: number } })
@@ -346,7 +464,9 @@ async function sessionFor(url: string): Promise<PageSession> {
 /** Lo que pide el panel ahora: tamaño en píxeles CSS, densidad y si la web debe ver un móvil (panel estrecho). */
 function wanted(): { width: number; height: number; dpr: number; mobile: boolean } {
   const fit = control.fit ?? DESKTOP
-  return { ...fit, mobile: fit.width < 768 }
+  const zoom = control.zoom ?? 1
+  const width = Math.max(200, Math.round(fit.width / zoom))
+  return { width, height: Math.max(150, Math.round(fit.height / zoom)), dpr: Math.min(4, fit.dpr * zoom), mobile: width < 768 }
 }
 
 /**
@@ -399,7 +519,6 @@ export interface LocalAgentBrowserSite {
   readonly cookies: number
 }
 
-const home = (): string => process.env.DSH_HOME ?? join(homedir(), '.dsh')
 
 /** Fichero donde se anota el Edge compartido. */
 export function localAgentBrowserStateFile(): string {
@@ -419,6 +538,169 @@ function readState(): AgentBrowserState | undefined {
     return undefined
   }
 }
+
+/** Dónde puede estar Edge (el del sistema, el de 64 bits o el del usuario). */
+function edgeCandidates(): string[] {
+  const roots = [process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', process.env.ProgramFiles ?? 'C:\\Program Files', process.env.LOCALAPPDATA]
+  return roots.filter((root): root is string => root !== undefined && root !== '').map(root => join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe'))
+}
+
+/** El Edge instalado, o nada. */
+export function localEdgePath(): string | undefined {
+  return edgeCandidates().find(path => existsSync(path))
+}
+
+/** La versión de ese Edge: la carpeta con el número más alto junto a msedge.exe (sin abrirlo). */
+function edgeVersion(path: string): string | undefined {
+  try {
+    const versions = readdirSync(join(path, '..')).filter(name => /^\d+\.\d+\.\d+\.\d+$/.test(name))
+    return versions.sort((a, b) => {
+      const x = a.split('.').map(Number)
+      const y = b.split('.').map(Number)
+      for (let i = 0; i < 4; i++) if ((x[i] ?? 0) !== (y[i] ?? 0)) return (y[i] ?? 0) - (x[i] ?? 0)
+      return 0
+    })[0]
+  } catch {
+    return undefined
+  }
+}
+
+/** Si el navegador puede funcionar: Edge instalado y lo bastante nuevo. Lo enseña la pestaña si falla. */
+export function localAgentBrowserCheck(): { readonly ok: boolean; readonly version?: string; readonly message?: string } {
+  const path = localEdgePath()
+  if (path === undefined) {
+    return { ok: false, message: 'Microsoft Edge is not installed. The browser needs it: install it from microsoft.com/edge and open this tab again.' }
+  }
+  const version = edgeVersion(path)
+  const major = Number(version?.split('.')[0] ?? Number.NaN)
+  if (!Number.isNaN(major) && major < EDGE_MIN_MAJOR) {
+    return { ok: false, ...version === undefined ? {} : { version }, message: `Microsoft Edge ${String(major)} is too old for the browser (it needs ${String(EDGE_MIN_MAJOR)} or newer). Update it from edge://settings/help.` }
+  }
+  return { ok: true, ...version === undefined ? {} : { version } }
+}
+
+/**
+ * Bloqueadores de anuncios del navegador, de la Chrome Web Store (Edge acepta sus extensiones). Se descargan solos y se
+ * cargan cada vez que arranca ese Edge, por el protocolo de depuración (Extensions.loadUnpacked: el Edge de marca ignora
+ * --load-extension); cada semana se vuelve a mirar si hay versión nueva.
+ */
+const AD_BLOCKERS = [
+  { id: 'cfhdojbkjhnklbpkdaibdccddilifddb', name: 'Adblock Plus' },
+  { id: 'bgnkhhnnamicmpeenaelnjfhikgbkllg', name: 'AdGuard' },
+] as const
+const EXTENSIONS_REFRESH_MS = 7 * 24 * 60 * 60_000
+
+/**
+ * Carpeta de las extensiones (la misma que mira el lanzador del agente, agent-browser-launcher.mjs). De ruta corta: con
+ * la carpeta de la app más larga, las reglas de los bloqueadores pasaban de 260 caracteres y Edge no las cargaba.
+ */
+export function localAgentBrowserExtensionsDir(): string {
+  return join(process.env.LOCALAPPDATA ?? join(home(), 'storages'), 'dsh-ad-blockers')
+}
+
+/** Las extensiones listas para cargar. */
+function extensionDirs(): string[] {
+  return AD_BLOCKERS.map(item => join(localAgentBrowserExtensionsDir(), item.id)).filter(dir => existsSync(join(dir, 'manifest.json')))
+}
+
+/** Un .crx (cabecera Cr24 con su firma) y, detrás, un .zip normal. */
+function crxZip(crx: Buffer): Buffer {
+  if (crx.subarray(0, 4).toString('latin1') !== 'Cr24') throw new Error('no es una extensión')
+  const version = crx.readUInt32LE(4)
+  const start = version === 3 ? 12 + crx.readUInt32LE(8) : 16 + crx.readUInt32LE(8) + crx.readUInt32LE(12)
+  return crx.subarray(start)
+}
+
+async function downloadExtension(id: string, major: number): Promise<void> {
+  const dir = join(localAgentBrowserExtensionsDir(), id)
+  const stamp = join(dir, '.downloaded')
+  try {
+    if (existsSync(join(dir, 'manifest.json')) && Date.now() - statSync(stamp).mtimeMs < EXTENSIONS_REFRESH_MS) return
+  } catch {
+    // Sin la marca: se descarga.
+  }
+  const url = `https://clients2.google.com/service/update2/crx?response=redirect&prodversion=${String(major)}.0&acceptformat=crx2,crx3&x=id%3D${id}%26uc`
+  const response = await fetch(url, { signal: AbortSignal.timeout(60_000) })
+  if (!response.ok) throw new Error(`descarga: ${String(response.status)}`)
+  const zip = crxZip(Buffer.from(await response.arrayBuffer()))
+  const fresh = `${dir}.new`
+  const zipFile = `${dir}.zip`
+  rmSync(fresh, { recursive: true, force: true })
+  mkdirSync(fresh, { recursive: true })
+  writeFileSync(zipFile, zip)
+  try {
+    // tar de Windows (bsdtar) abre .zip.
+    await new Promise<void>((resolve, reject) => {
+      execFile(join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe'), ['-xf', zipFile, '-C', fresh],
+        { windowsHide: true, timeout: 60_000 }, (error) => { if (error === null) resolve(); else reject(new Error(error.message)) })
+    })
+  } finally {
+    rmSync(zipFile, { force: true })
+  }
+  if (!existsSync(join(fresh, 'manifest.json'))) throw new Error('la extensión no trae manifest.json')
+  // Chrome no carga sin empaquetar las que traen _metadata (la firma de la tienda).
+  rmSync(join(fresh, '_metadata'), { recursive: true, force: true })
+  writeFileSync(join(fresh, '.downloaded'), new Date().toISOString())
+  rmSync(`${dir}.old`, { recursive: true, force: true })
+  if (existsSync(dir)) renameSync(dir, `${dir}.old`)
+  renameSync(fresh, dir)
+  rmSync(`${dir}.old`, { recursive: true, force: true })
+}
+
+/** Descarga (o actualiza) los bloqueadores; una vez por arranque de la app. Si falla, el navegador va sin ellos. */
+let extensionsReady: Promise<void> | undefined
+function prepareExtensions(): Promise<void> {
+  extensionsReady ??= (async () => {
+    const path = localEdgePath()
+    const major = Number(path === undefined ? Number.NaN : edgeVersion(path)?.split('.')[0])
+    for (const item of AD_BLOCKERS) {
+      try {
+        await downloadExtension(item.id, Number.isNaN(major) ? 140 : major)
+      } catch (error) {
+        console.warn(`local agent browser: no se ha podido preparar ${item.name}:`, error instanceof Error ? error.message : error)
+      }
+    }
+    // Si el Edge ya estaba abierto (lo arrancó el agente o la pestaña antes de terminar la descarga), se cargan en él.
+    const running = readState()
+    if (running !== undefined && await json(running, '/json/version') !== undefined) await loadExtensions(running)
+  })()
+  return extensionsReady
+}
+if (process.env.DSH_LOCAL_NO_AD_BLOCKERS !== '1') setTimeout(() => { void prepareExtensions() }, 3000).unref()
+
+/** El Edge (por su proceso) en el que ya se cargaron los bloqueadores. */
+let extensionsLoadedIn: number | undefined
+
+/** Carga las extensiones listas en ese Edge (no se guardan: hay que hacerlo en cada arranque), una vez por Edge. */
+async function loadExtensions(state: AgentBrowserState): Promise<void> {
+  const dirs = process.env.DSH_LOCAL_NO_AD_BLOCKERS === '1' ? [] : extensionDirs()
+  if (dirs.length === 0 || extensionsLoadedIn === state.pid) return
+  extensionsLoadedIn = state.pid
+  const socket = await json<{ webSocketDebuggerUrl?: string }>(state, '/json/version')
+  if (socket?.webSocketDebuggerUrl === undefined) return
+  for (const path of dirs) {
+    await cdp(socket.webSocketDebuggerUrl, 'Extensions.loadUnpacked', { path })
+      .catch((error: unknown) => { console.warn('local agent browser: extensión sin cargar', path, error instanceof Error ? error.message : error) })
+  }
+  void closeWelcomePages(state, socket.webSocketDebuggerUrl)
+}
+
+/**
+ * Al instalarse, AdGuard y Adblock Plus abren su página de bienvenida en una pestaña nueva, y el panel y el agente se
+ * irían a ella: se cierra en cuanto aparece (llega un par de segundos después), sin hacer esperar al arranque.
+ */
+async function closeWelcomePages(state: AgentBrowserState, browserSocket: string): Promise<void> {
+  for (let i = 0; i < 16; i++) {
+    await sleep(500)
+    const pages = await json<{ id: string; type: string; url: string }[]>(state, '/json/list') ?? []
+    for (const page of pages.filter(target => target.type === 'page' && EXTENSION_WELCOME.test(target.url))) {
+      await cdp(browserSocket, 'Target.closeTarget', { targetId: page.id }).catch(() => undefined)
+    }
+  }
+}
+
+/** Las páginas de bienvenida de los bloqueadores. */
+const EXTENSION_WELCOME = /^https:\/\/([a-z0-9-]+\.)*(adguard\.com|adblockplus\.org)\/|^chrome-extension:\/\//i
 
 async function json<T>(state: AgentBrowserState, path: string): Promise<T | undefined> {
   try {
@@ -455,14 +737,21 @@ async function ensureBrowser(): Promise<AgentBrowserState> {
   try {
     const again = readState()
     if (again !== undefined && await json(again, '/json/version') !== undefined) return again
-    if (!existsSync(EDGE)) throw new Error('Microsoft Edge is not installed.')
+    const check = localAgentBrowserCheck()
+    const edge = localEdgePath()
+    if (!check.ok || edge === undefined) throw new Error(check.message ?? 'Microsoft Edge is not installed.')
+    // Los bloqueadores de anuncios, si se están descargando ahora (la primera vez), se esperan un poco.
+    if (process.env.DSH_LOCAL_NO_AD_BLOCKERS !== '1') {
+      await Promise.race([prepareExtensions(), sleep(15_000)])
+    }
     const profile = localAgentBrowserProfile()
     mkdirSync(profile, { recursive: true })
     rmSync(join(profile, 'DevToolsActivePort'), { force: true })
-    const browser = spawn(EDGE, [
+    const browser = spawn(edge, [
       '--headless=new', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', `--user-data-dir=${profile}`,
       '--no-first-run', '--no-default-browser-check', '--disable-features=msEdgeSidebarV2,msUndersideButton',
-      '--window-size=1280,800', 'about:blank',
+      // Permite cargar los bloqueadores por el protocolo (loadExtensions); el puerto solo escucha en 127.0.0.1.
+      '--enable-unsafe-extension-debugging', '--window-size=1280,800', 'about:blank',
     ], { detached: true, stdio: 'ignore', windowsHide: true })
     browser.unref()
     let port: number | undefined
@@ -472,6 +761,7 @@ async function ensureBrowser(): Promise<AgentBrowserState> {
     }
     if (port === undefined || browser.pid === undefined) throw new Error('The browser did not start.')
     const state = { port, pid: browser.pid }
+    await loadExtensions(state)
     writeFileSync(stateFile, JSON.stringify({ ...state, startedAt: new Date().toISOString() }))
     return state
   } finally {
@@ -497,12 +787,79 @@ async function cdp<T>(url: string, method: string, params: Record<string, unknow
   })
 }
 
-/** La página que conviene enseñar: la primera con contenido (Edge las lista de la más reciente a la más antigua). */
+/** La pestaña elegida (por el usuario en el panel, o la del agente al actuar) y cuándo. */
+let pinned: { id: string; at: number } | undefined
+
+/** Las pestañas de verdad (con su conexión; sin las páginas internas de las extensiones). */
+const pagesOf = (targets: readonly CdpTarget[]): CdpTarget[] =>
+  targets.filter(target => target.type === 'page' && target.webSocketDebuggerUrl !== undefined && !/^(chrome|edge)-extension:/.test(target.url))
+
+/** La misma dirección, sin la parte de después de # (Playwright y Edge no siempre la dan igual). */
+const sameUrl = (a: string, b: string): boolean => a === b || a.split('#')[0] === b.split('#')[0]
+
+/**
+ * La página que conviene enseñar: la de la última acción del agente (si no se eligió otra después), la elegida en el
+ * panel o, si no, la primera con contenido (Edge las lista de la más reciente a la más antigua).
+ */
 function currentPage(targets: readonly CdpTarget[], popups: ReadonlySet<string>): CdpTarget | undefined {
-  const pages = targets.filter(target => target.type === 'page' && target.webSocketDebuggerUrl !== undefined)
+  const pages = pagesOf(targets)
+  const agentAt = control.agentAt ?? 0
+  const agentUrl = control.agentUrl
+  if (agentUrl !== undefined && agentAt > (pinned?.at ?? 0)) {
+    // Si hay varias con esa dirección, la que ya se veía.
+    const matches = pages.filter(page => sameUrl(page.url, agentUrl))
+    const match = matches.find(page => page.id === pinned?.id) ?? matches[0]
+    if (match !== undefined) {
+      pinned = { id: match.id, at: agentAt }
+      return match
+    }
+  }
+  const chosen = pinned === undefined ? undefined : pages.find(page => page.id === pinned?.id)
+  if (chosen !== undefined) return chosen
   const content = pages.filter(page => !page.url.startsWith('about:blank') && !page.url.startsWith('edge://'))
   // Las ventanas que abre una web (a veces diminutas, de 360 × 50) no tapan a la página de verdad.
   return content.find(page => !popups.has(page.id)) ?? content[0] ?? pages[0]
+}
+
+/** @returns las pestañas abiertas, la que se ve y la del agente. */
+export async function localAgentBrowserTabs(): Promise<{ readonly tabs: readonly LocalAgentBrowserTab[] }> {
+  const state = readState()
+  const targets = state === undefined ? undefined : await json<CdpTarget[]>(state, '/json/list')
+  if (state === undefined || targets === undefined) return { tabs: [] }
+  const shown = currentPage(targets, await popupIds(state))
+  const agentUrl = control.agentUrl
+  return {
+    tabs: pagesOf(targets).map(page => ({
+      id: page.id, title: page.title === '' ? page.url : page.title, url: page.url, shown: page.id === shown?.id,
+      agent: agentUrl !== undefined && sameUrl(page.url, agentUrl),
+    })),
+  }
+}
+
+/**
+ * Pestañas desde el panel: enseñar otra, abrir una nueva (con una dirección o en blanco) o cerrar una.
+ * @param request - qué hacer.
+ */
+export async function localAgentBrowserTab(request: { action: 'show' | 'close'; id: string } | { action: 'new'; url?: string }): Promise<{ readonly id: string }> {
+  takeControl()
+  const state = await ensureBrowser()
+  const socket = await browserSocket(state)
+  if (socket === undefined) throw new Error('The browser is not responding.')
+  seenPage = undefined
+  if (request.action === 'new') {
+    const url = request.url === undefined || request.url.trim() === '' ? 'about:blank' : localAddressToUrl(request.url)
+    const { targetId } = await cdp<{ targetId: string }>(socket, 'Target.createTarget', { url })
+    pinned = { id: targetId, at: Date.now() }
+    return { id: targetId }
+  }
+  if (request.action === 'close') {
+    await cdp(socket, 'Target.closeTarget', { targetId: request.id })
+    if (pinned?.id === request.id) pinned = undefined
+    return { id: request.id }
+  }
+  await cdp(socket, 'Target.activateTarget', { targetId: request.id }).catch(() => undefined)
+  pinned = { id: request.id, at: Date.now() }
+  return { id: request.id }
 }
 
 /** Ventanas emergentes: páginas abiertas por otra página (las pestañas normales no tienen quien las abra). */
@@ -526,17 +883,21 @@ async function popupIds(state: AgentBrowserState): Promise<ReadonlySet<string>> 
 
 /** La última página vista: los gestos seguidos (mover el ratón) no preguntan a Edge cada vez cuál es. */
 let seenPage: { at: number; page: CdpTarget } | undefined
+/** Cuántas pestañas había la última vez que se miró. */
+let tabCount = 0
 
 /**
  * La página que se ve y su conexión (lista para fotogramas y gestos), o nada si el navegador no está en marcha.
  * @param fresh - preguntar a Edge aunque se haya visto hace nada (fotogramas y navegación).
  */
 async function livePage(state = readState(), fresh = true): Promise<{ page: CdpTarget; live: PageSession } | undefined> {
-  if (!fresh && seenPage !== undefined && Date.now() - seenPage.at < 1000 && session?.alive === true && session.url === seenPage.page.webSocketDebuggerUrl) {
+  if (!fresh && seenPage !== undefined && Date.now() - seenPage.at < 1000 && session?.alive === true
+    && session.url === seenPage.page.webSocketDebuggerUrl) {
     return { page: seenPage.page, live: session }
   }
   if (state === undefined) return undefined
   const targets = await json<CdpTarget[]>(state, '/json/list')
+  tabCount = targets === undefined ? 0 : pagesOf(targets).length
   const page = targets === undefined ? undefined : currentPage(targets, await popupIds(state))
   if (page?.webSocketDebuggerUrl === undefined) return undefined
   const live = await sessionFor(page.webSocketDebuggerUrl)
@@ -552,9 +913,12 @@ async function livePage(state = readState(), fresh = true): Promise<{ page: CdpT
  */
 export async function localAgentBrowserFrame(after = 0): Promise<LocalAgentBrowserFrame> {
   const fit = control.fit ?? DESKTOP
+  const pending = control.confirm
   const idle: LocalAgentBrowserFrame = {
     running: false, url: '', title: '', seq: after, image: null, control: control.active,
     viewport: { width: fit.width, height: fit.height }, canGoBack: false, canGoForward: false,
+    tabId: '', tabCount: 0, lookOnly: control.lookOnly === true, zoom: control.zoom ?? 1,
+    confirm: pending === undefined || pending.answer !== undefined ? null : { id: pending.id, label: pending.label, site: pending.site },
   }
   watchedAt = Date.now()
   const state = readState()
@@ -580,9 +944,16 @@ export async function localAgentBrowserFrame(after = 0): Promise<LocalAgentBrows
       seq: shot?.seq ?? live.shot?.seq ?? after,
       image: shot?.data ?? null,
       control: control.active,
-      viewport: live.layout === undefined ? idle.viewport : { width: Math.round(live.layout.width), height: Math.round(live.layout.height) },
+      viewport: live.layout === undefined
+        ? idle.viewport
+        : { width: Math.round(live.layout.width), height: Math.round(live.layout.height) },
       canGoBack: history !== undefined && history.currentIndex > 0,
       canGoForward: history !== undefined && history.currentIndex < history.entries.length - 1,
+      tabId: page.id,
+      tabCount: tabCount,
+      lookOnly: idle.lookOnly,
+      zoom: idle.zoom,
+      confirm: idle.confirm,
     }
   } catch {
     return { ...idle, running: true }
@@ -598,7 +969,23 @@ const KEY_TEXT: Readonly<Record<string, string>> = { Enter: '\r' }
  * @param input - el gesto.
  * @returns si se ha llevado a la página.
  */
-export async function localAgentBrowserInput(input: LocalAgentBrowserInput): Promise<{ readonly sent: boolean }> {
+/** Cada cuánto se pregunta a la página por el cursor mientras se mueve el ratón. */
+const CURSOR_MS = 120
+let cursorAskedAt = 0
+
+/** El cursor que pondría la página en ese punto (mano en enlaces y botones, barra en el texto editable). */
+async function pageCursor(live: PageSession, x: number, y: number): Promise<string | undefined> {
+  const result = await live.call<{ result: { value?: unknown } }>('Runtime.evaluate', {
+    expression: `(() => { let e = document.elementFromPoint(${String(x)}, ${String(y)}); while (e && e.shadowRoot) { const inner = e.shadowRoot.elementFromPoint(${String(x)}, ${String(y)}); if (!inner || inner === e) break; e = inner }
+      if (!e) return 'default'; const c = getComputedStyle(e).cursor; if (c !== 'auto') return c;
+      return e.isContentEditable || e.tagName === 'TEXTAREA' || (e.tagName === 'INPUT' && !/^(button|submit|reset|checkbox|radio|range|color|file|image)$/i.test(e.type)) ? 'text' : 'default' })()`,
+    returnByValue: true,
+  }, 1000).catch(() => undefined)
+  const value = result?.result.value
+  return typeof value === 'string' ? value : undefined
+}
+
+export async function localAgentBrowserInput(input: LocalAgentBrowserInput): Promise<{ readonly sent: boolean; readonly cursor?: string }> {
   if (input.kind === 'mouse' && input.type === 'move' && !control.active) return { sent: false }
   takeControl()
   const current = await livePage(readState(), false)
@@ -610,7 +997,10 @@ export async function localAgentBrowserInput(input: LocalAgentBrowserInput): Pro
   }
   if (input.kind === 'key') {
     const text = KEY_TEXT[input.key]
-    const base = { key: input.key, code: input.code, windowsVirtualKeyCode: input.keyCode, nativeVirtualKeyCode: input.keyCode, modifiers: input.modifiers }
+    const base = {
+      key: input.key, code: input.code, modifiers: input.modifiers,
+      windowsVirtualKeyCode: input.keyCode, nativeVirtualKeyCode: input.keyCode,
+    }
     live.send('Input.dispatchKeyEvent', { ...base, type: text === undefined ? 'rawKeyDown' : 'keyDown', ...text === undefined ? {} : { text, unmodifiedText: text } })
     live.send('Input.dispatchKeyEvent', { ...base, type: 'keyUp' })
     return { sent: true }
@@ -634,7 +1024,89 @@ export async function localAgentBrowserInput(input: LocalAgentBrowserInput): Pro
   live.send('Input.dispatchMouseEvent', {
     type, x, y, button: input.button, buttons: input.buttons, clickCount: input.clickCount, modifiers: input.modifiers,
   })
+  if (input.type === 'move' && input.buttons === 0 && Date.now() - cursorAskedAt > CURSOR_MS) {
+    cursorAskedAt = Date.now()
+    const cursor = await pageCursor(live, x, y)
+    return cursor === undefined ? { sent: true } : { sent: true, cursor }
+  }
   return { sent: true }
+}
+
+/**
+ * Lo seleccionado en la página (o en el campo que tiene el foco), para el portapapeles de Windows: el Edge sin ventana
+ * no siempre llega a él.
+ * @returns el texto (vacío si no hay nada seleccionado; nunca el de un campo de contraseña).
+ */
+export async function localAgentBrowserCopy(): Promise<{ readonly text: string }> {
+  const current = await livePage(readState(), false)
+  if (current === undefined) return { text: '' }
+  const result = await current.live.call<{ result: { value?: unknown } }>('Runtime.evaluate', {
+    expression: `(() => { const deep = (d) => { let a = d.activeElement; while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement; return a };
+      let doc = document, a = deep(doc);
+      while (a && a.tagName === 'IFRAME') { try { doc = a.contentDocument; a = deep(doc) } catch { break } }
+      if (a && (a.tagName === 'TEXTAREA' || (a.tagName === 'INPUT' && a.type !== 'password')) && typeof a.selectionStart === 'number' && a.selectionStart !== a.selectionEnd) return a.value.slice(a.selectionStart, a.selectionEnd);
+      return String((doc.getSelection && doc.getSelection()) || '') })()`,
+    returnByValue: true,
+  }).catch(() => undefined)
+  const value = result?.result.value
+  return { text: typeof value === 'string' ? value : '' }
+}
+
+/**
+ * Buscar en la página: la siguiente (o la anterior) aparición del texto, que queda seleccionada y a la vista.
+ * @returns si la ha encontrado.
+ */
+export async function localAgentBrowserFind(text: string, backwards = false): Promise<{ readonly found: boolean }> {
+  const current = await livePage(readState(), false)
+  if (current === undefined || text === '') return { found: false }
+  const result = await current.live.call<{ result: { value?: unknown } }>('Runtime.evaluate', {
+    expression: `window.find(${JSON.stringify(text)}, false, ${String(backwards)}, true, false, true, false)`, returnByValue: true,
+  }).catch(() => undefined)
+  return { found: result?.result.value === true }
+}
+
+/** Lo más que se puede soltar de una vez sobre la página. */
+const DROP_MAX_BYTES = 64 * 1024 * 1024
+
+/**
+ * Ficheros soltados sobre la página desde el panel: se guardan en una carpeta temporal del perfil y se sueltan en ese
+ * punto de la página como un arrastre de verdad (las zonas para subir ficheros y los campos de fichero los aceptan).
+ * @param drop - punto (0..1 sobre la imagen) y ficheros (nombre y contenido en base64).
+ */
+export async function localAgentBrowserDrop(
+  drop: { x: number; y: number; files: readonly { name: string; data: string }[] },
+): Promise<{ readonly dropped: number }> {
+  if (drop.files.length === 0) return { dropped: 0 }
+  const bytes = drop.files.reduce((total, file) => total + Math.floor(file.data.length * 3 / 4), 0)
+  if (bytes > DROP_MAX_BYTES) throw new Error('Those files are too big to drop here (64 MB at most).')
+  takeControl()
+  const current = await livePage(readState(), false)
+  if (current === undefined) throw new Error('Open a page first.')
+  const uploads = join(home(), 'storages', 'agent-browser-uploads')
+  // Lo de días anteriores ya no hace falta.
+  try {
+    for (const name of readdirSync(uploads)) {
+      const path = join(uploads, name)
+      if (Date.now() - statSync(path).mtimeMs > 24 * 60 * 60_000) rmSync(path, { recursive: true, force: true })
+    }
+  } catch {
+    // Aún no hay carpeta.
+  }
+  const folder = join(uploads, randomUUID())
+  mkdirSync(folder, { recursive: true })
+  const paths = drop.files.map((file, index) => {
+    const name = basename(file.name).replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 180) || `file-${String(index + 1)}`
+    const path = join(folder, name)
+    writeFileSync(path, Buffer.from(file.data, 'base64'))
+    return path
+  })
+  const { live } = current
+  const size = live.layout ?? await live.measure()
+  const x = Math.round(Math.min(1, Math.max(0, drop.x)) * size.width)
+  const y = Math.round(Math.min(1, Math.max(0, drop.y)) * size.height)
+  const data = { items: [], files: paths, dragOperationsMask: 1 }
+  for (const type of ['dragEnter', 'dragOver', 'drop']) await live.call('Input.dispatchDragEvent', { type, x, y, data, modifiers: 0 })
+  return { dropped: paths.length }
 }
 
 /**
@@ -657,21 +1129,6 @@ export async function localAgentBrowserRepair(): Promise<{ readonly url: string 
   await prepare(live).catch(() => undefined)
   await live.capture().catch(() => undefined)
   return { url: page.url }
-}
-
-/**
- * Lo escrito en la barra de dirección (o un enlace del chat): una web, con o sin http(s)://, o, si no lo parece, una
- * búsqueda. Solo webs: ni file: (abriría ficheros del PC, que el agente podría leer) ni javascript: ni otros esquemas.
- */
-export function localAddressToUrl(text: string): string {
-  const value = text.trim()
-  if (value === '') return ''
-  if (/^https?:\/\//i.test(value) || value === 'about:blank') return value
-  // localhost:3000 o 127.0.0.1:8080 parecen un esquema («localhost:»), pero son una web local.
-  if (/^(localhost|\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\])(:\d+)?(\/.*)?$/i.test(value)) return `http://${value}`
-  if (!/\s/.test(value) && /^[^/:]+\.[a-z]{2,}(:\d+)?(\/.*)?$/i.test(value)) return `https://${value}`
-  if (/^[a-z][a-z0-9+.-]*:/i.test(value) && !/\s/.test(value)) throw new Error('Only web addresses (http or https) can be opened here.')
-  return `https://www.bing.com/search?q=${encodeURIComponent(value)}`
 }
 
 /**
@@ -725,7 +1182,8 @@ export async function localAgentBrowserSites(): Promise<{ readonly sites: readon
   const { cookies } = await cdp<{ cookies: CdpCookie[] }>(socket, 'Storage.getCookies')
   const counts = new Map<string, number>()
   for (const cookie of cookies) counts.set(plain(cookie.domain), (counts.get(plain(cookie.domain)) ?? 0) + 1)
-  return { sites: [...counts].map(([domain, count]) => ({ domain, cookies: count })).sort((a, b) => b.cookies - a.cookies || a.domain.localeCompare(b.domain)) }
+  const sites = [...counts].map(([domain, count]) => ({ domain, cookies: count }))
+  return { sites: sites.sort((a, b) => b.cookies - a.cookies || a.domain.localeCompare(b.domain)) }
 }
 
 /**
@@ -763,7 +1221,9 @@ function cdpMany(url: string, commands: readonly { method: string; params: Recor
     let answered = 0
     const timer = setTimeout(() => { socket.close(); reject(new Error('sin respuesta')) }, 10_000)
     socket.addEventListener('open', () => {
-      commands.forEach((command, index) => { socket.send(JSON.stringify({ id: index + 1, method: command.method, params: command.params })) })
+      commands.forEach((command, index) => {
+        socket.send(JSON.stringify({ id: index + 1, method: command.method, params: command.params }))
+      })
     })
     socket.addEventListener('message', (event) => {
       const message = JSON.parse(String(event.data)) as { id?: number }
@@ -797,7 +1257,7 @@ export function localAgentBrowserSecretsFile(): string {
 function readSecrets(): StoredSecret[] {
   try {
     const list = JSON.parse(readFileSync(localAgentBrowserSecretsFile(), 'utf8')) as unknown
-    return Array.isArray(list) ? list.filter((item): item is StoredSecret => typeof item?.name === 'string' && typeof item.value === 'string') : []
+    return Array.isArray(list) ? list.filter((item: unknown): item is StoredSecret => typeof (item as StoredSecret | null)?.name === 'string' && typeof (item as StoredSecret).value === 'string') : []
   } catch {
     return []
   }
@@ -813,7 +1273,10 @@ function writeSecrets(list: readonly StoredSecret[]): void {
 const powershell = (script: string, input: string, timeout: number): Promise<string> => new Promise((resolve, reject) => {
   // Codificada: el guion tiene varias líneas y un bloque de C#, que por la línea de órdenes no llegarían enteros.
   const child = execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')],
-    { windowsHide: true, timeout }, (error, stdout) => { if (error !== null) reject(error); else resolve(stdout.trim()) })
+    { windowsHide: true, timeout }, (error, stdout) => {
+      if (error !== null) reject(new Error(error.message))
+      else resolve(stdout.trim())
+    })
   child.stdin?.end(input)
 })
 
@@ -821,6 +1284,20 @@ const powershell = (script: string, input: string, timeout: number): Promise<str
 function protect(value: string): Promise<string> {
   return powershell('[Console]::InputEncoding = [Text.Encoding]::UTF8; Add-Type -AssemblyName System.Security; $v = [Console]::In.ReadToEnd(); '
     + "[Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect([Text.Encoding]::UTF8.GetBytes($v), $null, 'CurrentUser'))", value, 20_000)
+}
+
+/** Cifra (protect) o descifra (unprotect) varios valores con DPAPI de una vez; van y vuelven en JSON por la entrada estándar. */
+async function dpapiMany(direction: 'protect' | 'unprotect', values: readonly string[]): Promise<string[]> {
+  if (values.length === 0) return []
+  const step = direction === 'protect'
+    ? "[Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect([Text.Encoding]::UTF8.GetBytes($v), $null, 'CurrentUser'))"
+    : "[Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect([Convert]::FromBase64String($v), $null, 'CurrentUser'))"
+  const out = await powershell('[Console]::InputEncoding = [Text.Encoding]::UTF8; [Console]::OutputEncoding = [Text.Encoding]::UTF8; '
+    + 'Add-Type -AssemblyName System.Security; $items = [Console]::In.ReadToEnd() | ConvertFrom-Json; '
+    + `$out = foreach ($v in $items) { ${step} }; ConvertTo-Json -InputObject @($out) -Compress`, JSON.stringify(values), 60_000)
+  const list = JSON.parse(out === '' ? '[]' : out) as unknown
+  if (!Array.isArray(list) || list.length !== values.length) throw new Error("Windows couldn't read the saved passwords.")
+  return list.map(String)
 }
 
 /** Las contraseñas se desbloquean en la app durante este tiempo (y se bloquean antes al ocultar la ventana). */
@@ -940,6 +1417,63 @@ export async function localAgentBrowserUnlock(): Promise<{ readonly unlocked: bo
   return unlocking
 }
 
+/** Si Windows Hello está configurado (huella, cara o PIN); se mira una vez por arranque, sin pedir nada. */
+let helloAvailable: Promise<boolean> | undefined
+const HELLO_CHECK = String.raw`
+$ErrorActionPreference = 'Stop'
+try {
+  [void][Windows.Security.Credentials.UI.UserConsentVerifier, Windows.Security.Credentials.UI, ContentType = WindowsRuntime]
+  Add-Type -AssemblyName System.Runtime.WindowsRuntime
+  $asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation${'`'}1' } | Select-Object -First 1
+  $task = $asTask.MakeGenericMethod([Windows.Security.Credentials.UI.UserConsentVerifierAvailability]).Invoke($null, @([Windows.Security.Credentials.UI.UserConsentVerifier]::CheckAvailabilityAsync()))
+  [void]$task.Wait(-1)
+  if ($task.Result -eq [Windows.Security.Credentials.UI.UserConsentVerifierAvailability]::Available) { 'HELLO' } else { 'PASSWORD' }
+} catch { 'PASSWORD' }
+`
+
+/** @returns cómo se desbloquean las contraseñas en este PC: con Windows Hello o con la contraseña de Windows. */
+export async function localAgentBrowserUnlockMethod(): Promise<{ readonly method: 'hello' | 'password' }> {
+  helloAvailable ??= powershell(HELLO_CHECK, '', 20_000).then(answer => answer.split(/\r?\n/).at(-1)?.trim() === 'HELLO').catch(() => false)
+  return { method: await helloAvailable ? 'hello' : 'password' }
+}
+
+/**
+ * Copia de seguridad de las contraseñas guardadas, cifrada con una frase de paso (para otro PC o para no perderlas).
+ * @param passphrase - la frase (8 caracteres o más); sin ella no se puede abrir.
+ * @returns el fichero y cuántas lleva.
+ */
+export async function localAgentBrowserExportSecrets(passphrase: string): Promise<{ readonly file: string; readonly count: number }> {
+  requireUnlocked()
+  if (passphrase.length < 8) throw new Error('Use a passphrase of at least 8 characters.')
+  const list = readSecrets()
+  if (list.length === 0) throw new Error('There are no saved passwords to export.')
+  const values = await dpapiMany('unprotect', list.map(item => item.value))
+  const plain: PlainSecret[] = list.map((item, index) => ({ name: item.name, site: item.site, value: values[index] ?? '' }))
+  return { file: sealSecrets(plain, passphrase), count: plain.length }
+}
+
+/**
+ * Importa una copia de seguridad: las contraseñas se vuelven a cifrar con DPAPI en este PC; las que tienen el mismo
+ * nombre se sustituyen.
+ * @param file - el contenido del fichero exportado.
+ * @param passphrase - su frase de paso.
+ * @returns cuántas se han importado.
+ */
+export async function localAgentBrowserImportSecrets(file: string, passphrase: string): Promise<{ readonly count: number }> {
+  requireUnlocked()
+  const incoming = openSecrets(file, passphrase)
+    .map(item => ({ ...item, name: localSecretName(item.name) }))
+    .filter(item => item.name !== '' && item.value !== '')
+  if (incoming.length === 0) throw new Error('The backup has no passwords.')
+  const encrypted = await dpapiMany('protect', incoming.map(item => item.value))
+  const names = new Set(incoming.map(item => item.name))
+  writeSecrets([
+    ...readSecrets().filter(item => !names.has(item.name)),
+    ...incoming.map((item, index) => ({ name: item.name, site: item.site.trim().slice(0, 200), value: encrypted[index] ?? '' })),
+  ].sort((a, b) => a.name.localeCompare(b.name)))
+  return { count: incoming.length }
+}
+
 /** Vuelve a bloquear las contraseñas (al ocultar o cerrar la ventana). */
 export function localAgentBrowserLock(): { readonly locked: true } {
   unlockedUntil = 0
@@ -952,7 +1486,11 @@ export function localSecretName(name: string): string {
 }
 
 /** @returns si están bloqueadas y, si no, las contraseñas guardadas (sin sus valores). */
-export function localAgentBrowserSecrets(): { readonly locked: boolean; readonly count: number; readonly secrets: readonly LocalAgentBrowserSecret[] } {
+export function localAgentBrowserSecrets(): {
+  readonly locked: boolean
+  readonly count: number
+  readonly secrets: readonly LocalAgentBrowserSecret[]
+} {
   const list = readSecrets()
   if (!isUnlocked()) return { locked: true, count: list.length, secrets: [] }
   return { locked: false, count: list.length, secrets: list.map(({ name, site }) => ({ name, site })) }
@@ -961,7 +1499,7 @@ export function localAgentBrowserSecrets(): { readonly locked: boolean; readonly
 /**
  * Guarda (o cambia) una contraseña. Vale para los chats que empiecen a usar el navegador después.
  * @param name - nombre para el agente (se normaliza a MAYÚSCULAS_CON_GUIONES).
- * @param site - web donde se usa (solo para que el agente y tú lo sepáis).
+ * @param site - web donde se usa: el agente solo la puede escribir allí.
  * @param value - la contraseña; se guarda cifrada.
  * @returns el nombre con el que queda guardada.
  */
@@ -970,6 +1508,8 @@ export async function localAgentBrowserSaveSecret(name: string, site: string, va
   const key = localSecretName(name)
   if (key === '') throw new Error('Give the password a name (letters or numbers).')
   if (value === '') throw new Error('The password is empty.')
+  // El agente solo la puede escribir en esa web (local-browser-context.ts lo comprueba).
+  if (site.trim() === '') throw new Error('Add the site where this password is used (e.g. example.com).')
   const encrypted = await protect(value)
   writeSecrets([...readSecrets().filter(item => item.name !== key), { name: key, site: site.trim().slice(0, 200), value: encrypted }]
     .sort((a, b) => a.name.localeCompare(b.name)))

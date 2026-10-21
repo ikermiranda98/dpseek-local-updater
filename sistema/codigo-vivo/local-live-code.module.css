@@ -17,7 +17,8 @@
 
 .tool { display: inline-flex; flex: none; gap: 4px; align-items: center; height: 26px; padding: 0 8px; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); white-space: nowrap; cursor: default; }
 .tool:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
-.tool[aria-pressed='true'] { color: var(--dsw-alias-state-business-primary); }
+/* «Follow» en azul solo si se puede usar: desactivado (sin ficheros) parecía pulsado. */
+.tool[aria-pressed='true']:not(:disabled) { color: var(--dsw-alias-state-business-primary); }
 .tool:disabled { opacity: 0.5; }
 
 .path { flex: 0 0 auto; padding: 6px 12px; overflow: hidden; color: var(--dsw-alias-label-tertiary); font: var(--dsw-font-xs-13); text-overflow: ellipsis; white-space: nowrap; }
@@ -41,6 +42,10 @@
 
 .footer { display: flex; flex: 0 0 auto; gap: 8px; align-items: center; justify-content: space-between; padding: 6px 8px; border-top: 0.5px solid var(--dsw-alias-border-l3); font: var(--dsw-font-xs-13); color: var(--dsw-alias-label-tertiary); }
 .footer label { display: inline-flex; gap: 6px; align-items: center; }
+/* El turno que se ve (cuando hay varios con ficheros): un desplegable discreto, del tono del pie. */
+.turnSelect { max-width: 60%; height: 24px; padding: 0 4px; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); font: inherit; outline: none; cursor: default; }
+.turnSelect:hover, .turnSelect:focus-visible { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.turnSelect option { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); }
 
 /* Botón «Undo» de la revisión de cambios. */
 .undo { display: inline-flex; flex: none; align-items: center; height: 26px; padding: 0 8px; border: 0; border-radius: var(--dsw-radius-sm); background: transparent; color: var(--dsw-alias-label-secondary); font: var(--dsw-font-xs-13); white-space: nowrap; cursor: default; }

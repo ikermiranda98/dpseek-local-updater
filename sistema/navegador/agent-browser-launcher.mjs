@@ -3,20 +3,61 @@
 // Lo usa el proveedor de navegador como comando de su servidor MCP (node -e con este código). Si el Edge del agente
 // no está en marcha, lo arranca sin ventana, con su propio perfil (las sesiones iniciadas se guardan ahí) y un puerto
 // de depuración, y lo anota en un fichero de estado; luego carga el servidor de Playwright conectado a él. Todos los
-// chats comparten ese Edge, y la app lee el mismo fichero para enseñarlo en la barra lateral.
+// chats comparten ese Edge, y la app lee el mismo fichero para enseñarlo en la barra lateral. Lleva los bloqueadores de
+// anuncios que la app haya descargado (Adblock Plus y AdGuard).
 // Argumentos: <cli.js de @playwright/mcp> <msedge.exe> <carpeta del perfil> <fichero de estado> [carpeta de salida]
 // [contraseñas guardadas] (la carpeta de salida guarda páginas y capturas de Playwright; sin ella van a .playwright-mcp
 // en la carpeta de trabajo del chat).
 import { randomUUID } from 'node:crypto'
 import { execFileSync, spawn } from 'node:child_process'
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const args = process.argv.slice(1).filter((arg) => arg !== '--')
-const [cli, edge, profile, stateFile, outputDir, secretsFile] = args
+const [cli, configuredEdge, profile, stateFile, outputDir, secretsFile] = args
+// Si Edge no está donde dice la configuración, el de 64 bits o el del usuario.
+const edge = [configuredEdge, join(process.env.ProgramFiles ?? 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+  ...process.env.LOCALAPPDATA === undefined ? [] : [join(process.env.LOCALAPPDATA, 'Microsoft', 'Edge', 'Application', 'msedge.exe')]]
+  .find((path) => path !== undefined && existsSync(path)) ?? configuredEdge
+// Los bloqueadores de anuncios que la app ya ha descargado (local-agent-browser.ts): Adblock Plus y AdGuard. En una
+// carpeta de ruta corta (con rutas largas, Edge no encontraba sus reglas).
+const extensionsDir = join(process.env.LOCALAPPDATA ?? dirname(stateFile), 'dsh-ad-blockers')
+const extensions = process.env.DSH_LOCAL_NO_AD_BLOCKERS === '1' ? [] : ['cfhdojbkjhnklbpkdaibdccddilifddb', 'bgnkhhnnamicmpeenaelnjfhikgbkllg']
+  .map((id) => join(extensionsDir, id)).filter((dir) => existsSync(join(dir, 'manifest.json')))
 const sleep = (ms) => new Promise((resolve) => { setTimeout(resolve, ms) })
+
+/** Carga los bloqueadores en el Edge recién arrancado, por el protocolo de depuración; sin ellos, el navegador funciona. */
+const loadExtensions = async (port) => {
+  try {
+    const { webSocketDebuggerUrl } = await (await fetch(`http://127.0.0.1:${String(port)}/json/version`)).json()
+    const socket = new WebSocket(webSocketDebuggerUrl)
+    await new Promise((resolve, reject) => { socket.onopen = resolve; socket.onerror = reject })
+    for (const [index, path] of extensions.entries()) {
+      socket.send(JSON.stringify({ id: index + 1, method: 'Extensions.loadUnpacked', params: { path } }))
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 15_000)
+        socket.onmessage = (event) => { if (JSON.parse(String(event.data)).id === index + 1) { clearTimeout(timer); resolve() } }
+      })
+    }
+    // Al instalarse abren su página de bienvenida en otra pestaña (el agente y el panel se irían a ella): se cierra en
+    // cuanto aparece, sin hacer esperar al arranque.
+    void (async () => {
+      for (let i = 0; i < 16; i++) {
+        await sleep(500)
+        const pages = await (await fetch(`http://127.0.0.1:${String(port)}/json/list`)).json().catch(() => [])
+        for (const page of pages.filter((target) => target.type === 'page' && WELCOME.test(target.url))) {
+          socket.send(JSON.stringify({ id: 100 + i, method: 'Target.closeTarget', params: { targetId: page.id } }))
+        }
+      }
+      socket.close()
+    })().catch(() => { socket.close() })
+  } catch {
+    // Sin bloqueadores esta vez.
+  }
+}
+const WELCOME = /^https:\/\/([a-z0-9-]+\.)*(adguard\.com|adblockplus\.org)\/|^chrome-extension:\/\//i
 
 const alive = async (port) => {
   try {
@@ -63,7 +104,8 @@ if (state === undefined || !await alive(state.port)) {
       const browser = spawn(edge, [
         '--headless=new', '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', `--user-data-dir=${profile}`,
         '--no-first-run', '--no-default-browser-check', '--disable-features=msEdgeSidebarV2,msUndersideButton',
-        '--window-size=1280,800', 'about:blank',
+        // Los bloqueadores se cargan por el protocolo (el Edge de marca ignora --load-extension); solo escucha en 127.0.0.1.
+        '--enable-unsafe-extension-debugging', '--window-size=1280,800', 'about:blank',
       ], { detached: true, stdio: 'ignore', windowsHide: true })
       browser.unref()
       let port
@@ -72,6 +114,7 @@ if (state === undefined || !await alive(state.port)) {
         try { port = Number(readFileSync(join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0]) || undefined } catch { /* aún no */ }
       }
       if (port === undefined) throw new Error('el Edge del agente no ha abierto su puerto de depuración')
+      await loadExtensions(port)
       state = { port, pid: browser.pid, startedAt: new Date().toISOString() }
       writeFileSync(stateFile, JSON.stringify(state))
     }

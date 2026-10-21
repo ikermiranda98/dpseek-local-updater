@@ -3,8 +3,9 @@
  *
  * - Pestaña «Live code»: lo que el modelo escribe en el turno actual, en tiempo
  *   real (si el proveedor lo envía por trozos; Ollama lo da entero al terminar),
- *   con una pestaña por fichero. Se abre con «View code» en la línea de estado
- *   del turno en el chat (local-live-watch.tsx), nunca sola.
+ *   con una pestaña por fichero, y lo que escribió en los turnos anteriores (se
+ *   elige el turno abajo). Se abre con «View code» en la línea de estado del turno
+ *   en el chat (local-live-watch.tsx), nunca sola.
  * - Botón «Undo» en la revisión de cambios del turno: deja ese fichero como
  *   estaba al empezar el turno (localUndoTurnFile en el Host).
  */
@@ -17,7 +18,9 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceChangedFile } from '@deepseek-ai/dsh-workspace-changes/types'
 import { changesReviewAddress } from '../changes.ts'
-import { liveChoice, liveSnapshot, onLiveOpen, subscribeLive, type LiveEdit, type LiveFile } from './local-live-store.ts'
+import {
+  liveChoice, liveSnapshot, onLiveOpen, sessionTurns, subscribeLive, turnSnapshot, type LiveEdit, type LiveFile,
+} from './local-live-store.ts'
 import css from './local-live-code.module.css'
 
 /** Tipo de pestaña y su identidad en el sistema de pestañas. */
@@ -58,8 +61,7 @@ export function setLocalLive(ctx: Context): void {
       openTabIn?: (sessionId: SessionId, kind: string) => void
     }
     try {
-      if (right.openTabIn) right.openTabIn(sessionId as SessionId, LIVE_KIND)
-      else right.openTab(LIVE_KIND)
+      right.openTabIn(sessionId as SessionId, LIVE_KIND)
     } catch (error) {
       console.warn('local live code:', error)
     }
@@ -92,7 +94,10 @@ function spans(highlight: CodeHighlighter, text: string): readonly (readonly Hig
 
 /** Líneas con número, resaltadas si se puede; `tone` las marca como añadidas o quitadas. */
 function Lines({ text, highlight, tone, caret }: {
-  text: string; highlight: CodeHighlighter; tone?: 'add' | 'del'; caret: boolean
+  text: string
+  highlight: CodeHighlighter
+  tone?: 'add' | 'del'
+  caret: boolean
 }): ReactNode {
   const colored = useMemo(() => spans(highlight, text), [highlight, text])
   const lines = text === '' ? [''] : text.replace(/\r/g, '').split('\n')
@@ -110,7 +115,10 @@ function Lines({ text, highlight, tone, caret }: {
 
 /** Una escritura o edición del fichero. */
 function EditBlock({ edit, index, count, highlight }: {
-  edit: LiveEdit; index: number; count: number; highlight: CodeHighlighter
+  edit: LiveEdit
+  index: number
+  count: number
+  highlight: CodeHighlighter
 }): ReactNode {
   const live = edit.status === 'writing'
   const title = edit.kind === 'write'
@@ -136,15 +144,25 @@ function EditBlock({ edit, index, count, highlight }: {
  */
 function LiveCodeTab({ sessionId, useTabInfo }: PropsRuntime<'sidebar.right.pane.tab'>): ReactNode {
   const { tab } = useTabInfo()
-  const live = useSyncExternalStore(subscribeLive, () => liveSnapshot(sessionId))
+  const current = useSyncExternalStore(subscribeLive, () => liveSnapshot(sessionId))
+  // Un turno anterior elegido abajo o desde su línea en el chat; sin él, el actual.
+  const [viewTurn, setViewTurn] = useState<number | undefined>(undefined)
+  const older = useSyncExternalStore(subscribeLive, () => viewTurn === undefined ? undefined : turnSnapshot(sessionId, viewTurn))
+  const live = older ?? current
+  const turns = useSyncExternalStore(subscribeLive, () => sessionTurns(sessionId))
+  const written = turns.filter(entry => entry.files.length > 0)
   const files = live?.files ?? []
   const [chosen, setChosen] = useState<string | undefined>(undefined)
-  // Una pestaña elegida a mano deja de seguir al modelo hasta que pulses «Follow» o empiece otro turno.
-  const turn = live?.turn
-  useEffect(() => { setChosen(undefined) }, [turn])
-  // Un fichero pulsado en la lista de la flecha, en el chat: se enseña ese.
+  // Una pestaña elegida a mano deja de seguir al modelo hasta que pulses «Follow» o empiece otro turno (que se enseña).
+  const turn = current?.turn
+  useEffect(() => { setChosen(undefined); setViewTurn(undefined) }, [turn])
+  // Un fichero pulsado en la lista de la flecha, en el chat: se enseña ese, en su turno.
   const choice = useSyncExternalStore(subscribeLive, () => liveChoice(sessionId))
-  useEffect(() => { if (choice !== undefined) setChosen(choice.path) }, [choice?.at])
+  useEffect(() => {
+    if (choice === undefined) return
+    setViewTurn(choice.turn === undefined || choice.turn === turn ? undefined : choice.turn)
+    setChosen(choice.path)
+  }, [choice?.at])
   const following = chosen === undefined || !files.some(file => file.path === chosen)
   const path = following ? currentPath(files) : chosen
   const file = files.find(entry => entry.path === path)
@@ -174,8 +192,8 @@ function LiveCodeTab({ sessionId, useTabInfo }: PropsRuntime<'sidebar.right.pane
           ))}
         </div>
         <Tooltip label="Show the file the agent is writing" side="bottom" align="end" delayMs={500}>
-          <button type="button" className={css.tool} aria-pressed={following} disabled={files.length === 0}
-            onClick={() => { setChosen(undefined) }}>Follow</button>
+          <button type="button" className={css.tool} aria-pressed={following && older === undefined} disabled={current === undefined || current.files.length === 0}
+            onClick={() => { setChosen(undefined); setViewTurn(undefined) }}>Follow</button>
         </Tooltip>
       </div>
       {file !== undefined && <Tooltip label={file.path} side="bottom" delayMs={500}><div className={css.path}>{file.path}</div></Tooltip>}
@@ -191,7 +209,23 @@ function LiveCodeTab({ sessionId, useTabInfo }: PropsRuntime<'sidebar.right.pane
           ))}
       </div>
       <div className={css.footer}>
-        <span>{live === undefined ? '' : `Turn ${String(live.turn)}${live.running ? ' · running' : ''}`}</span>
+        {written.length > 1 && live !== undefined
+          ? (
+            <select className={css.turnSelect} aria-label="Turn" value={String(live.turn)} data-live-turn
+              onChange={(event) => {
+                const picked = Number(event.target.value)
+                setChosen(undefined)
+                setViewTurn(picked === turn ? undefined : picked)
+              }}>
+              {!written.some(entry => entry.turn === live.turn) && <option value={String(live.turn)}>{`Turn ${String(live.turn)}`}</option>}
+              {written.map(entry => (
+                <option key={entry.turn} value={String(entry.turn)}>
+                  {`Turn ${String(entry.turn)}${entry.running ? ' · running' : ''} · ${String(entry.files.length)} ${entry.files.length === 1 ? 'file' : 'files'}`}
+                </option>
+              ))}
+            </select>
+          )
+          : <span>{live === undefined ? '' : `Turn ${String(live.turn)}${live.running ? ' · running' : ''}`}</span>}
         {review && <button type="button" className={css.tool} onClick={() => {
           tab.actions.openResource(changesReviewAddress({ sessionId, seq: live.changesSeq ?? 0, turn: live.turn }))
         }}>Review changes and undo</button>}
@@ -210,7 +244,10 @@ const undone = new Set<string>()
  * @returns el botón.
  */
 export function LocalUndoButton({ sessionId, seq, index, file }: {
-  sessionId: string; seq: number; index: number; file: WorkspaceChangedFile
+  sessionId: string
+  seq: number
+  index: number
+  file: WorkspaceChangedFile
 }): ReactNode {
   const key = `${sessionId}:${String(seq)}:${String(index)}`
   const [state, setState] = useState<'idle' | 'confirm' | 'working' | 'done' | 'error'>(undone.has(key) ? 'done' : 'idle')

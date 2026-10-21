@@ -27,7 +27,7 @@ interface Block { readonly type: string; readonly text?: string }
 
 /** Si el mensaje es la tarea de un subchat. */
 function isTask(content: readonly Block[]): boolean {
-  return content.some((block) => typeof block.text === 'string' && (block.text.startsWith(MARKER) || block.text.includes(LEGACY)))
+  return content.some(block => typeof block.text === 'string' && (block.text.startsWith(MARKER) || block.text.includes(LEGACY)))
 }
 
 /**
@@ -113,12 +113,14 @@ function duration(ms: number): string {
  * @returns la tarjeta.
  */
 export function LocalSubchatResultCard({ notice, content, time }: {
-  notice: SubchatNotice; content: readonly Block[]; time: string
+  notice: SubchatNotice
+  content: readonly Block[]
+  time: string
 }): ReactNode {
   const scope = useLocalSubchatScope()
   const [open, setOpen] = useState(false)
-  const closing = content.findIndex((block) => block.text === 'Its closing message:')
-  const text = closing < 0 ? '' : content.slice(closing + 1).map((block) => block.text ?? '').join('\n\n').trim()
+  const closing = content.findIndex(block => block.text === 'Its closing message:')
+  const text = closing < 0 ? '' : content.slice(closing + 1).map(block => block.text ?? '').join('\n\n').trim()
   const lines = text.split('\n')
   const long = lines.length > 4 || text.length > 400
   const preview = long && !open ? `${lines.slice(0, 4).join('\n').slice(0, 400)}…` : text
@@ -132,7 +134,7 @@ export function LocalSubchatResultCard({ notice, content, time }: {
       <p className={css.text}>{preview === '' ? 'It left no closing message.' : preview}</p>
       <div className={css.actions}>
         {long && (
-          <button type="button" className={css.link} aria-expanded={open} onClick={() => { setOpen((value) => !value) }}>
+          <button type="button" className={css.link} aria-expanded={open} onClick={() => { setOpen(value => !value) }}>
             {open ? 'Show less' : 'Show all'} <IconChevronDownOutlineRegular size={11} className={open ? css.up : undefined} />
           </button>
         )}

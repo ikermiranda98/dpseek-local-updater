@@ -58,7 +58,7 @@ export function localSubchatPrompt(task: string): { type: 'text'; text: string }
 
 /** Texto de una salida (sin razonamiento ni llamadas a herramientas). */
 export function localClosingText(blocks: readonly { readonly type: string; readonly text?: string }[]): string {
-  return blocks.flatMap((block) => block.type === 'text' && typeof block.text === 'string' && block.text !== '' ? [block.text] : [])
+  return blocks.flatMap(block => block.type === 'text' && typeof block.text === 'string' && block.text !== '' ? [block.text] : [])
     .join('\n\n')
 }
 
@@ -105,7 +105,8 @@ export function localDeliverNotice(parent: LocalParentAgent, notice: unknown): v
  * @returns la sesión del subchat y su resultado (la primera respuesta final y si terminó bien).
  */
 export async function localStartSubchat(subagents: LocalSubagents, parent: unknown, task: string, label: string,
-  signal: AbortSignal): Promise<{ readonly childId: string; readonly result: Promise<{ readonly text: string; readonly completed: boolean }> }> {
+  signal: AbortSignal,
+): Promise<{ readonly childId: string; readonly result: Promise<{ readonly text: string; readonly completed: boolean }> }> {
   const started = await subagents.startActivation({
     provider: FORK_PROVIDER,
     label,
@@ -121,6 +122,6 @@ export async function localStartSubchat(subagents: LocalSubagents, parent: unkno
   return {
     childId: started.childId,
     // Parado por el usuario o con error, no se manda nada solo (se puede mandar a mano).
-    result: started.result.then((result) => ({ text: localClosingText(result.output), completed: result.stopReason === 'completed' })),
+    result: started.result.then(result => ({ text: localClosingText(result.output), completed: result.stopReason === 'completed' })),
   }
 }

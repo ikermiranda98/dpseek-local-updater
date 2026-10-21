@@ -71,7 +71,7 @@ function settings(): { ollama: string; defaultModel?: string } {
 
 /** Versión numérica comparable: «v0.40.5» → [0, 40, 5]. */
 function parts(version: string): number[] {
-  return version.replace(/^v/, '').split(/[.-]/).slice(0, 3).map((part) => Number.parseInt(part, 10) || 0)
+  return version.replace(/^v/, '').split(/[.-]/).slice(0, 3).map(part => Number.parseInt(part, 10) || 0)
 }
 
 function newer(latest: string, installed: string): boolean {
@@ -95,15 +95,15 @@ async function installedVersion(): Promise<string | null> {
 /** Las novedades del Release, en frases: viñetas sin enlaces, menciones ni formato. */
 function highlightsOf(body: string): string[] {
   return body.split('\n')
-    .map((line) => line.trim())
-    .filter((line) => /^[-*] /.test(line))
-    .map((line) => line.replace(/^[-*] /, '')
+    .map(line => line.trim())
+    .filter(line => /^[-*] /.test(line))
+    .map(line => line.replace(/^[-*] /, '')
       .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
       .replace(/\s+by @\S+.*$/, '')
       .replace(/\s+in https?:\/\/\S+$/, '')
       .replace(/[`*_]/g, '')
       .trim())
-    .filter((line) => line.length > 0 && !/^(new contributors|full changelog)|made their first contribution/i.test(line))
+    .filter(line => line.length > 0 && !/^(new contributors|full changelog)|made their first contribution/i.test(line))
     .slice(0, 8)
 }
 
@@ -119,10 +119,13 @@ async function latestRelease(force: boolean): Promise<Release | undefined> {
     })
     if (!response.ok) return release
     const body = await response.json() as {
-      tag_name?: unknown; body?: unknown; html_url?: unknown; assets?: { name?: unknown; browser_download_url?: unknown }[]
+      tag_name?: unknown
+      body?: unknown
+      html_url?: unknown
+      assets?: { name?: unknown; browser_download_url?: unknown }[]
     }
     if (typeof body.tag_name !== 'string') return release
-    const installer = body.assets?.find((asset) => asset.name === 'OllamaSetup.exe')?.browser_download_url
+    const installer = body.assets?.find(asset => asset.name === 'OllamaSetup.exe')?.browser_download_url
     release = {
       version: body.tag_name.replace(/^v/, ''),
       highlights: highlightsOf(typeof body.body === 'string' ? body.body : ''),
